@@ -1,0 +1,286 @@
+---
+title: "FigureYa228linkCor"
+author: "小丫画图出品"
+date: "2021-4-16"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+老师这个图10D可以众筹吗？真的很漂亮，蝴蝶图
+
+![](example.png)
+
+出自<https://www.thno.org/v11p3089.htm>
+
+Figure 6. Roles of Siglec15 in predicting immune phenotypes in the Xiangya cohort. 
+(C) Correlations between Siglec15 and the steps of the **cancer immunity cycle**. 
+(D) Correlations between Siglec15 and the enrichment scores of **immunotherapy-predicted pathways**.
+
+**图的解析**
+
+- 用热图展示通路的自相关分析结果；
+- C和D两个热图，分别展示两类通路各自的相关分析结果，放在一起方便对比；
+- 用连线展示Siglec15跟两类通路的各个具体通路之间的相关性，实线代表正相关、虚线代表负相关，用颜色代表P value；
+
+# 应用场景
+
+展示相关性分析结果，多对多（C热图、D热图）、1对多（Siglec15跟C的连线，Siglec15跟D的连线）、两组对比（C和D画一起）画一起。
+
+例文是1个基因跟多个通路的相关性，可以替换为1个基因跟多个基因之间、或1个通路跟多个基因之间等等，灵活套用。
+
+如果只有一组，就是单独的C或D；如果有两组，就像例文一样拼成蝴蝶；如果有更多组，同样套用easy_input*文件，画出多个图后，按自己的审美组合。
+
+相关性展示的8种情况及解决方案看这里：<https://mp.weixin.qq.com/s/D9wheY5QdnOh4JrjIc8-Cg>
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("ggnewscale")
+install.packages("ade4")
+# 下载自https://github.com/hannet91/ggcor
+install.packages("ggcor-master.tar.gz", repos = NULL, type = "source")
+```
+
+加载包
+
+```{r}
+library(data.table)
+library(GSVA)
+library(ggplot2)
+library(ggcor)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数（来自cogena），用于提取msigdb特定通路的基因，参考FigureYa151pathifier
+
+```{r}
+# 读取gmt文件为列表形式，满足pathifier的输入要求
+gmt2list <- function(annofile){
+  if (!file.exists(annofile)) {
+    stop("There is no such gmt file.")
+  }
+  
+  if (tools::file_ext(annofile) == "xz") {
+    annofile <- xzfile(annofile)
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+    close(annofile)
+  } else if (tools::file_ext(annofile) == "gmt") {
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+  } else {
+    stop ("Only gmt and gmt.xz are accepted for gmt2list")
+  }
+  
+  y <- strsplit(x, "\t")
+  names(y) <- sapply(y, `[[`, 1)
+  
+  annoList <- lapply(y, `[`, c(-1,-2))
+}
+```
+
+# 输入文件的获得
+
+如果你的数据已经整理为`easy_input_*.txt`的格式，就可以直接进入“开始画图”。
+
+下面用基因表达矩阵和通路-基因信息，计算各通路的富集得分（可以理解为通路的表达矩阵）。
+
+- tcga_blca_fpkm.txt，基因表达矩阵，文件太大，上传到微云<https://share.weiyun.com/cKd3bIXW>。
+- 通路的基因信息，例文根据文献整理了两类通路，其他通路套用这样的格式即可：
+  - bladder cancer signature.txt，膀胱癌相关签名，每行一个通路，第一列为通路名（Signature），第二列为基因（Genes）。用于绘制(C) Correlations between Siglec15 and the steps of the cancer immunity cycle。出自例文的Table S9.xlsx，Bladder cancer signatures，取Signature和Genes两列。是例文作者从这篇文章整理出来的：Mariathasan S, Turley SJ, Nickles D, Castiglioni A, Yuen K, Wang Y, et al. TGFβ attenuates tumour response to PD-L1 blockade by contributing to exclusion of T cells. Nature. 2018; 554: 544-8.
+  - immunotherapy predicted pathways.txt，治疗签名，用于绘制(D) Correlations between Siglec15 and the enrichment scores of immunotherapy-predicted pathways。整理自例文的Table S9.xlsx，Therapeutic predicted pathways，选取Description一列为Anticancer_immunotherapy的Pathway及其对应的Genes。可以直接拿来用到自己的文章里，记得引用例文哦～～
+
+原文：A set of **gene signatures positively correlated with the clinical response of an anti-PD-L1 agent (atezolizumab) in BLCA** were collected from Mariathasan’s study [27]. Twelve bladder cancer signatures that are specific to different molecular subtypes were collected from the study performed by the Bladder Cancer Molecular Taxonomy Group [19]. We also collected other **therapeutic signatures**, including oncogenic pathways that could shape a non-inflamed TME, targeted therapy-associated gene signatures, and gene signatures predicting radiotherapy responses (Table S9).
+
+```{r}
+# 加载TCGA-BLCA表达谱FPKM
+expr <- read.table("tcga_blca_fpkm.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tumsam <- colnames(expr)[substr(colnames(expr),11,13) == "01A"] # 取出肿瘤样本
+# 取出SIGLEC15表达量
+siglec15 <- log2(expr["SIGLEC15",tumsam] + 1)
+write.csv(siglec15, "easy_input_gene.csv")
+
+# 加载immunotherapy-predicted pathways
+immPath <- read.table("immunotherapy predicted pathways.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+immPath.list <- list()
+for (i in rownames(immPath)) {
+  tmp <- immPath[i,"Genes"]
+  tmp <- toupper(unlist(strsplit(tmp,", ",fixed = T)))
+  tmp <- gsub(" ","",tmp)
+  immPath.list[[i]] <- tmp
+}
+
+# 加载膀胱癌相关签名
+blcaPath <- read.table("bladder cancer signature.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+blcaPath.list <- list()
+for (i in rownames(blcaPath)) {
+  tmp <- blcaPath[i,"Genes"]
+  tmp <- toupper(unlist(strsplit(tmp,", ",fixed = T)))
+  tmp <- gsub(" ","",tmp)
+  blcaPath.list[[i]] <- tmp
+}
+```
+
+计算富集得分，保存到文件，便于套用
+
+```{r}
+# 计算immunotherapy-predicted pathways的富集得分
+immPath.score <- gsva(expr = as.matrix(log2(expr[,tumsam] + 1)),
+                      immPath.list, 
+                      method = "ssgsea")
+# 保存到文件，便于套用
+write.table(immPath.score, "easy_input_immPath.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+# 计算膀胱癌相关签名的富集得分
+blcaPath.score <- gsva(expr = as.matrix(log2(expr[,tumsam] + 1)),
+                       blcaPath.list,
+                       method = "ssgsea")
+# 保存到文件，便于套用
+write.table(blcaPath.score, "easy_input_blcaPath.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+> 对于自己的数据，你可能想提取自己感兴趣的通路计算通路的富集得分。可以从[msigdb](http://www.gsea-msigdb.org/gsea/downloads.jsp)下载gmt文件`c5.all.v7.4.symbols.gmt`，提取自己感兴趣的通路及其对应的基因，计算富集得分。
+
+```{r eval=FALSE}
+# 从gmt文件提取感兴趣的通路
+# 例如提取带有`METABOLISM`字样的通路
+gset <- gmt2list("c5.all.v7.4.symbols.gmt") 
+gset.list <- gset[names(gset) %like% "METABOLISM"]
+
+# 计算通路富集得分
+gset.score <- gsva(expr = as.matrix(log2(expr[,tumsam] + 1)),
+                   gset.list,
+                   method = "ssgsea")
+# 保存到文件
+write.table(gset.score, "easy_input_gset.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# 开始画图
+
+```{r}
+# 加载单个基因的表达量，也就是“1对多”的“1”
+siglec15 <- read.csv("easy_input_gene.csv", row.names = 1, check.names = F)
+
+# 加载第一组富集得分
+immPath.score <- read.table("easy_input_immPath.txt", check.names = F)
+# 跟目标基因SIGLEC15的表达量合并
+immPath.score <- rbind.data.frame(immPath.score,
+                                  siglec15)
+
+# 加载第二组富集得分
+blcaPath.score <- read.table("easy_input_blcaPath.txt", check.names = F)
+# 跟目标基因SIGLEC15的表达量合并
+blcaPath.score <- rbind.data.frame(blcaPath.score,
+                                   siglec15)
+```
+
+循环计算相关性并画图
+
+```{r}
+# 循环计算相关性并绘制左下角
+immCorSiglec15 <- NULL
+for (i in rownames(immPath.score)) {
+  cr <- cor.test(as.numeric(immPath.score[i,]),
+                 as.numeric(siglec15),
+                 method = "pearson")
+  immCorSiglec15 <- rbind.data.frame(immCorSiglec15,
+                                     data.frame(gene = "Siglec15",
+                                                path = i,
+                                                r = cr$estimate,
+                                                p = cr$p.value,
+                                                stringsAsFactors = F),
+                                     stringsAsFactors = F)
+}
+immCorSiglec15$sign <- ifelse(immCorSiglec15$r > 0,"pos","neg")
+immCorSiglec15$absR <- abs(immCorSiglec15$r)
+immCorSiglec15$rSeg <- as.character(cut(immCorSiglec15$absR,c(0,0.25,0.5,0.75,1),labels = c("0.25","0.50","0.75","1.00"),include.lowest = T))
+immCorSiglec15$pSeg <- as.character(cut(immCorSiglec15$p,c(0,0.001,0.01,0.05,1),labels = c("<0.001","<0.01","<0.05","ns"),include.lowest = T))
+immCorSiglec15[nrow(immCorSiglec15),"pSeg"] <- "Not Applicable"
+
+immCorSiglec15$rSeg <- factor(immCorSiglec15$rSeg, levels = c("0.25","0.50","0.75","1.00"))
+immCorSiglec15$pSeg <- factor(immCorSiglec15$pSeg, levels = c("<0.001","<0.01","<0.05","Not Applicable","ns"))
+immCorSiglec15$sign <- factor(immCorSiglec15$sign, levels = c("pos","neg"))
+
+p1 <- quickcor(t(immPath.score), 
+         type = "lower",
+         show.diag = TRUE) + 
+  geom_colour() +
+  add_link(df = immCorSiglec15, 
+           mapping = aes(colour = pSeg, size = rSeg, linetype = sign),
+           spec.key = "gene",
+           env.key = "path",
+           diag.label = FALSE) +
+  scale_size_manual(values = c(0.5, 1, 1.5, 2)) +
+  scale_color_manual(values = c("#19A078","#DA6003","#7570B4","#E8288E","#65A818")) +
+  scale_fill_gradient2(low = "#9483E1",mid = "white",high = "#E11953",midpoint=0) +
+  remove_axis("x")
+p1
+ggsave(filename = "ggcor plot in bottom left.pdf", width = 10,height = 8)
+
+# 循环计算相关性并绘制右上角
+blcaCorSiglec15 <- NULL
+for (i in rownames(blcaPath.score)) {
+  cr <- cor.test(as.numeric(blcaPath.score[i,]),
+                 as.numeric(siglec15),
+                 method = "pearson")
+  blcaCorSiglec15 <- rbind.data.frame(blcaCorSiglec15,
+                                     data.frame(gene = "Siglec15",
+                                                path = i,
+                                                r = cr$estimate,
+                                                p = cr$p.value,
+                                                stringsAsFactors = F),
+                                     stringsAsFactors = F)
+}
+blcaCorSiglec15$sign <- ifelse(blcaCorSiglec15$r > 0,"pos","neg")
+blcaCorSiglec15$absR <- abs(blcaCorSiglec15$r)
+blcaCorSiglec15$rSeg <- as.character(cut(blcaCorSiglec15$absR,c(0,0.25,0.5,0.75,1),labels = c("0.25","0.50","0.75","1.00"),include.lowest = T))
+blcaCorSiglec15$pSeg <- as.character(cut(blcaCorSiglec15$p,c(0,0.001,0.01,0.05,1),labels = c("<0.001","<0.01","<0.05","ns"),include.lowest = T))
+blcaCorSiglec15[nrow(blcaCorSiglec15),"pSeg"] <- "Not Applicable"
+
+blcaCorSiglec15$rSeg <- factor(blcaCorSiglec15$rSeg, levels = c("0.25","0.50","0.75","1.00"))
+blcaCorSiglec15$pSeg <- factor(blcaCorSiglec15$pSeg, levels = c("<0.001","<0.01","<0.05","Not Applicable","ns"))
+blcaCorSiglec15$sign <- factor(blcaCorSiglec15$sign, levels = c("pos","neg"))
+
+p2 <- quickcor(t(blcaPath.score), 
+         type = "upper",
+         show.diag = TRUE) + 
+  geom_colour() +
+  add_link(df = blcaCorSiglec15, 
+           mapping = aes(colour = pSeg, size = rSeg, linetype = sign),
+           spec.key = "gene",
+           env.key = "path",
+           diag.label = FALSE) +
+  scale_size_manual(values = c(0.5, 1, 1.5, 2)) +
+  scale_color_manual(values = c("#19A078","#DA6003","#7570B4","#E8288E","#65A818")) +
+  scale_fill_gradient2(low = "#9483E1",mid = "white",high = "#E11953",midpoint=0) +
+  remove_axis("x")
+p2
+ggsave(filename = "ggcor plot in top right.pdf", width = 10,height = 8)
+```
+
+# 后期处理
+
+输出的PDF文件是矢量图，可以用矢量图编辑器打开，编辑文字和图形。
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
