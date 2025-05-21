@@ -1,0 +1,184 @@
+---
+title: "FigureYa77baseZoom"
+author: "小丫画图出品"
+date: "2019-2-24"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Haitao Wang
+
+Dr. Haitao Wang: JNU,Guagnzhou => GIBH-CAS,Guagnzhou => BNU,Beijing => IMCB,Singapore => UMAC,Macao => NCCS,Singapore
+
+Email: ht.wang@yahoo.com; wang.haitao@nccs.com.sg
+
+小丫注释、校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用base plot画出C图这种zoom in效果的图。
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S0092867415011952>
+
+## 应用场景
+
+有时会遇到这样的问题：点的分布很不均匀，堆在一起的点很难标label。
+
+解决办法：画整体的同时画局部，就能看清堆在一起的点了，写label也很清晰。
+
+示例图用于展示多个基因在两组中各变异类型所占的百分比，用颜色表示变异类型，泡泡大小表示pvalue，泡泡所在的位置偏左上说明在IDC中占比高于ILC，反之亦然。该图不仅限于基因。
+
+## 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.csv，提供分组、个数及总数（用于计算百分比）、pvalue：
+
+- 第一列是基因名；
+- 第二列是分组；
+- 第3-4、5-6列分别是在ILC（横坐标）和IDC（纵坐标）里的数量和总数，后面会用这两列计算百分比；
+- 最后一列是pvalue。
+
+示例数据整理自例文的Table 1. Recurrently Mutated Genes in Breast Cancer，这里只用了mutation，没加CNV，因此泡泡的位置跟原图有出入。
+
+```{r}
+dat2 <- read.csv("easy_input.csv")
+head(dat2)
+```
+
+## 把各列数据整理成画图所需的格式
+
+```{r}
+### 用3-6列计算百分比 ###
+ILC <- (dat2$n_ILC/dat2$total_ILC)*100
+names(ILC) <- dat2$Gene
+IDC <- (dat2$n_IDC/dat2$total_IDC)*100
+names(IDC) <- dat2$Gene
+
+### group列 ###
+# 给每个group的泡泡一种颜色
+# 先自定义足够多的颜色
+mycol <- c("red","navy","forestgreen","black","#FB9A99","#33A02C","#E31A1C","#B15928","#6A3D9A","#CAB2D6","#A6CEE3","#1F78B4","#FDBF6F","#999999","#FF7F00")
+# 不显著的定义为notsig组，画成灰色
+dat2$group[dat2$pvalue > 0.001] <- "notsig"
+cols.names <- unique(dat2$group)
+cols.code <- c(mycol[1:(length(cols.names)-1)],"grey")
+names(cols.code) <- cols.names
+
+### pvalue列 ###
+# pvalue决定泡泡的大小
+sizes <- -log10(dat2$pvalue)/5
+sizes[sizes=="Inf"] <- 0
+names(sizes) <- dat2$Gene
+```
+
+## 开始画图
+
+Zoom in的效果，也就是画一个整体，再画一个局部。
+
+### 画局部 ###
+
+```{r, fig.width=10, fig.height=5.5}
+par(mfrow=c(1,2),mar = par()$mar + c(3,0,0,3)) #在底部留出图例的地方)
+plot(ILC, IDC,
+     col = cols.code[as.character(dat2$group)],
+     xlim = c(0,15), ylim=c(0,15), #画局部
+     pch = 16, #实心圆点
+     ylab = "IDC (% altered samples)",xlab="ILC (% altered samples)", 
+     cex = sizes)
+abline(a = 0, b = 1, col = "gray60", lwd = 1, lty = 5)
+# 泡泡外面画白圈
+points(ILC, IDC, pch = 1, col = "white", cex = sizes)
+
+# 给百分比大于6的泡泡标上文字
+# 可以根据你自己的喜好调整
+up <- which(IDC > 6)
+down <- which(ILC > 6)
+
+par(xpd=TRUE) #让超出画图范围的字也能显示出来
+text(ILC[up], IDC[up], names(ILC[up]), pos=2) #Values of 1, 2, 3 and 4, respectively indicate positions below, to the left of, above and to the right of the specified coordinates.
+text(ILC[down], IDC[down], names(ILC[down]), pos=4)
+
+# 画黄色背景
+## Add an alpha value to a colour
+add.alpha <- function(col, alpha=1){
+  if(missing(col))
+    stop("Please provide a vector of colours.")
+  apply(sapply(col, col2rgb)/255, 2, 
+        function(x) 
+          rgb(x[1], x[2], x[3], alpha=alpha))  
+}
+gray.alpha <- add.alpha("orange", alpha=0.1)
+rect(par("usr")[1], par("usr")[3], par("usr")[2], par("usr")[4], col = gray.alpha)
+
+# 添加pathway颜色的图例
+legend("bottom", 
+       inset=c(0,-.5), #把图例画到图外
+       ncol = 3,
+       pch=16, col=cols.code, legend=cols.names, bty="n")
+
+
+### 画整体 ###
+#par(mar = par()$mar + c(0,0,0,3)) #在右侧留出写title的地方
+plot(ILC, IDC,
+     col = cols.code[as.character(dat2$group)],
+     xlim=c(0,70),ylim=c(0,70),
+     ylab="", xlab="ILC (% altered samples)", 
+     yaxt='n', #先不画y轴
+     pch=16, 
+     cex=sizes)
+# 泡泡外面画白圈
+points(ILC, IDC, pch=1, col = "white", cex=sizes)
+
+axis(side = 4) #画右侧y轴
+title(ylab="IDC (% altered samples)", 
+      mgp=c(-20,1,0)) #根据具体图的大小调整，这里取-25，让title位于右侧
+
+# 给百分比大于15的泡泡标上文字
+w <- which(ILC > 15 | IDC > 15) # ILC或IDC>15
+text(ILC[w], IDC[w], names(ILC[w]), pos=3) #Values of 1, 2, 3 and 4, respectively indicate positions below, to the left of, above and to the right of the specified coordinates.
+
+# 添加size的图例
+u <- par("usr")
+f <- c(1,2.5,5,10,20)
+s <- sqrt(f/3)
+legend("bottom", 
+       inset=c(0,-.5), #把图例画到图外
+       legend=rep("", length(f)), 
+       title = "Significance level [-log10(q)]",
+       pch=1, pt.cex=s, bty='n',
+       horiz = TRUE, #横向排列
+       col="#88888888")
+
+par(xpd = F) #默认就是F，前面为了写label改成TRUE了。画abline前一定改为FALSE，否则对角线的虚线会超出plot region
+abline(a = 0, b = 1, col = "gray60", lwd = 1, lty=2)
+
+# 给局部区域画黄色背景
+# 此处的4.6是由70/15得到的
+rect(par("usr")[1]/4.6, par("usr")[3]/4.6, par("usr")[2]/4.6, par("usr")[4]/4.6, col = gray.alpha, border=TRUE)
+
+recordedplot1 <- recordPlot() # record the previous plot
+
+pdf("baseZoom.pdf",10,5.5)
+recordedplot1
+dev.off()
+```
+
+![](baseZoom.pdf)
+
+```{r}
+sessionInfo()
+```

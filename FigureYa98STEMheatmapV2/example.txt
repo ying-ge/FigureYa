@@ -1,0 +1,75 @@
+#Main Input:
+Data_File	easy_input_rep1.txt
+Gene_Annotation_Source	No annotations
+Gene_Annotation_File	
+Cross_Reference_Source	No cross regerences
+Cross_Reference_File	
+Gene_Location_Source	No Gene Locations
+Gene_Location_File	
+Clustering_Method[STEM Clustering Method,K-means]	STEM Clustering Method
+Maximum_Number_of_Model_Profiles	50
+Maximum_Unit_Change_in_Model_Profiles_between_Time_Points	2
+Number_of_Clusters_K	10
+Number_of_Random_Starts	20
+Normalize_Data[Log normalize data,Normalize data,No normalization/add 0]	Normalize data
+Spot_IDs_included_in_the_data_file	false
+
+#Repeat data
+Repeat_Data_Files(comma delimited list)	easy_input_rep2.txt,easy_input_rep3.txt
+Repeat_Data_is_from[Different time periods,The same time period]	The same time period
+
+#Comparison Data:
+Comparison_Data_File	
+Comparison_Repeat_Data_Files(comma delimited list)	
+Comparison_Repeat_Data_is_from[Different time periods,The same time period]	Different time periods
+Comparison_Minimum_Number_of_genes_in_intersection	5
+Comparison_Maximum_Uncorrected_Intersection_pvalue	0.0050
+
+#Filtering:
+Maximum_Number_of_Missing_Values	0
+Minimum_Correlation_between_Repeats	0.0
+Minimum_Absolute_Log_Ratio_Expression	4.0
+Change_should_be_based_on[Maximum-Minimum,Difference From 0]	Maximum-Minimum
+Pre-filtered_Gene_File	
+
+#Model Profiles
+Maximum_Correlation	1.0
+Number_of_Permutations_per_Gene	50
+Maximum_Number_of_Candidate_Model_Profiles	1000000
+Significance_Level	0.05
+Correction_Method[Bonferroni,False Discovery Rate,None]	Bonferroni
+Permutation_Test_Should_Permute_Time_Point_0	true
+
+#Clustering Profiles:
+Clustering_Minimum_Correlation	0.7
+Clustering_Minimum_Correlation_Percentile	0.0
+
+#Gene Annotations:
+Category_ID_File	
+Include_Biological_Process	true
+Include_Molecular_Function	true
+Include_Cellular_Process	true
+Only_include_annotations_with_these_evidence_codes	
+Only_include_annotations_with_these_taxon_IDs	
+
+#GO Analysis:
+Multiple_hypothesis_correction_method_enrichment[Bonferroni,Randomization]	Randomization
+Minimum_GO_level	3
+GO_Minimum_number_of_genes	5
+Number_of_samples_for_randomized_multiple_hypothesis_correction	500
+
+#Interface Options
+Gene_display_policy_on_main_interface[Do not display,Display only selected,Display all]	Do not display
+Gene_Color(R,G,B)	204,51,0
+Display_Model_Profile	true
+Display_Profile_ID	true
+Display_details_when_ordering	true
+Show_Main_Y-axis_gene_tick_marks	false
+Main_Y-axis_gene_tick_interval	1.0
+Y-axis_scale_for_genes_on_main_interface_should_be[Gene specific,Profile specific,Global]	Profile specific
+Scale_should_be_based_on_only_selected_genes	true
+Y-axis_scale_on_details_windows_should_be[Determined automatically,Fixed]	Determined automatically
+Y_Scale_Min	-3.0
+Y_Scale_Max	3.0
+Tick_interval	1.0
+X-axis_scale_should_be[Uniform,Based on real time]	Uniform

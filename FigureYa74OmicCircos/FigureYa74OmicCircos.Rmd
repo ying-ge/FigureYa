@@ -1,0 +1,245 @@
+---
+title: "FigureYa74omicCircos"
+author: "小丫画图出品"
+date: "2019-2-10"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：LiYin
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用R复现文章里的图
+
+![](example.png)
+
+出自<https://onlinelibrary.wiley.com/doi/abs/10.1111/all.13222>
+
+## 应用场景
+
+visualizing genomic variations, including mutation patterns, copy number variations (CNVs), expression patterns, and methylation patterns.
+
+支持hg18、hg19、mm9、mm10
+
+例如像例文那样展示多个芯片基因的表达变化和之间的link关系
+
+参考资料：<https://journals.sagepub.com/doi/10.4137/CIN.S13495>
+
+<https://www.bioconductor.org/packages/devel/bioc/html/OmicCircos.html>
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("OmicCircos", version = "3.8")
+```
+
+加载包
+
+```{r}
+library(S4Vectors)
+library(tidyverse)
+library(OmicCircos)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入数据
+
+如果你的数据已经保存为easy_input.csv格式，就可以跳过这步，进入“开始画图”
+
+- gene.location.csv，基因在染色体上的位置。至少包括基因所在的染色体、起始位置、基因 ID（例如ensembl ID、ENTREZ ID、gene symbol）。此处以人为例，对应hg19版本，来自TCGAbiolinks。
+
+- signal.csv，图中基因的信号值。第一列是gene ID，跟gene.location.csv里的一种基因ID一致，此处是gene symbol；第二列是图中基因名及其连线的颜色，红色连红色，蓝色连蓝色，你也可以写成其他颜色；第三列之后是三组样品的signal，第一组有两个，第二组有三个，第三组有三个。可以是RNA-seq、ChIP-seq、ATAC-seq、CNV、DNA甲基化等信息。用感兴趣的区段信息替换示例中的基因信息。
+
+```{r}
+gene.location <- read.csv("gene.location.csv")
+head(gene.location)
+
+easy_input <- read.csv('signal.csv')
+head(easy_input)
+
+# 提取基因在染色体上的位置
+gene_list <- easy_input$id
+# 此处根据gene symbol提取位置信息
+gene_list_chr <- gene.location[gene.location$external_gene_id %in% gene_list,]
+# 只保留三列：染色体、起始位置、gene symbol
+gene_list_chr <- gene_list_chr[,c(1,2,7)]
+colnames(gene_list_chr) <- c('chr','position','id')
+head(gene_list_chr)
+
+# 合并染色体位置和signal
+gene_chr_fc <- merge(gene_list_chr, easy_input, by='id')
+gene_chr_fc <- gene_chr_fc[!duplicated(gene_chr_fc$id),]
+
+write.csv(gene_chr_fc, "easy_input.csv", row.names = F)
+```
+
+## 分别准备图中各部分所需的数据
+
+### 热图
+
+```{r}
+gene_chr_fc <- read.csv("easy_input.csv")
+head(gene_chr_fc)
+
+# 画三组样品的热图，分3层来
+# 若不分3层，热图则会挨在一起，无法分开
+exp1 <- gene_chr_fc[,c(2,3,1,5,6)]
+head(exp1)
+exp2 <- gene_chr_fc[,c(2,3,1,7,8,9)]
+exp3 <- gene_chr_fc[,c(2,3,1,10,11,12)]
+```
+
+### 连线
+
+处理基因名字为一一对应关系，红色连红色，蓝色连蓝色
+
+```{r}
+gene_label <- gene_chr_fc[, c(2,3,1,4)]
+
+# 按照1-22,x,y排序
+# 有的数据没有X或Y，小鼠只有1:20也没关系，不用改
+gene_label$chr <- factor(gene_label$chr, levels = c(1:22, "X", "Y"))
+# 下面去掉多余的factor。也可以不运行这行，对结果没影响
+gene_label$chr <- droplevels(gene_label$chr, exclude = if(anyNA(levels(gene_label$chr))) NULL else NA)
+# 排序
+gene_label <- gene_label[order(gene_label$chr),]
+tail(gene_label)
+
+# 红色基因
+gene_link1 <- filter(gene_label, gene_label$color == 'red')
+gene_link1 <- gene_link1[, -4]
+head(gene_link1)
+id11 <- data_frame(id = combn(gene_link1$id, 2)[1, ])
+head(id11)
+id1.1 <- data_frame(id1.1 = combn(gene_link1$id, 2)[2, ])
+genelink1 <- gene_link1 %>%
+  right_join(id11)
+genelink11 <- gene_link1 %>%
+  rename(id1.1=id) %>%
+  right_join(id1.1)
+gene_link1 <- cbind(genelink1, genelink11)
+
+# 蓝色基因
+gene_link2 <- filter(gene_label, gene_label$color == 'blue')
+gene_link2 <- gene_link2[, -4]
+id22 <- data_frame(id=combn(gene_link2$id, 2)[1, ])
+id2.1<- data_frame(id2.1=combn(gene_link2$id, 2)[2, ])
+genelink2 <- gene_link2 %>%
+  right_join(id22)
+genelink22 <- gene_link2 %>%
+  rename(id2.1=id) %>%
+  right_join(id2.1)
+gene_link2 <- cbind(genelink2, genelink22)
+```
+
+## 开始画图
+
+R代表半径位置，W是宽度，cir是染色体
+
+图中的三组样品的文字需要用AI进行标记
+
+包里自带的写染色体名字的位置不合理，也没有参数可以调整，这里提供两种方法来处理：
+
+### 方法一：单独画染色体名字
+
+```{r}
+pdf('OmicCircos.pdf',width = 8,height = 8)
+par(mar=c(0, 0, 0, 0)); #准备画板
+plot(c(1,800), c(1,800), type="n", axes=FALSE, xlab="", ylab="", main="");
+
+#画染色体scale
+circos(R=250, cir="hg19", W=5, type="chr", 
+       print.chr.lab=FALSE, #自带的名字会跟scale重叠
+       scale=TRUE) 
+
+#画染色体名字
+#染色体长度信息，从https://genome.ucsc.edu/goldenPath/help/hg19.chrom.sizes下载，然后整理而成
+chr_info <- read.table("hg19.chrom.sizes.txt")
+head(chr_info)
+chr_label <- data.frame(chr = chr_info$V1, position = (chr_info$V2 + 1)/2, id = chr_info$V1)
+circos(R=270, cir="hg19", W=2, mapping=chr_label, type="label2", col = "black", side="in", cex=0.5);
+
+#画基因名字，side="in"则基因在圈里面
+circos(R=280, cir="hg19", W=10, mapping=gene_label, type="label", lwd = 0.4, col = gene_label$color, 
+       side="out", cex=0.5);  
+
+#画第1个热图
+circos(R=210, cir="hg19", W=40, mapping=exp1,  type="heatmap2",   
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画第2个热图
+circos(R=160, cir="hg19", W=60, mapping=exp2,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画第3个热图
+circos(R=110, cir="hg19", W=60, mapping=exp3,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画link
+circos(R=100, cir="hg19", W=10, mapping=gene_link2, type="link2", lwd=2, col='blue') 
+circos(R=100, cir="hg19", W=10, mapping=gene_link1, type="link2", lwd=2, col='red')
+dev.off()
+```
+
+![](OmicCircos.pdf)
+
+### 方法二：修改包里的代码
+
+修改了染色体名字的位置，顺便修改了scale的位置。
+
+修改后的函数命名为circos_plus，保存为sourceOmiccircos.R，位于当前文件夹。查找#Ya#可看到修改的代码。
+
+```{r}
+source("sourceOmiccircos.R")
+pdf('OmicCircos_plus.pdf',width = 8,height = 8)
+par(mar=c(0, 0, 0, 0)); #准备画板
+plot(c(1,800), c(1,800), type="n", axes=FALSE, xlab="", ylab="", main="");
+
+#画染色体
+circos_plus(R=250, cir="hg19", W=5, type="chr", 
+       print.chr.lab=TRUE, scale=TRUE) 
+
+#画基因名字，side="in"则基因在圈里面
+circos_plus(R=280, cir="hg19", W=10, mapping=gene_label, type="label", lwd = 0.4, col = gene_label$color, 
+       side="out", cex=0.5);  
+
+#画第1个热图
+circos_plus(R=210, cir="hg19", W=40, mapping=exp1,  type="heatmap2",   
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画第2个热图
+circos_plus(R=160, cir="hg19", W=60, mapping=exp2,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画第3个热图
+circos_plus(R=110, cir="hg19", W=60, mapping=exp3,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL,scale = TRUE) 
+
+#画link，col跟基因颜色一致
+circos_plus(R=100, cir="hg19", W=10, mapping=gene_link2, type="link2", lwd=2, col='blue') 
+circos_plus(R=100, cir="hg19", W=10, mapping=gene_link1, type="link2", lwd=2, col='red')
+dev.off()
+```
+
+![](OmicCircos_plus.pdf)
+
+```{r}
+sessionInfo()
+```

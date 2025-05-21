@@ -1,0 +1,246 @@
+---
+title: "FigureYa64triangle"
+author: "小丫画图出品"
+date: "2019-1-6"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Yin Li （他来自复旦大学）
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用R画出paper里的Triangle plot
+
+![](example.png)
+
+出自<https://www.cell.com/cell/fulltext/S0092-8674(18)31250-9?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS0092867418312509%3Fshowall%3Dtrue>
+
+原文解析：
+
+- 点的坐标代表其突变频率，越靠近三角形的一个角，代表在这个类型突变越多；
+- 点的大小代表在glioma这个病中，总共的突变频率；
+- 颜色代表相对突变频率
+
+## 应用场景
+
+展示3种不同疾病或者3组之间某个指标的相关性，一目了然。
+
+ggtern在文献中的应用：<http://www.ggtern.com/publications/>
+
+带代码的更多主题：<http://www.ggtern.com/posts/>
+
+关注“小丫画图”公众号，回复“三角形”查看ggtern在另一篇Cell paper中的用法及代码。
+
+脑洞大开，发挥你的想象力，一定能拓展出更多应用场景。
+
+## 环境设置
+
+```{r,message=FALSE}
+#options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+#options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+#devtools::install_git('https://bitbucket.org/nicholasehamilton/ggtern')
+#install.packages("tidyverse")
+#install.packages('ggtern')
+#install.packages("proto")
+#install.packages("directlabels")
+library(ggtern)
+citation(package = 'ggtern')
+library(tidyverse)
+library(scales)
+library(ggplot2)
+library(directlabels)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入数据预处理
+
+如果你的数据已经整理成“easy_input.csv”的格式，就可以跳过这步，直接进入“输入文件”。
+
+下载原文的补充材料Table2.pdf，整理为"not_easy_input.csv"
+
+### 直接用原文数据画图
+
+```{r}
+df <- read.csv("not_easy_input.csv")
+head(df)
+ggtern(data=df, aes(x=df$Frequency.in.pGBM,
+                    y=df$Frequency.in.LGG,
+                    z=df$Frequency.in.sGBM)) +  
+   geom_point(size = df$Alteration.Frequency.in.glioma)  
+```
+
+可以看到，点的大小和原文有较大出入，说明原文对数据进行了一定的优化。
+
+### 把size扩大50倍
+
+```{r}
+ggtern(data=df,aes(x=df$Frequency.in.pGBM,y=df$Frequency.in.LGG,z=df$Frequency.in.sGBM)) +  
+   geom_point(size=df$Alteration.Frequency.in.glioma*50) 
+```
+
+可以看到，除了几个较大的点，其他点大小同原文相似度极高，估计作者对特大值进行了不同的处理
+
+### 分段处理
+
+```{r}
+#先查看分布
+hist(df$Alteration.Frequency.in.glioma)
+
+#用0.1作为阈值来分段，
+df$allfrequency <- ifelse(df$Alteration.Frequency.in.glioma >= 0.1,
+                       10^(df$Alteration.Frequency.in.glioma) * 3, 
+                       50 * (df$Alteration.Frequency.in.glioma))
+
+ggtern(data=df, aes(x=df$Frequency.in.pGBM,
+                    y=df$Frequency.in.LGG,
+                    z=df$Frequency.in.sGBM)) +  
+   geom_point(size=df$allfrequency)
+
+write.csv(df[,c(1,4,8,11,13)],"easy_input.csv", quote = F, row.names = F)
+```
+
+接下来就采用这种方式预处理输入数据，调整细节、美化图形。
+
+## 输入文件
+
+easy_input.csv：包含5列。
+
+- 第1列，基因名；
+
+- 第2、3、4列，对应xyz坐标。此处代表基因在GBM各亚型中的突变频率；
+
+- 第5列，点的大小。此处代表基因在所有GBM中总的突变频率。
+
+至少包含3列，即3个坐标：x，y，z，即可画出点在三角形的位置。
+
+点的大小和颜色可以按照自己的生物学意义处理。
+
+```{r}
+df <- read.csv('easy_input.csv')
+head(df)
+```
+
+## 开始画图
+
+```{r}
+p <- ggtern(data=df, aes(x=df$Frequency.in.pGBM, y=df$Frequency.in.LGG, z=df$Frequency.in.sGBM)) +
+  geom_point(size = df$allfrequency) + #用allfrequency来定义点的大小
+  theme_custom(18, '') + #字体大小
+  labs(x='Primary\nGBM', z='Secondary\nGBM', y='Low Grade Glioma')+ #加label
+  theme(tern.panel.background = element_rect(fill = "white"), #背景白色
+                                            tern.panel.grid.minor = element_line(color = "gray90"), #背景网格颜色
+                                            tern.axis.arrow.show = TRUE, #画箭头
+        
+        #箭头颜色和大小 L: LEFT, R: RIGHT, T: TOP
+        tern.axis.arrow.T = element_line(color ='#0000E3', size = 2.5), 
+        tern.axis.arrow.L = element_line(color = '#FF44FF', size = 2.5),
+        tern.axis.arrow.R = element_line(color = 'red', size = 2.5),
+        
+        #箭头上字的颜色
+        tern.axis.arrow.text.L = element_text(color = 'black'),  
+        tern.axis.arrow.text.T = element_text(color = 'black'),
+        tern.axis.arrow.text.R = element_text(color = 'black'),
+        
+        #箭头距离三角形的远近
+        tern.axis.arrow.sep = 0.1, 
+        
+        #背景网格颜色、线型、粗细
+        tern.panel.grid.major.T = element_line(color = 'gray92', linetype = 1, size = 0.8), 
+        tern.panel.grid.major.L = element_line(color = 'gray92', linetype = 1, size = 0.8),
+        tern.panel.grid.major.R = element_line(color = 'gray92', linetype = 1, size = 0.8),
+        tern.panel.grid.minor.T = element_line(color = 'gray94', linetype = 1, size = 0.8), 
+        tern.panel.grid.minor.L = element_line(color = 'gray94', linetype = 1, size = 0.8),
+        tern.panel.grid.minor.R = element_line(color = 'gray94', linetype = 1, size = 0.8),
+        
+        #坐标轴title的字体颜色、大小
+        tern.axis.title.L = element_text(color = '#FF44FF', size = 11),
+        tern.axis.title.T = element_text(color = '#0000E3', size = 11),
+        tern.axis.title.R = element_text(color = 'red', size = 11),
+        
+        #坐标轴标签的字号
+        tern.axis.text.L = element_text(size = 17,face = 'bold'),
+        tern.axis.text.R = element_text(size = 17,face = 'bold'),
+        tern.axis.text.T = element_text(size = 17,face = 'bold'),
+        
+        #整体画布往上移动一点，避免压到字
+        tern.axis.vshift = 0.04,
+
+        #坐标轴粗细
+        tern.axis.line.T = element_line(size = 0.8),
+        tern.axis.line.R = element_line(size = 0.8),
+        tern.axis.line.L = element_line(size = 0.8)) + 
+  
+  #画一条虚线
+  geom_Lisoprop(color='darkgrey', value=.5, linetype=4, size=1) 
+p
+```
+
+### 给点加颜色
+
+在原文中，颜色代表相对的表达频率，那么有3个类型，要上3种颜色，怎么办？
+
+此处采用逐层上颜色，同时设置为半透明：
+
+突变频率越高，则堆砌的颜色则越深，越有意义。
+  
+```{r}
+p1 <- p + 
+  #分别画三种亚型的突变频率，图层叠加
+  geom_point(aes(color=df$Frequency.in.sGBM), size=df$allfrequency, alpha=0.7) + #半透明
+  geom_point(aes(color=df$Frequency.in.pGBM), size=df$allfrequency, alpha=0.7) +
+  geom_point(aes(color=df$Frequency.in.LGG), size=df$allfrequency, alpha=0.7) +
+  scale_color_gradient2(low='red', mid = '#0000E3', high ='purple', midpoint = 0.33, #三种颜色
+                        guide = FALSE) + #不画图例
+  
+  #每个圈圈外面加个黑圈
+  geom_point(size=df$allfrequency, shape = 1, alpha = 0.8,
+             stroke = 0.7, #线的粗细
+             color = "black")
+p1
+
+#保存到pdf文件
+ggsave("triangle.pdf")
+```
+
+### 标基因名
+
+为了避免基因名的重叠，我们通常会使用ggrepel，可惜ggrepel不支持ggtern。另外，geom_text的check_overlap也对ggtern无效。提供以下两种方案来解决字的重叠问题：
+
+#### 方案一：geom_text + AI
+
+```{r}
+p1 + geom_text(aes(label=Gene)) 
+ggsave('triangle_geom_text.pdf')
+```
+
+优点：能标出全部基因名
+
+缺点：需要用Illustrator打开pdf文件，然后用鼠标拖动基因名来微调。
+
+#### 方案二：用directlabels包
+
+参考这篇：<https://mp.weixin.qq.com/s/6MMVsO22n9oKZNC7qC7g5A>
+
+```{r}
+p1 + geom_dl(aes(label=Gene), method = "smart.grid")
+ggsave('triangle_directlabels.pdf')
+```
+
+优点：大部分基因名分散较好
+
+缺点：包里的参数有限。基因名离基因较远，需要参照方案一核对基因跟点的对应关系。另外，边缘的基因名溢出。因此，需要借用Illustrator微调。
+
+```{r}
+sessionInfo()
+```

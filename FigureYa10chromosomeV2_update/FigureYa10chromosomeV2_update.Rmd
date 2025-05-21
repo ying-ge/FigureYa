@@ -1,0 +1,113 @@
+---
+title: "FigureYa10chromosomeV2_update"
+author: "小丫画图出品"
+date: "2020-3-5"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Zhaodong Hao
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用R代码画出paper里的直的染色体分布图
+
+![](example.png)
+
+出自<https://academic.oup.com/brain/article/138/3/616/333368>
+
+# 应用场景
+
+差异表达基因（RNA-seq）、开放染色质（DNase/ATAC-seq）、CTCF结合位点（ChIP-seq）、突变位点（WGS）或DNA甲基化（WGBS）在染色体上的分布，或者只是画Ideogram
+
+在“小丫画图”微信公众号回复“染色体”查看这套代码的来历
+
+If you use this package in a published paper, please cite this paper:
+
+Hao Z, Lv D, Ge Y, Shi J, Weijers D, Yu G, Chen J. 2020. RIdeogram: drawing SVG graphics to visualize and map genome-wide data on the idiograms. PeerJ Comput. Sci. 6:e251 http://doi.org/10.7717/peerj-cs.251
+
+# 环境设置
+
+```{r}
+#install.packages("RIdeogram")
+library(RIdeogram)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+三个输入文件，其中第一个文件必需提供，第二和第三个文件非必需：
+
+- karyotype.csv，用于画染色体轮廓。包含五列：第一列为染色体名，第二、三列为染色体的起始和终止点。如果能提供着丝粒的开始和结束位置，就给出第四列（起始）和第五列（终止），如果着丝粒位置未知，就只给前三列。0-based基因组坐标(以0-based开始、1-based结束)。
+- easy_input_heatmap.csv，用来绘制染色体heatmap。包含四列，第一列染色体名，第二、三列为染色体上的位置，第四列为相应位置上的值。例如差异基因的log2foldchange、甲基化水平等。
+- easy_input_mark.csv，如果想画染色体旁边的形状标记，就要提供这个文件。包含六列，第一列type，第二列形状（只支持三种形状：box正方形、triangle三角形和circle圆。如果需要标记的特征超过3种，就用第六列里的颜色区分吧，例如红色的三角形，蓝色的三角形等），第三列染色体，第四、五列染色体上的位置，第六列颜色。**注意：**同一type对应的颜色一致。
+
+```{r}
+# 染色体长度、中心粒位置
+karyotype <- read.csv("karyotype.csv")
+karyotype
+
+# 染色体上的heatmap
+gene_density <- read.csv("easy_input_heatmap.csv")
+head(gene_density)
+
+# 染色体旁边的形状标记
+Random_RNAs_500 <- read.csv("easy_input_mark.csv")
+head(Random_RNAs_500)
+```
+
+# 开始画图
+
+```{r}
+ideogram(karyotype = karyotype, 
+         
+         #如果没提供easy_input_heatmap.csv，就在下面两行前面加#
+         overlaid = gene_density, 
+         #染色体上heatmap的配色
+         colorset1 = c("forestgreen", "gold", "deeppink3"), 
+         
+         #如果没提供easy_input_mark.csv，就在下面这行前面加#
+         label = Random_RNAs_500, 
+         label_type = "marker",
+         
+         #染色体宽度，默认170
+         width = 180, #注意：太宽会跑出画布外面
+         
+         #图例的位置
+         Lx = 160, #图例左上角跟左边的距离
+         Ly = 20, #图例左上角跟顶端的距离
+         
+         #输出文件
+         output = "chromosome.svg") #只支持svg格式
+
+# 可以转成png，方便查看
+convertSVG("chromosome.svg", device = "png")
+```
+
+# 格式转换
+
+运行完上面这段，当前文件夹里会生成一个“chromosome.svg”文件，是矢量图。可以用Inkscape、Illustrator等工具打开、编辑、转换成其他格式。
+
+还可以运行下面这段把svg转成pdf或tiff、jpg、png等格式的文件
+
+```{r}
+#svg2pdf或svg2tiff、svg2jpg、svg2png
+svg2pdf("chromosome.svg", 
+        width = 12, height = 8, #画布大小
+        dpi = 300)
+```
+
+![](chromosome.pdf)
+
+```{r}
+sessionInfo()
+```

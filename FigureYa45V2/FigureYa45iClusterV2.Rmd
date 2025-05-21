@@ -1,0 +1,328 @@
+---
+title: "FigureYa45 iCluster的教程答疑V2"
+author: "小丫画图出品"
+date: "2018-11-26"
+output: 'html_document'
+---
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：徐洲更<https://www.jianshu.com/u/9ea40b5f607a>
+
+![](hoptop.jpg)
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 版本更新
+
+在原来的基础上，增加和修改了如下几处内容：
+
+- 修改了R 3.5.0以后的安装方法(保留低于R 3.5.0之前的安装方法)
+- 增加重要参数的说明
+- 将`iClusterPlus`替换成最新的`iClusterBayes`
+- 增加了结果输出部分，用于调用其他R包做热图
+- 增加了几个统计学和机器学习概念的解释
+
+## 需求描述
+
+iCluster分析过程答疑。
+
+另外，需要输出分类和特征基因，用于画paper里的这种热图。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/nature20805>
+
+可以用`FigureYa17已分类的heatmap`来画heatmap，从本代码输出的`output_clusterMembership.txt`中取一列分类，作为sample分组信息。例图iCluster的两类完全分开，为了达到这种效果，需要单独画1类和2类，然后拼在一起。
+
+## 应用场景
+
+使用iClusterPlus整合多种基因组数据。
+
+肿瘤的分子复杂性体现在基因组、表观组、转录组和蛋白组等多种水平。
+
+一种方法是单独对不同数据类型进行聚类，然后手动合并。而`iCluster`则是同时使用多种来源数据进行整合分析，用于识别肿瘤亚型。
+
+`iCluster`在2009年开发，中间经历了很多次的开发升级，目前最新版是Bioconductor上的`iClusterPlus`, 包括`iClusterPlus`和`iClusterBayes`两种算法。三者的区别在于:
+
+- iCluster(2009): 使用lasso限制的隐变量回归识别可用于聚类的常见隐变量(common latent variable)
+- iClusterPlus(2012): 整合了elasticnet和fused lasso算法, 可以处理ontinuous, count, binary, multi-categorical类数据
+- iClusterBayes(2018): 改进了算法，比iClusterPlus速度快
+
+> 隐变量(latent variable)是一个机器学习中的概念。举例说明，如果一个人面前有三个袋子，他每次抽球的时候都会说自己是从哪个袋子里拿了哪种颜色的球，你在旁边记录每个袋子抽出了什么颜色的球，在他抽取一定次数后，你就能估计每个袋子中不同颜色球的比例。但是如果他最后只汇报他抽的是什么颜色的球，而将从哪个袋子抽球的这一步**隐藏**了，那么选袋子这一步就是隐变量。广义上的隐变量主要就是指"不能被直接观察到，但是对系统的状态和能观察到的输出存在影响的一种东西"
+
+> lasso, elastic net, fused lasso 是机器学习中特征选择的实现算法, 也就是找到数据集中有代表性的属性(attribute)。
+
+## 环境准备
+
+### 安装iClusterPlus
+
+`iClusterPlus`需要通过`biocLite`安装，如果速度慢，将下面代码`#options(...)`中的`#`去掉，则会使用国内镜像. 
+
+CRAN镜像备选
+
+- 国科大: <https://mirrors.ustc.edu.cn/CRAN/>
+- 同济大学: <https://mirrors.tongji.edu.cn/CRAN/>
+- 兰州大学: <https://mirror.lzu.edu.cn/CRAN/>
+
+```{r, message=FALSE, warning=FALSE}
+#options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+#options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+# R > 3.5.0
+if (!requireNamespace("BiocManager"))
+    install.packages("BiocManager")
+if (!requireNamespace("iClusterPlus"))
+  BiocManager::install("iClusterPlus")
+#R < 3.5.0
+#source("http://bioconductor.org/biocLite.R")
+#biocLite("iClusterPlus")
+library("iClusterPlus")
+```
+
+### 其他工具
+
+```{r}
+#BiocManager::install("DNAcopy")
+#BiocManager::install("GenomicRanges")
+#R < 3.5.0的用下面的代码安装
+#source("http://bioconductor.org/biocLite.R")
+#biocLite("DNAcopy")
+#biocLite("GenomicRanges") 
+library("DNAcopy")
+library("GenomicRanges")
+```
+
+## 输入数据
+
+`iClusterPlus`和`iClusterBayes`支持如下类型数据:
+
+- binary: 如体细胞变异, 有(1)/无(0)
+- catergorical: 拷贝数状态: -2 = homozygous deletion; -1 = hemizygous deletion; 0 = neutral / no change; 1 = gain; 2 = high level amplification
+- counts: 如RNA-seq count
+- continuous: 如芯片表达量数据
+
+测试数据集为TCGA的GBM(glioblastoma, 胶质母细胞瘤)数据集, 可以从<http://www.cbioportal.org/> 和 <https://portal.gdc.cancer.gov/> 中下载. 
+- gbm_mut.txt: 体细胞突变数据. 来自于三个芯片平台(Agilent 244K, SNP6, Illumina 550K), 0表示无，1表示有
+- gbm_exp.txt: 来自于不同平台的基因表达量归一化后数据
+- gbm_seg.txt: DNA 拷贝数变异. Level 3经标准化和片段化(normalized and segmented)数据集. 
+
+```{r}
+options(stringsAsFactors = FALSE)
+gbm.mut.raw <- read.table('gbm_mut.txt', header = T, row.names = 1, sep = "\t")
+gbm.mut.raw[1:3,1:6]
+gbm.seg.raw <- read.table('gbm_seg.txt', header = T, sep = "\t")
+gbm.seg.raw[1:3,]
+gbm.exp.raw <- read.table('gbm_exp.txt', header = T, row.names = 1, sep = "\t")
+ gbm.exp.raw[1:3,1:6]
+```
+
+## 数据预处理
+
+根据`iClusterBayes()`和`tune.iClusterBayes()`的要求，输入数据都必须是**矩阵**, 且每一行表示是不同的样本，每一列表示的基因组的特征,如基因名或者基因区间。
+
+### CNA预处理
+
+CNA(Copy Number Alteration): 过滤掉突变率不高的基因，例如设定阈值2%.
+
+用`apply`对每一个基因用`mean`计算变异频率，根据阈值进行过滤
+
+```{r}
+gbm.mut <- as.matrix(gbm.mut.raw)
+row.names(gbm.mut) <- rownames(gbm.mut.raw)
+min.rate <- 0.02
+mut.rate <- apply(gbm.mut, 2, mean)
+gbm.mut2 <- gbm.mut[, which(mut.rate > min.rate)]
+gbm.mut2[1:5,1:5]
+```
+
+### CNV预处理
+
+由于原始或者标准化的拷贝数数据集具有很高维度和空间相关性, 因此iCluster推荐用R包`DNAcopy`处理, 得到片段化结果。
+
+```{r}
+gbm.seg.raw[1:3,]
+```
+
+移除冗余的拷贝数区域. 
+
+```{r}
+data(variation.hg18.v10.nov.2010)
+cnvregion <- variation.hg18.v10.nov.2010[,3:5] # 生殖细胞CNV的坐标信息
+gbm.cn <- CNregions(seg=gbm.seg, 
+                    epsilon = 0,
+                    adaptive = FALSE,
+                    rmCNV=TRUE, 
+                    cnv=cnvregion,
+                    frac.overlap = 0.5, 
+                    rmSmallseg = TRUE, nProbes = 5)
+gbm.cn <- gbm.cn[order(rownames(gbm.cn)),]
+gbm.cn[1:10,1:5]
+```
+
+重要参数说明:
+
+- seg: DNAcopy的CBS片段化后输出结果
+- epsilon: 当超过临近探针的最大欧式距离时, 两个区域就不会被合并. epsiolon=0时表示所有区域都不会被合并将n个样本的所有唯一断裂点取并集。
+- adaptive: 仅当样本数非常大时才设置为TRUE
+- nProbes: 根据长度对片段进行过滤,和-rmSmallseg=TRUE联用
+
+如果你知道设置细胞的区间，设置`rmCNV=TRUE`, 且`cnv`参数不能为空. CNV信息可从 <http://dgv.tcag.ca/dgv/app/downloads?table=DGV_Content_Summary.txt> 下载
+
+
+### 芯片表达量预处理
+
+基因表达量数据, 选择样本间变化程度比较高的基因基因。
+
+```{r}
+gbm.exp <- as.matrix(gbm.exp.raw)
+row.names(gbm.exp) <- row.names(gbm.exp.raw)
+gbm.exp[1:5,1:5]
+```
+
+计算每个基因的方差
+
+```{r}
+gbm.exp.var <- apply(gbm.exp, 2, var)
+gbm.exp.var.order <- gbm.exp.var[order(gbm.exp.var, decreasing = T)]
+head(gbm.exp.var.order)
+```
+
+选择方差较大的前几个基因，例如前1500, 或者大于某个阈值
+
+> 由于原来的数据集已经经过了过滤，下面的代码可以不运行，举例说明而已，
+
+```{r}
+top_var_gene <- names(gbm.exp.var.order[1:1500])
+# top_var_gene <- names(gbm.exp.var.oder[gbm.exp.var.oder > 1])
+gbm.exp <- gbm.exp[, top_var_gene]
+dim(gbm.exp)
+```
+
+**注**: 用于下载的芯片数据已经是经过归一化, 所以此处没有归一化。
+
+最后确保三个数据集拥有**相同的列名**
+
+```{r}
+if (identical(rownames(gbm.cn), rownames(gbm.exp)) &
+    identical(rownames(gbm.cn), rownames(gbm.mut2)))
+  print("all data have same rownames")
+```
+
+### 整合分析
+
+> For example, it took iClusterBayes about **2** h to analyze the simulated data sets using 6 cores of a 2.62 GHz 12-core Mac Pro computer. However, it took the iClusterPlus about **391** h.
+-- "A fully Bayesian latent variable model for integrative clustering analysis of multi-type omics data"
+
+使用`tune.iClusterBayes`或`iClusterBayes`进行整合数据分析。最多可以使用**6**个不同的基因组特征数据(dt1,dt2,dt3,dt4,dt5,dt6). 主要设置三个参数
+
+- dt1,dt2,dt3,dt4,dt5,dt6: 输入数据集，必须都得是**矩阵**！
+- type: 表示数据服从的可能分布。类似于0,1的使用"binomial", 连续性数据使用"gaussian", RNA-Seq的原始数据使用"poisson"
+- K: 特征数. `iClusterBayes`只能设置一个固定值，`tune.iClusterBayes`是设定一个区间。最终的聚类数=K+1
+- cpus: 程序并行处理. **Windows下不支持该参数**
+- prior.gamma: 不同数据集的先验概率。这个**值**只能不断试
+
+如果你确定最后可以分成多少类，那么直接用`iClusterBayes`.
+
+```{r}
+bayfitK4 <- iClusterBayes(dt1 = gbm.mut2,
+                          dt2 = gbm.cn, 
+                          dt3 = gbm.exp,
+                    type=c("binomial","gaussian","gaussian"),
+              K=3)
+```
+
+如果无法确定到底能分成多少类，那么建议用`tune.iClusterBayes`, 测试多个K值. 
+```r
+if(!file.exists(Bayfit.RData)){
+  date()
+  bayfit <- tune.iClusterBayes(cpus=1,
+                            dt1=gbm.mut2,dt2=gbm.cn,dt3=gbm.exp,
+                    type=c("binomial","gaussian","gaussian"),
+                    K=1:6,n.burnin=18000,
+                    n.draw=12000,
+                    prior.gamma=c(0.5,0.5,0.5),
+                    sdev=0.05, thin=3)
+  date()
+  save.image(file="Bayfit.RData") #需要运行40min，保存到文件里
+}
+```
+> Windows只能单核运行, 建议这一步用Mac或服务器。
+
+下一步，基于BIC或着误差率选择比较合适的特征数K
+
+```{r}
+load("Bayfit.RData")
+allBIC = NULL
+devratio = NULL
+nK = length(bayfit$fit)
+for(i in 1:nK){
+  allBIC = c(allBIC,bayfit$fit[[i]]$BIC)
+  devratio = c(devratio,bayfit$fit[[i]]$dev.ratio)
+  }
+
+par(mar=c(4.0,4.0,0.5,0.5),mfrow=c(1,2))
+plot(1:nK, allBIC,type="b",xlab="k",ylab="BIC",pch=c(1,1,19,1,1,1))
+plot(1:nK,devratio,type="b",xlab="k",ylab="Deviance ratio",pch=c(1,1,19,1,1,1))
+```
+
+> 贝叶斯信息准则(BIC, Bayesian Information Criterion): 选择模型的一个标准,  只要记住**越小越好**
+> 偏差比(deviance ratio), 定于来自于glmnet包， dev.ratio=1-devriance/nulldev, 只要记住**越大越好**
+
+根据上图，K=3是最优解. 提取每个样本的分类信息
+
+```{r}
+best.cluster.Bayes = bayfit$fit[[3]]$clusters
+```
+
+### 作图
+
+`iCluster`的本质是数据分析，因此最后的热图展示不作为本次教程的重点。仅以自带的`plotHeatmap`展示下结果。
+
+```{r}
+library(magrittr)
+library(lattice)
+library(gplots)
+# 提取gbm.cn的染色体位置信息
+chr <- unlist(strsplit(colnames(gbm.cn), '\\.')) %>% 
+  extract(seq(1,length(.),by=2)) %>% 
+  gsub("chr","",.) %>% 
+  as.numeric()
+# 为了更好的展示对过高的值调整
+cn.image <- gbm.cn
+cn.image[cn.image > 1.5] <- 1.5
+cn.image[cn.image < -1.5] <- -1.5
+exp.image <- gbm.exp
+exp.image[exp.image > 2.5] <- 2.5
+exp.image[exp.image < -2.5] <- -2.5
+# 选择配色
+bw.col <-  colorpanel(2,low="white",high="black")
+col.scheme = alist()
+col.scheme[[1]] <- bw.col
+col.scheme[[2]] <- bluered(256)
+col.scheme[[3]] <- bluered(256)
+# 作图
+plotHeatmap(fit= bayfit$fit[[3]] ,datasets=list(gbm.mut2,cn.image,exp.image),
+            type=c("binomial","gaussian","gaussian"), 
+            col.scheme = col.scheme,
+            row.order=c(F,F,T),chr=chr,plot.chr=c(F,T,F),
+            sparse=c(T,F,T),cap=c(F,T,F))
+```
+
+## 输出文件
+
+把best.cluster.Bayes 、特征基因和值保存到文件，就可以用自己的heatmap代码画热图了。
+
+```{r}
+write.table(best.cluster.Bayes, file="output_clusterMembership.txt",sep='\t',quote=F)
+
+write.csv(t(gbm.mut2), "output_mut2.csv",quote = F)
+write.csv(t(cn.image), "output_cn.csv",quote = F)
+write.csv(t(exp.image), "output_exp.csv",quote = F)
+```
+
+```{r}
+sessionInfo()
+```

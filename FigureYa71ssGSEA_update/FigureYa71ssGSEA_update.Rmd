@@ -1,0 +1,441 @@
+---
+title: "FigureYa71ssGSEA_update"
+author: "小丫画图出品"
+date: "2019-9-4"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：夏至
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+输入TCGA数据，用原文的方法计算，原图复现。
+
+![](example.png)
+
+出自<https://doi.org/10.3389/fimmu.2018.01578>
+
+## 应用场景
+关于量化浸润免疫细胞，2018年发表在Cancer Immunol Immunother中的一篇综述概况了目前所用的几种方法：[Quantifying tumor-infiltrating immune cells from transcriptomics data](https://link.springer.com/article/10.1007%2Fs00262-018-2150-z)。
+
+ssGSEA量化免疫细胞浸润最大的一个优点就是自己可以定制量化免疫浸润细胞种类。像MCPcounter只能量化10种免疫细胞，cibersort量化22种细胞，但是目前平台只限于用在芯片数据，虽然很多RNA-seq数据也直接用了。
+
+ssGSEA只要你有marker genes就可以量化。**注意：**量化出来的结果是不可以跨数据比较的，就跟转录组的批次效应一样。
+
+目前公认并且用的最多的免疫细胞marker就是2013年发表在Immunity上的[SpatiotemporalDynamicsof IntratumoralImmuneCells Reveal the Immune Landscape in Human Cancer](https://linkinghub.elsevier.com/retrieve/pii/S1074-7613(13)00437-8) 所提供的免疫细胞marker genes（Table S1），能提取到24种免疫细胞信息。下文用的是这24种免疫细胞。
+
+例文提取了27种免疫细胞，联系原作者能获得27种免疫细胞表面marker genes。输入原作者提供的这些marker genes来跑这套代码，结果基本同原文一致，可以很好的分为3类。
+
+![](Immunother.png)
+
+## 环境设置
+
+使用国内镜像安装包
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("GSVA")
+install.packages("circlize")
+```
+
+加载包
+```{r}
+library(GSVA)
+library(TCGAbiolinks)
+library(ComplexHeatmap)
+library(dplyr)
+library(stringr)
+library(rtracklayer)
+library(SummarizedExperiment)
+library(clusterProfiler)
+library(RColorBrewer)
+library(maftools)
+library(circlize)
+library(matrixStats)
+library(GetoptLong)
+library(GenomicRanges)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入数据预处理
+
+用ssGSEA量化免疫浸润，需要两个输入数据：
+
+- easy_input_immunity.rdata，24种免疫细胞marker genes的ENTREZ ID，保存为list。来源：[2013 Immunity那篇文章的Table S1](https://www.cell.com/cms/10.1016/j.immuni.2013.10.003/attachment/8dc04d32-6aff-4eda-99f5-6401bcae9751/mmc1.pdf)，手动整理成csv格式，并用GPL96（HG-U133A Affymetrix platform）按照探针得到gene symbol，文章有提到这批数据是从这个芯片平台得到的。
+
+- easy_input_expr.csv，基因表达矩阵，每行一个基因，每列一个sample。第一列基因ID跟easy_input_immunity.rdata里的基因ID一致，此处都用ENTREZ ID。文件太大，请从微云下载easy_input_expr.csv和not_easy_input_expr.csv：<https://share.weiyun.com/5EsD2Ek>
+
+**如果你已经准备好了这两个文件，就可以直接进入“用ssGSEA来量化浸润水平”。**
+
+下面带你获得这两个输入文件：
+
+### 免疫细胞marker genes
+
+这步获得的easy_input_immunity.rdata里面是各种免疫细胞marker genes list，可重复使用。
+
+```{r}
+# 读入免疫细胞marker genes
+immunity <- read.csv("immunitygene.csv", header = T)
+
+# 去除不是免疫细胞的CellType
+immunity <- immunity[!immunity$CellType %in% c("Blood vessels", "Normal mucosa", "SW480 cancer cells", "Lymph vessels"), ]
+
+# 转成list，去除冗余基因
+# 文献marker genes是在affy芯片平台上获取的，我这里选用的是Entrez_ID。也可以用Gene symbol
+immunity <- immunity %>% 
+  split(., .$CellType) %>% 
+  lapply(., function(x)(x$ENTREZ_GENE_ID))
+immunity <- lapply(immunity, unique)
+
+# 保存到文件，便于过后重复使用时直接读取
+save(immunity,file = "easy_input_immunity.rdata")
+```
+
+### 表达矩阵
+
+TCGA表达数据的获取方式：
+
+- 用TGCAbiolinks下载表达数据read count，然后转成TPM，数据下载和转换的方法可参考FigureYa23count2TPM；第一列是ENTREZ ID，其后每列一个sample。需要把gene_id换成gene symbol或ENTREZ ID。GDC来源的TCGA数据用的是v22版本，从GENCODE<https://www.gencodegenes.org/>进去，点击下载v22版本gtf文件：<ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_22/gencode.v22.annotation.gtf.gz>
+
+- 或者下载所有癌症的TPM，提取感兴趣癌症的TPM，可参考FigureYa56immune_inflitrationV2。
+
+此处用TGCAbiolinks下载"TCGA-COAD"和"TCGA-READ"的基因表达矩阵，然后转成TPM，获得not_easy_input_expr.txt文件。
+
+如果你已经生成过gtf_v22.csv文件，就可以跳过下面这段。
+
+```r
+# 先获得protein_coding gene的gene_id跟gene symbol的对应关系
+gtf_v22 <- rtracklayer::import("gencode.v22.annotation.gtf")
+gtf_v22 <- as.data.frame(gtf_v22)
+gtf_v22 <- dplyr::select(gtf_v22, c("gene_id", "gene_type", "gene_name")) %>% 
+  filter(., gene_type ==  "protein_coding") %>% 
+  unique()
+gtf_v22 <- gtf_v22[!duplicated(gtf_v22), ]
+
+# 再加入ENTREZ ID，如果immunity.rdata里用的是gene symbol，就不需要运行下面这行
+gtf_v22 <- bitr(gtf_v22$gene_name, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = "org.Hs.eg.db") %>%
+  merge(., gtf_v22, by.x = "SYMBOL", by.y = "gene_name") %>% 
+  mutate(., gene_id = str_sub(gene_id, 1, 15))
+
+# 这步获得gtf_v22.csv文件，包含v22版本protein_coding gene的gene_id、gene symbol和ENTREZ ID的对应关系，可重复使用。
+write.csv(gtf_v22, "gtf_v22.csv", quote = F, row.names = F)
+```
+
+把gene_id换成ENTREZ ID
+
+```r
+tcga_expr <- read.csv("not_easy_input_expr.csv", header = T, stringsAsFactors = F, row.names = 1)
+tcga_expr[1:3,1:3]
+
+gtf_v22 <- read.csv("gtf_v22.csv")
+
+library(data.table)
+tcga_expr <- merge(gtf_v22[, c("ENTREZID", "gene_id")], tcga_expr, by.x = 2, by.y = 0) %>% .[, -1] %>% 
+    aggregate(.~ENTREZID, ., median) #这步运行时间长
+rownames(tcga_expr) <- tcga_expr$ENTREZID
+tcga_expr <- tcga_expr[, -1]
+head(tcga_expr)
+# 保存到文件
+write.csv(round(tcga_expr,1), "easy_input_expr.csv", quote = F)
+```
+
+## 用ssGSEA来量化浸润水平
+
+```{r}
+tcga_expr <- read.csv("easy_input_expr.csv", row.names = 1)
+tcga_expr[1:3,1:2]
+(load("easy_input_immunity.rdata"))
+immunity[1]
+
+# 下面这一句就完成了ssGSEA
+tcga_gsva <- as.data.frame(t(gsva(as.matrix(tcga_expr), immunity, method = "ssgsea")))
+str(tcga_gsva)
+
+# 把ssGSEA结果保存到文件
+write.csv(tcga_gsva, "ssGSEA_output.csv", quote = F, row.names = T)
+
+# 画个图粗略看一下结果
+library(pheatmap)
+pheatmap(t(tcga_gsva), scale = "row", show_colnames = F, color = colorRampPalette(c("navy", "white", "firebrick3"))(50))
+```
+
+如果你只想计算免疫浸润，那么到这里就结束了。
+
+如果你想把免疫浸润跟突变、临床信息结合起来看，复现例文的原图，就需要运行下面这部分：
+
+## 原图复现
+
+下面用TCGAbiolink从GDC下载数据，需要找个网络好点的地方。
+
+### 下载突变信息
+
+变异类型归为WT和Mutant，参考 <https://bioconductor.org/packages/devel/bioc/vignettes/ELMER/inst/doc/pipe.html> 
+
+![](Variant_Classification.png)
+
+```{r}
+targetMut <- c("TP53", "KRAS", "BRAF", "EGFR") #提取哪个基因的突变
+nonsilentmutation <- c("Frame_Shift_Del", "Frame_Shift_Ins", "Missense_Mutation", "Nonsense_Mutation", "Splice_Site", "In_Frame_Del", "In_Frame_Ins", "Translation_Start_Site", "Nonstop_Mutation") #Splice_Region是ncRNA-splicing
+
+# 4种找mutation的pipeline任选其一：muse, varscan2, somaticsniper, mutect2
+#此处提取COAD和READ的突变信息
+coadmut <- GDCquery_Maf(tumor = "COAD", pipelines = "varscan2")
+readmut <- GDCquery_Maf(tumor = "READ", pipelines = "varscan2")
+all(colnames(coadmut) == colnames(readmut)) #两个文件的列名都是一样的，可以直接合并
+crcmut <- rbind(coadmut, readmut) 
+crcmut <- data.frame(sample = str_sub(crcmut$Tumor_Sample_Barcode, 1, 12), crcmut)
+all_mutSample <- unique(crcmut$sample)
+
+# 去除Silent mutations
+table(crcmut$Variant_Classification)
+crcmut <- crcmut[crcmut$Variant_Classification %in% nonsilentmutation, ]
+
+# 提取target gene的突变
+crc_mut_gene <- crcmut[crcmut$Hugo_Symbol %in% targetMut,]
+
+TP53mutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "TP53", "sample"])  #带有目标突变的sample
+TP53wildSample <- setdiff(all_mutSample, TP53mutSample) #文件中的其他sample被认为是野生型，不在该文件中的sample被认为是未检出，后面将被标为NA
+
+KRASmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "KRAS", "sample"])
+KRASwildSample <- setdiff(all_mutSample, KRASmutSample)
+
+BRAFmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "BRAF", "sample"])
+BRAFwildSample <- setdiff(all_mutSample, BRAFmutSample)
+
+EGFRmutSample <- unique(crc_mut_gene[crc_mut_gene$Hugo_Symbol == "EGFR", "sample"])
+EGFRwildSample <- setdiff(all_mutSample, EGFRmutSample)
+```
+
+### 下载msi临床信息
+
+```{r}
+msiquery1 <- GDCquery(project = "TCGA-COAD", 
+                  data.category = "Other",
+                  legacy = TRUE,
+                  access = "open",
+                  data.type = "Auxiliary test")
+GDCdownload(msiquery1)
+coad_msi_results <- GDCprepare_clinic(msiquery1, "msi")
+msiquery2 <- GDCquery(project = "TCGA-READ", 
+                  data.category = "Other",
+                  legacy = TRUE,
+                  access = "open",
+                  data.type = "Auxiliary test")
+GDCdownload(msiquery2)
+read_msi_results <- GDCprepare_clinic(msiquery2, "msi")
+msi_results <- rbind(read_msi_results, coad_msi_results) %>% .[, c(1, 3)]
+colnames(msi_results) <- c("sample", "MSI")
+```
+
+### 下载其他临床信息
+
+```{r}
+coadclinical <- GDCquery(project = "TCGA-COAD", 
+                  data.category = "Clinical", 
+                  file.type = "xml")
+GDCdownload(coadclinical)
+coadclinical <- GDCprepare_clinic(coadclinical, clinical.info = "patient")
+
+readclinical <- GDCquery(project = "TCGA-READ", 
+                  data.category = "Clinical", 
+                  file.type = "xml")
+GDCdownload(readclinical)
+readclinical <- GDCprepare_clinic(readclinical, clinical.info = "patient")
+all(colnames(readclinical) == colnames(coadclinical))
+clinical <- rbind(coadclinical, readclinical)
+```
+
+### 组合所需要的临床信息
+
+```{r}
+targetAnno <- clinical[, c("bcr_patient_barcode", "stage_event_pathologic_stage", "gender", "vital_status", "anatomic_neoplasm_subdivision", "colon_polyps_present" )] 
+table(targetAnno$anatomic_neoplasm_subdivision)
+#从盲肠到横结肠为右侧，从脾曲到直肠为左侧结直肠癌
+targetAnno$tumor_site <- targetAnno$anatomic_neoplasm_subdivision %>% 
+  str_replace(., "(Cecum|Ascending Colon|Hepatic Flexure|Transverse Colon)", "right") %>%
+  str_replace(., "(Splenic Flexure|Descending Colon|Sigmoid Colon|Rectosigmoid Junction|Rectum)", "left")
+targetAnno <- merge(targetAnno, msi_results, by.x = "bcr_patient_barcode", by.y = "sample",all.x = T)
+targetAnno$TP53mut <- NA
+targetAnno$KRASmut <- NA
+targetAnno$BRAFmut <- NA
+targetAnno$EGFRmut <- NA
+
+targetAnno[targetAnno$bcr_patient_barcode %in% TP53mutSample, "TP53mut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% TP53wildSample, "TP53mut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% KRASmutSample, "KRASmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% KRASwildSample, "KRASmut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% BRAFmutSample, "BRAFmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% BRAFwildSample, "BRAFmut"] <- "wildtype" 
+
+targetAnno[targetAnno$bcr_patient_barcode %in% EGFRmutSample, "EGFRmut"] <- "mutant"
+targetAnno[targetAnno$bcr_patient_barcode %in% EGFRwildSample, "EGFRmut"] <- "wildtype"
+
+summary(targetAnno)
+```
+
+### 融合ssGSEA和临床表达数据
+
+```{r}
+tcga_gsva <- read.csv("ssGSEA_output.csv", row.names = 1)
+tcga_gsva <- data.frame(sample = str_sub(rownames(tcga_gsva), 1, 12), barcode = rownames(tcga_gsva), tcga_gsva) 
+tcga_gsva$sample <- str_replace_all(tcga_gsva$sample, "\\.", "-")
+
+library(data.table)
+heatmapinput <- unique(merge(tcga_gsva, targetAnno, by.x = "sample", by.y = "bcr_patient_barcode", all.x = T))
+library(data.table)
+rownames(heatmapinput) <- heatmapinput$barcode
+summary(heatmapinput)
+
+write.csv(heatmapinput, "heatmapinput.csv")
+```
+
+### 开始画图
+
+用complexheatmap画图。complexheatmap的参数众多，有兴趣了解的详情<https://bioconductor.org/packages/release/bioc/html/ComplexHeatmap.html>
+
+```{r}
+heatmapinput <- read.csv("heatmapinput.csv", row.names = 1)
+ml <- heatmapinput[, c(3:26)] #画图的ssGSEA数据
+ml <- as.data.frame(t(apply(ml, 2, scale))) #scale标化
+colnames(ml) <- rownames(heatmapinput)
+
+col_fun <- colorRamp2(c(-5, 0, 5), c("#377EB8", "white", "#E41A1C"))
+
+#获取聚类分组信息
+h1 <- Heatmap(ml, cluster_rows = TRUE, cluster_columns = TRUE, clustering_method_columns = "ward.D2",show_row_names = TRUE, show_column_names = FALSE,
+              clustering_distance_columns = "euclidean", 
+              clustering_distance_rows = "euclidean",
+              clustering_method_rows  = "ward.D2")
+tree <- column_dend(h1)
+ind <- cutree(as.hclust(tree), k = 2)[order.dendrogram(tree)] #此处划分为2类，根据你自己的数据调整
+table(ind)
+heatmapinput$Immune_infiltration <- ind[heatmapinput$barcode]
+draw(h1)
+heatmapinput$Immune_infiltration <- str_replace(heatmapinput$Immune_infiltration, "1", "Low infiltration")
+heatmapinput$Immune_infiltration <- str_replace(heatmapinput$Immune_infiltration, "2", "High infiltration")
+
+#临床信息注释
+Immune_infiltration <- heatmapinput[, "Immune_infiltration"]
+Tumor_site <- heatmapinput[, "tumor_site"] 
+TP53_mutation <- heatmapinput[, "TP53mut"]
+KRAS_mutation <- heatmapinput[, "KRASmut"]
+BRAF_mutation <- heatmapinput[, "BRAFmut"]
+EGFR_mutation <- heatmapinput[, "EGFRmut"]
+Gender <- heatmapinput[, "gender"]
+MSI <- heatmapinput[, "MSI"]
+Polyps <- heatmapinput[, "colon_polyps_present"]
+Survival <- heatmapinput[, "vital_status"] #这种生存信息是没有什么价值的，建议用生存状态加时间，详细画法可以参考complexheatmap
+Anatomic_location <- heatmapinput[, "anatomic_neoplasm_subdivision"]
+Stage <- heatmapinput[, "stage_event_pathologic_stage"]
+ha = HeatmapAnnotation(Immune_infiltration =Immune_infiltration, Tumor_site = Tumor_site, 
+                       TP53_mutation = TP53_mutation, KRAS_mutation = KRAS_mutation, 
+                       BRAF_mutation = BRAF_mutation, EGFR_mutation = EGFR_mutation,
+                       Gender = Gender, MSI = MSI, Polyps = Polyps, 
+                       Survival = Survival, Anatomic_location = Anatomic_location,
+                       Stage = Stage, show_annotation_name = FALSE, 
+                       col = list(Immune_infiltration = c("High infiltration" = "#3FA538", 
+                                                          "Low infiltration" = "#9FD29BFF"),
+                         Tumor_site = c("left" = "#E00115", "right" = "#5E84B6"),
+                         TP53_mutation = c("mutant" = "black", "wildtype" = "grey"),
+                         KRAS_mutation = c("mutant" = "black", "wildtype" = "grey"),
+                         BRAF_mutation = c("mutant" = "black", "wildtype" = "grey"),
+                         EGFR_mutation = c("mutant" = "black", "wildtype" = "grey"),
+                         Gender = c("MALE" = "#C4868E", "FEMALE" = "#97A8C7"),
+                         MSI = c("MSI-H" = "#E5554D", "MSI-L" = "#C4868E", 
+                                 "MSS" = "#AEB6CE", "Indeterminate" = "#2B3D44"),
+                         Polyps = c("YES" = "black", "NO" = "grey"),
+                         Survival = c("Alive" = "#3FA538", "Dead" = "#E00115"),
+                         Stage =  c("Stage I" = "#B0B0FFFF", "Stage IA" = "#6060FFFF", "Stage II" = "#B0FFB0FF" , 
+                                    "Stage IIA" ="#95FF95FF", "Stage IIB" = "#7AFF7AFF", "Stage IIC" = "#60FF60FF",
+                                    "Stage III" = "#F7E897FF", "Stage IIIA" = "#F9EF64FF", 
+                                    "Stage IIIB" = "#FCF732FF", "Stage IIIC" = "#FFFF00FF",
+                                    "Stage IV" = "#FF6060FF", "Stage IVA"="#FF3030FF" , 
+                                    "Stage IVB" = "#FF0000FF")),
+                       na_col = "white", #各个临床信息的颜色，Anatomic_location颜色输入也同其他，更好颜色搭配信息请参考FigureYa28color
+                       show_legend = rep(TRUE, 12),#是否要显示annotation legend
+                       annotation_height = unit(rep(5, 12), "mm"),#临床annotation的高度
+                       annotation_legend_param = list(
+                         Immune_infiltration = list(title = "Immune infiltration"),
+                         Tumor_site = list(title = "Tumor site"),
+                         TP53_mutation = list(title = "TP53 mutation"),
+                         KRAS_mutation = list(title = "KRAS mutation"),
+                         BRAF_mutation = list(title = "BRAF mutation"),
+                         EGFR_mutation = list(title = "EGFR mutation"),
+                         Gender = list(title = "Gender"),
+                         MSI = list(title = "MSI"),
+                         Polyps = list(title = "Polyps"),
+                         Survival = list(title = "Survival"),
+                         Anatomic_location = list(title = "Anatomic location"),
+                         Stage = list(title = "Stage"))#annotation legend的标签
+)
+
+ht <- Heatmap(ml, col = col_fun, 
+              name = "CRC ssGSEA",
+              cluster_rows = TRUE, cluster_columns = TRUE,          
+              show_row_names = TRUE, show_column_names = FALSE,
+              bottom_annotation = ha, column_title = qq("TCGA CRC samples (n = @{ncol(ml)})"),
+              clustering_method_columns = "ward.D2",
+              clustering_distance_columns = "euclidean", 
+              clustering_distance_rows = "euclidean",
+              clustering_method_rows  = "ward.D2", column_dend_height = unit(30, "mm")
+              )
+```
+
+```{r}
+pdf("ssGSEA.pdf", 16, 12)
+draw(ht, annotation_legend_side = "left", heatmap_legend_side = "left")
+
+#装饰heatmap
+annotation_titles <- c(Immune_infiltration = "Immune infiltration",
+                      Tumor_site = "Tumor site",
+                      TP53_mutation = "TP53 mutation",
+                      KRAS_mutation = "KRAS mutation",
+                      BRAF_mutation = "BRAF mutation",
+                      EGFR_mutation = "EGFR mutation",
+                      Gender = "Gender",
+                      MSI = "MSI",
+                      Polyps = "Polyps",
+                      Survival = "Survival",
+                      Anatomic_location = "Anatomic location",
+                      Stage = "Stage")
+for(an in names(annotation_titles)) {
+  decorate_annotation(an, {
+    grid.text(annotation_titles[an], unit(-2, "mm"), just = "right")#对齐方向是右边
+    grid.rect(gp = gpar(fill = NA, col = "black"))
+  })
+}
+
+#分组划线：具体数值要参考聚类的信息
+decorate_heatmap_body("CRC ssGSEA", {
+  grid.lines(c(0, 0), c(0, 1), gp = gpar(lty = 1, lwd = 2))
+  grid.lines(c(table(ind)[[1]]/sum(table(ind)), table(ind)[[1]]/sum(table(ind))), 
+             gp = gpar(lty = 2, lwd = 2))
+  grid.lines(c(1, 1), c(0, 1), gp = gpar(lty = 1, lwd = 2))
+})
+
+#在heatmap上注释文字信息
+decorate_heatmap_body("CRC ssGSEA", {
+    grid.text("High infiltration", (table(ind)[[1]]/2)/sum(table(ind)), 0.1, #文字所放位置的x和y，根据自己的数据调整
+              default.units = "npc", gp = gpar(fontsize = 16))
+    grid.text("Low infiltration", (table(ind)[[1]] + table(ind)[[2]]/2)/sum(table(ind)), 0.1, default.units = "npc", gp = gpar(fontsize = 16))
+})
+
+dev.off()
+```
+
+![](ssGSEA.pdf)
+
+```{r}
+sessionInfo()
+```

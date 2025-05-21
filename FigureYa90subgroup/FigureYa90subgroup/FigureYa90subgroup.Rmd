@@ -1,0 +1,207 @@
+---
+title: "FigureYa90subgroup"
+author: "小丫画图出品"
+date: "2019-4-22"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：齐德龙
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+计算HR和P value，画出森林图。
+
+![](example.png)
+
+出自<http://cancerimmunolres.aacrjournals.org/content/early/2019/03/06/2326-6066.CIR-18-0436>
+
+## 应用场景
+
+临床亚组分析。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("forestplot")
+```
+
+加载包
+
+```{r}
+library(tidyverse)
+library(survival)
+library(forestplot)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.csv，score（连续变量）和score_binary（二分类变量）至少包含其中一列，后面分别提供两种计算方式。
+
+如果你的数据已经整理成subgroup.csv的格式，就可以跳过这步，直接进入“开始画图”。
+
+```{r}
+input <- read.csv("easy_input.csv", header = T)
+head(input)
+dim(input)
+
+#过滤数据
+input <- input%>%
+  filter(OS_time_months > 0) %>%
+  filter(!is.na(OS_status)) %>%
+  filter(!is.na(AJCC_stage))
+head(input)
+dim(input)
+```
+
+## 计算HR和P value
+
+```{r}
+#' @明确亚组的信息
+summary(as.factor(input$AJCC_stage))
+summary(input$ProjectID)
+
+#' @加载function
+source("function_subgroup_survival_analysis.R")
+#' @功能解读
+#' @pdata:是输入的文件-需要包含生存数据、亚组数据、目标变量
+#' @time:生存时间(连续性变量)；
+#' @status:事件发生与否(0或1)；
+#' @variable:亚组信息所对应的列；必须是因子变量；可以同时输入多个变量；
+#' @object:目标变量；可以是连续变量或者二分类变量；
+
+#' @分类变量--如果大家发现HR的方向反了的话，只需要倒转一下就可以了：也就试试将高变成低；0变成1；
+data1 <- Subgroup_survival_analysis(pdata = input,
+                           time ="OS_time_months", status = "OS_status",
+                           variable = c("ProjectID", "AJCC_stage"), object ="score_binary" )
+data1
+
+#' @附：连续性变量的计算方法
+data2 <- Subgroup_survival_analysis(pdata = input,
+                           time = "OS_time_months", status = "OS_status",
+                           variable = c("ProjectID", "AJCC_stage"), object = "score" )
+data2
+##如果你的数据是连续变量，就把后面的data1换成data2
+
+# 计算count和percentage
+data.count <- rbind(as.data.frame(table(input$ProjectID)), as.data.frame(table(input$AJCC_stage)))
+data1$count <- data.count$Freq
+data1$percentage <- round(100 * data.count$Freq/nrow(input))
+data1
+
+#' @总体
+data3 <- getHRandCIfromCoxph(coxphData = coxph(Surv(time = input[,"OS_time_months"],
+                                           event = input[,"OS_status"])~score_binary,data = input))
+data3 <- data.frame(data3)
+data3$count <- nrow(input)
+data3$percentage <- "100"
+data3
+
+#' @合并数据，用于画森林图
+forestplot_input <- rbind(data3, data1)
+forestplot_input$mean <- (forestplot_input$CI_low_0.95 + forestplot_input$CI_up_0.95)/2
+
+#下面这段可以用代码实现，也可以输出到文件后，手动在Excel里添加。
+#改首行行名
+row.names(forestplot_input)[1] <- "All patient"
+
+#在dataset前面插入"Dataset"行
+Dataset <- data.frame(matrix("",1, 7))
+row.names(Dataset) <- "Dataset"
+colnames(Dataset) <- colnames(forestplot_input)
+
+#在stage前面插入"AJCC Stage"行
+AJCC.Stage <- data.frame(matrix("",1, 7))
+row.names(AJCC.Stage) <- "AJCC Stage"
+colnames(AJCC.Stage) <- colnames(forestplot_input)
+#具体要在哪里插入，要根据你自己的数据而定
+forestplot_input <- rbind(forestplot_input[1:1, ], Dataset, forestplot_input[2:6, ], AJCC.Stage, forestplot_input[7:nrow(forestplot_input), ])
+
+# 保存到文件
+write.csv(forestplot_input, "subgroup.csv", quote = F)
+```
+
+## 开始画图
+
+从“FigureYa6森林图”改写而来。
+
+重点修改`hrzl_lines`参数里的第三行，画最下面一条黑线，""中数字为nrow(data)+5，此处是12行 + 5 = 17
+
+```{r}
+#读取输入文件，输入数据一般包括分类、样本数、风险比及置信区间（上限及下限）等，需要注意的是输入文件的布局(包括文字缩进)将展示在最后结果中，所见即所得。
+data <- read.csv("subgroup.csv")
+head(data)
+dim(data)[1] + 5 #把这个数字写入hrzl_lines参数的第三行
+
+np <- ifelse(!is.na(data$count), paste(data$count," (",data$percentage,")", sep=""), NA)
+head(np)
+
+#将要在图中展示的文本
+tabletext <- cbind(c("\nSubgroup",NA,NA, data$X, NA),
+                   c("No. of\nPatients (%)", NA, NA, np, NA),
+                   c("Hazard Ratio\n(95% CI)", NA, NA, ifelse(!is.na(data$count), paste(round(data$mean, 2), " (", round(data$CI_low_0.95, 2), " to ", round(data$CI_up_0.95, 2),")", sep=""), NA), NA),
+                   c("P-value", NA, NA, ifelse(data$P < 0.001, "<0.001", round(data$P,3)), NA))
+tabletext
+
+#用默认参数画图
+forestplot(labeltext=tabletext,
+           mean=c(NA,NA,1,data$mean,NA),
+           lower=c(NA,NA,1,data$CI_low_0.95,NA),
+           upper=c(NA,NA,1,data$CI_up_0.95,NA))
+
+#默认参数不够美，仔细读说明文档，调整参数，就能画出paper里的样子
+pdf("subgroup.pdf",width=12,height = 7)#新建PDF文件，准备写入图形
+forestplot(labeltext=tabletext, #图中的文本
+           mean=c(NA,NA,1,data$mean,NA),#HR
+           lower=c(NA,NA,1,data$CI_low_0.95,NA), #95%置信区间下限
+           upper=c(NA,NA,1,data$CI_up_0.95,NA),#95%置信区间上限
+           #title="Hazard Ratio",
+           graph.pos=3,#图在表中的列位置
+           graphwidth = unit(.4,"npc"),#图在表中的宽度比例
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石
+           col=fpColors(box="steelblue", lines="black", zero = "black"),#box颜色
+           boxsize=c(NA,NA,NA,data$percentage,NA)/75,#box大小根据样本量设置
+           lwd.ci=2,ci.vertices.height = 0.1,ci.vertices=TRUE,#置信区间用线宽、高、型
+           zero=1,#zero线横坐标
+           lwd.zero=2,#zero线宽
+           grid = structure(c(data[1,]$mean), gp = gpar(col = "black", lty=2,lwd=2)),#虚线(可多条)及其横坐标、颜色、线宽
+           #xticks = c(round(min(data$mean),1), 1,round((max(data$mean)-min(data$mean)/2),1), round(max(data$mean),1)), #横坐标刻度根据具体情况设置
+           lwd.xaxis=2, #X轴线宽
+           xlab="Hazard Ratio",#X轴标题
+           hrzl_lines=list("3" = gpar(lwd=2, col="black"),#第三行顶部加黑线，引号内数字标记行位置
+                           #"4" = gpar(lwd=60,lineend="butt", columns=c(1:4), col="#99999922"),#加阴影，弱项不建议使用
+                           "17" = gpar(lwd=2, col="black")),#最后一行底部加黑线,""中数字为nrow(data)+5
+           txt_gp=fpTxtGp(label=gpar(cex=1.25),#各种字体大小设置
+                          ticks=gpar(cex=1.25),
+                          xlab=gpar(cex = 1.25),
+                          title=gpar(cex = 1.25)),
+           #is.summary = c(T,rep(F,27)),#首行字体类型设置
+           lineheight = unit(.75,"cm"),#固定行高
+           #align=c("l","c","c"),#每列文字的对齐方式，偶尔会用到
+           #cex=10,
+           colgap = unit(0,"cm"),#列间隙
+           mar=unit(rep(1.25, times = 4), "cm"),#图形页边距
+           new_page = F#是否新页
+           )
+dev.off()
+```
+
+![](subgroup.pdf)
+
+```{r}
+sessionInfo()
+```

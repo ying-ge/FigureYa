@@ -1,0 +1,120 @@
+---
+title: "FigureYa17 WGCNA_heatmap"
+author: "小丫画图出品"
+date: "2018-6-30"
+output: html_document
+---
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+用R代码画出paper里WGCNA module的heatmap
+
+![](example.png)
+
+出自<https://www.cell.com/cell/abstract/S0092-8674(18)30511-7>
+
+## 使用场景
+
+WGCNA找出了gene module，展示各module的基因在各组样本中的表达谱变化。
+
+## 输入数据的预处理
+
+用FigureYa15WGCNA_module输出了各个gene module内的基因表达量，每个module保存在一个csv文件中，位于当前文件夹。
+
+WGCNA已经按照共表达特征给基因分成了多个module，因此，这里不需要再做聚类，直接按照module内基因的数量给基因排序，再用热图的方式可视化。
+
+如果你的数据已经保存成像`easy_input.csv`的格式，就可以跳过这步，直接进入“开始画图”。
+
+```{r}
+fnames<-Sys.glob("*.csv")
+fnames
+```
+
+读取这些module，合并。
+
+```{r}
+fdataset<-lapply(fnames,read.csv)
+names(fdataset) <- fnames
+
+library(plyr)
+result <- ldply(fdataset, data.frame)
+head(result)
+
+df<-result[,2:22]
+df$module<-unlist(strsplit(result$.id,split = ".csv"))
+head(df)
+```
+
+按照module内基因数量从多到少，给基因排序。
+
+```{r}
+#先按module内基因的数量为module排序
+module.num<-table(df$module)
+module.num.sort<-module.num[order(module.num,decreasing =TRUE)]
+module.num.sort
+keys<-names(module.num.sort)
+keysDF<-data.frame(module=keys,order=1:length(keys))
+keysDF
+
+#再按这个module的顺序为基因排序
+df.merged<-merge(df,keysDF,by.x = 'module',by.y = 'module',all.x = T, all.y = F)
+df.sort <- df.merged[order(df.merged$order),]
+write.table(df.sort[1:22],"easy_input.txt",row.names = F, quote = F)
+```
+
+## 开始画图
+
+```{r}
+#读取带有module信息的基因表达量文件
+df.exp<-read.table("easy_input.txt",header = T, as.is = T)
+row.names(df.exp)<-df.exp$X
+head(df.exp)
+dim(df.exp)
+
+library(pheatmap)
+#设置sample的分组
+annotation_col = data.frame(
+  type = factor(rep(c("BALB","C57","NOD","PWK","SPRET"),c(4,4,4,4,4))),
+  treatment = factor(rep(c("notx","notx","KLA","KLA"),5))
+)
+rownames(annotation_col) = colnames(df.exp[,3:22])
+
+#设置基因的分组，也就是module
+annotation_row = data.frame(df.exp$module)
+rownames(annotation_row) = df.exp$X
+colnames(annotation_row)<-"WGCNA.module"
+
+#为sample和基因的分组设置颜色
+#module的名字作为module的颜色
+module.name<-names(table(df.exp$module))
+names(module.name)<-module.name
+
+ann_colors = list(
+  treatment = c(notx = "black", KLA = "white"),#给两种处理设置颜色
+  type = c(BALB = "orange", C57 = "#007C46", NOD = "#00D0D1", PWK = "#333D7E", SPRET = "#A25BAA"),
+  WGCNA.module = module.name
+)
+
+#画heatmap
+pheatmap(df.exp[,3:22],cellwidth = 12, cellheight = 0.2, fontsize = 8,
+         scale="row", #为基因做scale
+         cluster_rows=F,cluster_cols=F,#不聚类
+         color = colorRampPalette(c("#00A9E0", "white", "firebrick3"))(50),
+         show_colnames=F,show_rownames =F,
+         annotation_col = annotation_col,
+         annotation_row = annotation_row,
+         annotation_colors = ann_colors,
+         border_color = "NA",
+         filename = "heatmap.pdf")
+```
+![](heatmap.pdf)
+
+```{r}
+sessionInfo()
+```

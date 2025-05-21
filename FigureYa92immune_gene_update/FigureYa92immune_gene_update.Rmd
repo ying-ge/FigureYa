@@ -1,0 +1,204 @@
+---
+title: "FigureYa92immune_gene_update"
+author: "小丫画图出品"
+date: "2020-9-3"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：果子，欢迎关注“果子学生信”公众号：[燃爆！那个碉堡的TCGA可视化网站GEPIA升级了](https://mp.weixin.qq.com/s/tWJkLVDt1mx5COduw7H35w)
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+计算免疫浸润跟基因的相关性，画图。
+
+![](example1.png)
+
+出自<https://mp.weixin.qq.com/s/tWJkLVDt1mx5COduw7H35w>
+
+当初众筹是因为果子的idea，用这种方式展示两个转录本和免疫浸润的关系，发布在果子学生信公众号上<https://mp.weixin.qq.com/s/tWJkLVDt1mx5COduw7H35w>。小伙伴看到了也想画，我们就众筹了。后来有小伙伴用这个图发表了文章，供参考：
+
+![](example2.png)
+
+出自<https://s3-us-west-1.amazonaws.com/paperchase-aging/pdf/GpDPdC6dMaFhzrxao.pdf>
+
+Figure  5.  Validation  of  hub  genes  and  PPI  map  construction.  (A)  Relationship  between  10  hub  genes  expression  and  CD8+  T  cell  infiltration  level;  P  <  0.05  is  considered  statistically  significant.  (B)  Scatter  plot  of  CCL5 expression  and  CD8+ T  cell  infiltration  level.  
+
+![](example3.png)
+
+出自<https://link.springer.com/article/10.1007/s00109-020-01908-9>
+
+Fig. 3 Construction of a prognostic immune-related gene signature. g ssGSEA revealed the most significant hallmarks correlated with the immune-related signature.
+
+# 应用场景
+
+评价基因对免疫浸润的影响，甚至可以写成循环，批量筛选出影响免疫浸润的候选基因。
+
+不仅限于基因跟免疫浸润之间的关系，还可以把免疫细胞矩阵替换为基因表达矩阵，计算基因跟基因之间的关系，找出并可视化共表达基因；或者把基因表达矩阵替换为转录本或临床信息，用于分析不同转录本、甚至临床指标跟免疫浸润的关系。
+
+在“小丫画图”公众号回复“R2”查看类似的图在文章里的用法。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("ggstatsplot")
+```
+
+加载包
+
+```{r}
+library(ggstatsplot)
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+要求两个文件的样本名一致
+
+- ssGSEA_output.csv，免疫细胞矩阵，列是免疫细胞，行是样本，由FigureYa71ssGSEA产生。在FigureYa71ssGSEA读取文件的命令行里添加`check.names = F`，避免行名TCGA id的“-”变成“.”。列也可以是基因，即基因表达矩阵。
+- easy_input_expr.txt，基因表达矩阵，列是样本，行是基因。行也可以是转录本，甚至是临床信息。另外，作者还提供了从TCGA表达矩阵（例如not_easy_input_expr.txt）提取某一基因表达谱的代码，见pick1gene.R文件。
+
+```{r}
+rm(list = ls())
+
+#免疫细胞矩阵
+tcga_gsva <- read.csv("ssGSEA_output.csv",row.names = 1)
+tcga_gsva[1:3,1:3]
+#行名TCGA id以-为间隔，本例中是逗号间隔，所以需要gsub批量转换。
+#如果你的免疫细胞矩阵行名跟基因表达矩阵一致，就可以忽略下面这行
+rownames(tcga_gsva) <- gsub("\\.","-",rownames(tcga_gsva))
+tcga_gsva[1:3,1:3]
+
+#基因表达矩阵
+tcga_expr <- read.table("easy_input_expr.txt", row.names = 1, header = T, check.names = F)
+tcga_expr[,1:3]
+
+#用表达量的样本名称，调整免疫矩阵的样本顺序
+#这一步并不是必须，这里只是保证计算相关性的时候一一对应
+tcga_gsva <- tcga_gsva[colnames(tcga_expr),]
+
+index <- rownames(tcga_expr) #基因名
+y <- as.numeric(tcga_expr)
+head(y)
+```
+
+# 基因跟免疫细胞的相关性
+
+进行spearman相关性分析，返回相关性系数和p值
+
+```{r}
+colnames <- colnames(tcga_gsva)
+data <- data.frame(colnames)
+for (i in 1:length(colnames)){
+  test <- cor.test(as.numeric(tcga_gsva[,i]),y, method="spearman")
+  data[i,2] <- test$estimate                                            
+  data[i,3] <- test$p.value
+}
+names(data) <- c("symbol","correlation","pvalue")
+head(data)
+
+#输出到文件
+write.table(data, "output_cor.txt", sep = "\t", quote = F, row.names = F)
+```
+
+## 开始画图
+
+```{r,message=FALSE, warning=FALSE}
+#如果你已经算好了correlation，只是想画棒棒糖图，那就套用output_cor.txt的格式，从这里读入
+data <- read.table("output_cor.txt", sep = "\t", header = T)
+head(data)
+
+data %>% 
+  #filter(pvalue <0.05) %>% # 如果不想把p值大于0.05的放在图上，去掉最前面的#号
+  ggplot(aes(correlation,forcats::fct_reorder(symbol,correlation))) +
+  geom_segment(aes(xend=0,yend=symbol)) +
+  geom_point(aes(col=pvalue,size=abs(correlation))) +
+  scale_colour_gradientn(colours=c("#7fc97f","#984ea3")) +
+  #scale_color_viridis_c(begin = 0.5, end = 1) +
+  scale_size_continuous(range =c(2,8))  +
+  theme_minimal() +
+  ylab(NULL)
+
+ggsave("gene_Xcell.pdf")
+```
+
+# 基因跟1种免疫细胞的相关性
+
+从上面的图可以看出基因跟不同免疫细胞的相关性有差异，可以进一步挑一个相关性最强的免疫细胞，例如TReg，画出基因表达跟免疫细胞浸润在每个样本里的分布。
+
+```{r}
+imucell <- "TReg"
+# 合并免疫数据和表达量数据
+plot_df <- data.frame(gene=y,imucell=tcga_gsva[,imucell])
+head(plot_df)
+```
+
+## 用ggscatterstats包画图
+
+图好看，但是速度很慢。
+
+```{r}
+#pdf("gene_1cell_ggscatterstats.pdf")
+ggscatterstats(data = plot_df,
+               x = gene,
+               y = imucell,
+               centrality.para = "mean",
+               margins = "both",
+               
+               xfill = "#CC79A7",
+               yfill = "#009E73",
+               marginal.type = "histogram")
+#dev.off
+```
+
+## 用ggplot2画图
+
+先定义一个函数，返回计算的结果，最终会作为标题放在图上方，他接受两个参数，就是作图文件的两列，分别是免疫数据和表达量数据。
+
+```{r}
+#先写个函数
+corr_eqn <- function(x,y,digits=2) {
+  test <- cor.test(x,y,method="spearman")
+  paste(paste0("n = ",length(x)),
+        paste0("r = ",round(test$estimate,digits),"(Spearman)"),
+        paste0("p.value= ",round(test$p.value,digits)),
+        sep = ", ")
+}
+#可以测试一下
+corr_eqn(plot_df$gene,plot_df$imucell)
+
+#开始画图
+plot_df %>% 
+  ggplot(aes(gene,imucell)) +
+  geom_point(col="#984ea3") +
+  geom_smooth(method=lm, se=T,na.rm=T, fullrange=T,size=2,col="#fdc086") +
+  geom_rug(col="#7fc97f") +
+  theme_minimal() +
+  xlab(paste0(index," (TPM)")) +
+  ylab(paste0(imucell," (immune infiltration)")) +
+  labs(title = paste0(corr_eqn(plot_df$gene,plot_df$imucell))) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("gene_1cell_ggplot2.pdf")
+```
+
+```{r}
+sessionInfo()
+```

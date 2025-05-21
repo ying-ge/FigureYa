@@ -1,0 +1,206 @@
+---
+title: "FigureYa88DAVIDkappa"
+author: "小丫画图出品"
+date: "2019-4-15"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+富集分析得到太多term，其中好多还是相似的，怎样合理的合并？clusterProfiler有一个simplify函数，能给富集分析结果瘦身by removing redundancy of enriched GO terms，但有时瘦的不够多。
+
+FigureYa80GOclustering用GOSemSim计算GO term之间的相似性，但是只能合并GO注释，对其他来源的注释无能为力。
+
+想要合并来源于不同数据库的term，参考DAVID的方法。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/nature22973>
+
+**方法探讨：**
+
+DAVID给gene或annotation做分类的原理：<https://david.ncifcrf.gov/helps/functional_classification.html>，包括kappa的计算和heuristic fuzzy partition algorithm。
+
+H Ma等写了R代码来计算Kappa value：[Use of DAVID algorithms for clustering custom annotated gene lists in a non-model organism, rainbow trout](https://bmcresnotes.biomedcentral.com/articles/10.1186/s13104-018-3154-7)。作者在补充材料里提供了R代码：[Additional file 1. R_script for clustering.](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5781295/bin/13104_2018_3154_MOESM1_ESM.txt)，包含两部分，第一部分：计算Kappa value，第二部分：设置kappa的cutoff筛选。
+
+基于这篇文章提供的代码里的第一部分来计算Kappa value。然后借助ggtree展示各个term之间的关系，并实现例文中相似term的标注效果。关于ggtree的问题，请前往Y叔知识星球biobabble讨论。
+
+## 应用场景
+
+基于term里的基因间overlap来衡量term之间的相似性。
+
+计算Kappa value，可用于找相似的注释、给相似的注释归类。
+
+原理见：<https://david.ncifcrf.gov/helps/linear_search.html#kappa>
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("ggtree", version = "3.8")
+```
+
+加载包
+
+```{r}
+library(ape)
+library(ggtree)
+library(scales)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.csv，注释信息跟Gene ID的对应关系。至少包含两列：
+
+- 第一列：GO、KEGG等无所谓什么来源的注释term；
+- 第二列：Gene ID，此处是ENTREZ ID，也可以是gene symbol等无所谓什么来源的基因ID。
+- 后面画热图时需要的logFC、Pvalue、zscore等信息也放在这里。如果要多组富集分析结果做对比，也都放到这里。多组合并的方法可参考FigureYa80GOclustering。
+
+```{r}
+D <- read.csv("easy_input.csv")
+head(D)
+```
+
+## 计算Kappa value，用它来衡量注释之间的相似性
+
+```{r}
+D <- D[order(D$Gene_identifier),]
+Total_N <- nrow(D)
+D_unique <- D[!duplicated(D$Gene_identifier),] #Extract unique gene name
+N <- nrow(D_unique) #gene
+Cat_unique <- D[!duplicated(D$Annotation_information),] #Extract unique annotation
+M <- nrow(Cat_unique) #注释
+
+paste ("Total number of rows in your input file:", Total_N)
+paste ("Total number of unique gene identifiers:", N)
+paste ("Total number of unique gene annotation information:", M)
+
+#create a matrix for kappa values
+Kappa_matrix <- matrix(0, M+1, M+1) 
+for (i in 1:M){
+  Kappa_matrix[i+1,1]=Cat_unique[i,1]
+  Kappa_matrix[1,i+1]=Cat_unique[i,1]
+}
+
+#行为注释，列为基因
+Gene_Cat_matrix <- matrix(0, M+1, N+1)
+for (i in 1:M){
+  Gene_Cat_matrix[i+1,1]=Kappa_matrix[i+1,1]
+}
+for (j in 1:N){
+  Gene_Cat_matrix[1,j+1]=D_unique[j,2]
+}
+rm(D_unique, Cat_unique)
+
+# Generating two-way table:
+for (i in 1:M){
+  D1 <- subset(D, Annotation_information == Gene_Cat_matrix[i+1,1])
+  N1 <- nrow(D1)
+  for (j in 1:N){
+    for (k in 1:N1){
+      if (Gene_Cat_matrix[i+1,1]==D1[k,1] && Gene_Cat_matrix[1,j+1] == D1[k,2]){
+        Gene_Cat_matrix[i+1,j+1]=1}
+      }
+    #print (c(i+1,j+1))
+    }}
+rm(D1)
+
+# Calculating kappa values:
+for(i in 2:(M+1)){
+  for (j in 2:(M+1)){
+    if (i==j){
+      Kappa_matrix[i,j]=1}
+    if(i<j){
+      a <- 0;b <- 0;c <- 0;d <- 0
+      sum1 <- sum(as.numeric(Gene_Cat_matrix[i,2:(N+1)]))
+      sum2 <- sum(as.numeric(Gene_Cat_matrix[j,2:(N+1)]))
+      for (k in 2:(N+1)){
+        if (Gene_Cat_matrix[i,k]==1 && Gene_Cat_matrix[j,k]==1){
+          a <- a+1}
+        }
+      b <- sum1-a; c <- sum2-a; d <- N+a-sum1-sum2
+      Kappa_matrix[i,j] <- ((a+d)*N-(a+b)*(a+c)-(c+d)*(b+d))/(N^2-(a+b)*(a+c)-(c+d)*(b+d))
+      Kappa_matrix[j,i]=Kappa_matrix[i,j]
+      #print (c(i,j))
+    }
+  }
+}
+write.table(Kappa_matrix,"kappa_matrix.txt", sep="\t", quote = F, col.names = F, row.names = F)
+```
+
+## 开始画图
+
+下面的画图代码跟FigureYa80GOclustering相似。
+
+```{r, fig.width=6, fig.height=8}
+ego.sim <- read.table("kappa_matrix.txt", sep="\t", header = T, row.names = 1)
+tree <- nj(as.dist(1-ego.sim))
+p <- ggtree(tree) + geom_tiplab() + #写注释term
+  geom_text2(aes(subset=!isTip, label=node), hjust=-.3) + #写node编号
+  coord_cartesian(xlim=c(-.1,1.3)) #左右两侧留出合适的空间
+p
+```
+
+```{r, fig.width=12, fig.height=8}
+#结合树的结构和背景知识，此处把term分为4类，记下每一类的node编号，写在node参数里
+node <- c(41,39,46,40)
+gtree <- groupClade(tree, .node=node)
+#用不同颜色展示不同类term
+pbase <- ggtree(gtree, 
+                aes(color=group)) #每类用不同颜色画树枝
+
+#给4类term分别总结出一个短语，作为分类名，标在树的旁边
+fontsize <- 4 #字的大小
+offset <- .8 #分类名向右移动到热图右侧，也可以设为0.3，让它显示在热图跟树之间
+pnode <- pbase + 
+  #如果不想显示每个term，就不运行这行，同时offset <- 0
+  geom_tiplab(size=4, align=TRUE) + #germ对齐
+  geom_cladelabel(node=node[1], align=TRUE, 
+                  #文字颜色跟树枝颜色一致，也可以删掉下面这行，就会像例文那样全是黑色 
+                  color = hue_pal()(length(node)+1)[2], 
+                  fontsize = fontsize, offset=offset, label="pathway1") +
+  geom_cladelabel(node=node[2], align=TRUE, color = hue_pal()(length(node)+1)[3], fontsize = fontsize, offset=offset, label="pathway2") +
+  geom_cladelabel(node=node[3], align=TRUE, color = hue_pal()(length(node)+1)[4], fontsize = fontsize, offset=offset, label="pathway3") +
+  geom_cladelabel(node=node[4], align=TRUE, color = hue_pal()(length(node)+1)[5], fontsize = fontsize, offset=offset, label="pathway4") +
+  #如果有更多分类，就继续往下粘贴
+  
+  coord_cartesian(xlim=c(-.1,1.5)) 
+
+# 此处把示例数据的adj_pval、zscore画在树形结构右侧
+# 实际操作时你可以把多组数据的同一种统计量并排画在右侧做对比
+ego.m <- unique(D[,c(1,4:5)])
+rownames(ego.m) <- ego.m$Annotation_information
+ego.m$Annotation_information <- NULL
+head(ego.m)
+
+gheatmap(pnode, ego.m, 
+         offset=.7, #热图向右移动到合适的位置
+         width=0.12, #heatmap格子的宽度
+         colnames_angle=90, hjust=0, #组的名字竖着写
+         low = "red", high = "white") 
+
+#保存到文件
+ggsave("DAVIDkappa.pdf", width = 12, height = 8)
+```
+
+```{r}
+sessionInfo()
+```

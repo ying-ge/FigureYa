@@ -1,0 +1,251 @@
+---
+title: "FigureYa70mutationEvents"
+author: "小丫画图出品"
+date: "2019-1-20"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Byron
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+co-occurrence/mutual exclusivity分析，画出图d。
+
+Co-occurrence/mutual exclusivity -- Only mutations seen in **at least 10 patients** were kept. The **DISCOVER method** was used to determine significant mutual exclusivity and co-occurrence. A plot of the co-occurrences was generated using corrplot with the **odds ratio of the pairwise co-occurrence** used to color and scale the circle sizes.
+
+![](https://media.springernature.com/lw900/springer-static/image/art%3A10.1038%2Fs41586-018-0623-z/MediaObjects/41586_2018_623_Fig1_HTML.png)
+
+出自<https://www.nature.com/articles/s41586-018-0623-z>
+
+## 应用场景
+
+用TCGA的基因突变数据分析Co-occurrence/mutual exclusivity。
+
+用corrplot同时展示相关性和显著性。
+
+corrplot这个包对相关性的更多展示方式可参考<http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram>。
+
+## 环境设置
+
+```{r}
+#使用国内镜像安装包
+#options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+#options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+#install.packages("Cairo")
+#安装discover包
+#options(repos=c(getOption("repos"), "http://ccb.nki.nl/software/discover/repos/r"))
+#install.packages("discover")
+
+library(reshape2)
+library(RColorBrewer)
+library(Cairo)
+library(discover)
+library(readr)
+library(corrplot)
+library(openxlsx)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 参数设置
+
+```{r}
+# 你感兴趣的癌症，此处以BRCA为例
+target_tumor <- "BRCA" 
+```
+
+## 输入文件的准备
+
+如果你的数据已经保存为“easy_input_mutation.csv”，就可以跳过这步，直接进入“Co-occurrence/mutual exclusivity分析”。
+
+如果只为画图，就直接进入“开始画图”。
+
+例文没有提供基因层面的突变数据，此处以TCGA的BRCA为例，用DISCOVERY method进行co-occurrence和mutual exclusivity分析。
+
+### 基因层面的突变数据下载
+
+从UCSC xena的TCGA Pan-Cancer (PANCAN) (39 datasets)<https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>，下载两个文件：
+
+- mc3.v0.2.8.PUBLIC.nonsilentGene.xena：somatic mutation (SNP and INDEL) - Gene level non-silent mutation。点击链接下载：<https://pancanatlas.xenahubs.net/download/mc3.v0.2.8.PUBLIC.nonsilentGene.xena.gz>。下载后解压缩，把mc3.v0.2.8.PUBLIC.nonsilentGene.xena文件保存到当前文件夹。里面包含TCGA所有癌症类型，用下面的代码提取你感兴趣的癌症的突变数据。
+
+- TCGA_phenotype_denseDataOnlyDownload.tsv：phenotype - sample type and primary disease。点击链接下载：<https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz>
+
+- TCGA的癌症全称和缩写的对应关系，参照GEPIA help的Differential analysis：<http://gepia.cancer-pku.cn/help.html>，整理成samplepair.txt文件
+
+```{r}
+#library(readr)
+#数据量很大，读入可能需要一段时间
+mutationinfo <- read_tsv(file = "mc3.v0.2.8.PUBLIC.nonsilentGene.xena")
+mutationinfo[1:5,1:5]
+
+samplepair <- read.delim("samplepair.txt",as.is = T)
+gtexpair <- samplepair[,c(1,2,5)]
+gtexpair
+#以TCGA的缩写为GTEx的组织命名
+gtexpair$type <- paste0(gtexpair$TCGA,"_normal_GTEx")
+gtexpair$type2 <-"normal"
+gtextcga <- gtexpair[,c(1,3:5)] #筛掉Detail列
+colnames(gtextcga)[1:2] <- c("tissue","X_primary_site")
+head(gtextcga)
+#为GTEx的sample标出组织
+gtexcase <- read.delim(file="GTEX_phenotype.tsv",header=T,as.is = T)
+colnames(gtexcase)[1] <- "sample"
+gtexcase2tcga <- merge(gtextcga,gtexcase,by="X_primary_site")
+gtextable <- gtexcase2tcga[,c(5,2:4)]
+head(gtextable)
+tissue <- gtexpair$TCGA
+names(tissue) <- gtexpair$Detail
+
+tcgacase <- read.delim(file="TCGA_phenotype_denseDataOnlyDownload.tsv",header=T,as.is = T)
+tcgacase$tissue <- tissue[tcgacase$X_primary_disease]
+tcgacase$type <- ifelse(tcgacase$sample_type=='Solid Tissue Normal',paste(tcgacase$tissue,"normal_TCGA",sep="_"),paste(tcgacase$tissue,"tumor_TCGA",sep="_"))
+tcgacase$type2 <- ifelse(tcgacase$sample_type=='Solid Tissue Normal',"normal","tumor")
+tcgatable<-tcgacase[,c(1,5:7)]
+head(tcgatable)
+```
+
+### 提取你感兴趣的癌症的突变数据
+
+```{r}
+library(data.table)
+target_sample <- tcgacase[tcgacase$tissue == target_tumor & tcgatable$type2 == "tumor",]
+
+target_mutationinfo <- mutationinfo[,colnames(mutationinfo) %in% target_sample$sample]
+head(target_mutationinfo)
+#table(colnames(mutationinfo) %in% target_sample$sample)
+target_mutationinfo$sample = mutationinfo$sample
+target_mutationinfo = target_mutationinfo[complete.cases(target_mutationinfo[,"sample"]),]
+target_mutationinfo = as.data.frame(target_mutationinfo)
+rownames(target_mutationinfo) = target_mutationinfo$sample
+target_mutationinfo = target_mutationinfo[,-length(target_mutationinfo)]
+target_mutationinfo[1:5,1:5]
+
+#保存到文件
+#write.csv(target_mutationinfo, "easy_input_mutation.csv",quote = F)
+#此处保存局部，用于查看文件格式
+write.csv(target_mutationinfo[,1:5], "easy_input_mutation.csv",quote = F)
+```
+
+## Co-occurrence/mutual exclusivity分析
+
+DESCOVERY method，用R版本的DESCOVERY计算co-occurrence和mutual exclusivity。
+
+参考资料：<https://github.com/NKI-CCB/DISCOVER>
+
+<http://ccb.nki.nl/software/discover/doc/r/discover-intro.html>
+
+下面使用Discover包进行co-occurrence和mutual exclusivity分析
+
+需要引用的文献：<https://genomebiology.biomedcentral.com/articles/10.1186/s13059-016-1114-x>
+
+```{r}
+# 输入文件：每个基因在每个sample里是否发生突变，0为未突变，1为突变。每行一个基因，每列一个sample。
+#target_mutationinfo <- read.csv("easy_input_mutation.csv", row.names = 1)
+#target_mutationinfo[1:5,1:5]
+
+library(discover)
+#step1 估计背景矩阵，这一步会比较花时间
+events <- discover.matrix(target_mutationinfo)
+
+#step2 选择至少在25个肿瘤样本中都有突变的基因
+subset <- rowSums(target_mutationinfo) > 25
+
+#step3 进行pairwise test，这一步用来进行mutual exclusivity的运算。
+result.mutex <- pairwise.discover.test(events[subset, ],alternative=c("less"))
+result.mutex
+print(result.mutex, fdr.threshold=0.05)
+result = as.data.frame(result.mutex)
+write.csv(result,file = "Target_cancer_discover_less.csv")
+
+#进行co-occurence的计算，加入参数alternative=c("greater")
+result.mutex <- pairwise.discover.test(events[subset, ],alternative=c("greater"))
+print(result.mutex, fdr.threshold=0.05)
+result = as.data.frame(result.mutex)
+write.csv(result,file = "Target_cancer_discover_greater.csv")
+```
+
+例文的图中有两个输入：P value和odds ratio。
+
+Figure legend of Figure 1d.d, Co-occurrence or exclusivity of the most recurrent mutational events in the Beat AML cohort (n = 531 patients) were assessed using the DISCOVER method. The dot plot shows the odds ratio of co-occurrence (blue) or exclusivity (red) using colour-coding and circle size as well as asterisks that indicate FDR-corrected statistical significance. *P < 0.1; **P < 0.05; ***P < 0.01.
+ 
+And the discription in Methods:
+Co-occurrence and mutual exclusivity. Only mutations seen in at least 10 patients were kept. The DISCOVER41 method was used to determine significant mutual exclusivity and co-occurrence. A plot of the co-occurrences was generated using corrplot84 with the odds ratio of the pairwise co-occurrence used to colour and scale the circle sizes.
+
+然而DESCOVER并不输出odds ratio，原文未描述odds ratio的计算方法，联系通讯作者未得到回复。欢迎对odds ratio的计算感兴趣的小伙伴来小丫画图知识星球或微信群里讨论。
+
+## 例文的原图复现
+
+### 输入文件
+
+输入数据来源：例文的Source Data Fig. 1，<https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-018-0623-z/MediaObjects/41586_2018_623_MOESM4_ESM.xlsx>，Tab C。
+
+```{r}
+# 读入文件第3个sheet中的我们需要的列
+library(openxlsx)
+input <- read.xlsx("41586_2018_623_MOESM4_ESM.xlsx", sheet = 3, cols=c(1,2,5,6), startRow = 1)
+# 保存到文件
+write.csv(input, "easy_input.csv", quote = F)
+```
+
+easy_input.csv，只需要4列，前两列是基因名，第三列决定点的大小和“***”符号（此处是p value），第四列决定点的颜色（此处是odd ratio）。根据自己的需要填后两列的数值。
+
+转换成两个矩阵inputdata和input_pvalue，分别表示Odd_ratio和p值的矩阵
+
+```{r}
+input <- read.csv("easy_input.csv", row.names = 1)
+head(input)
+
+# Odd_ratio，点的颜色
+input_data = input[,c(1:2,4)] #选择Gene1,Gene2,odd_Ratio列
+input_data = dcast(input_data, Gene1 ~ Gene2)
+rownames(input_data) = input_data$Gene1
+input_data = input_data[,-1]
+input_data = as.matrix(input_data)
+input_data[1:5,1:5]
+
+# pvalue，点的大小和***
+input_pvalue = input[,c(1:3)]
+input_pvalue = dcast(input_pvalue, Gene1 ~ Gene2)
+rownames(input_pvalue) = input_pvalue$Gene1
+input_pvalue = input_pvalue[,-1]
+input_pvalue = as.matrix(input_pvalue)
+rownames(input_pvalue) = colnames(input_pvalue)
+input_pvalue[1:5,1:5]
+```
+
+### 开始画图
+
+```{r}
+CairoPDF("mutationplot.pdf")
+corrplot(input_data, #对于一般的矩阵，必须使用is.corr = FALSE
+         type = "upper", #只显示上三角
+         order="hclust",
+         col=brewer.pal(n=8, name="RdBu"),
+         tl.col="black", #文字颜色
+         tl.cex = 0.5, #文字大小
+         tl.srt = 90, #文字旋转角度
+         is.corr = FALSE, #非相关系数矩阵
+         diag = F,  #不展示相关系数
+         p.mat = input_pvalue, #p值的矩阵
+         sig.level = c(.001, .05, .1), #显著水平
+         insig = c("label_sig"), #显著水平以***、**、*表示
+         pch.cex = 0.5, #标注的p值大小
+         font = 3) #斜体
+dev.off()
+```
+
+![](mutationplot.pdf)
+
+```{r}
+sessionInfo()
+```

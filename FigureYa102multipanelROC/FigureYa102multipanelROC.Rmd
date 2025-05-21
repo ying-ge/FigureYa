@@ -1,0 +1,141 @@
+---
+title: "FigureYa102multipanelROC"
+author: "小丫画图出品"
+date: "2019-6-13"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+FigureYa24ROC能拿到4个miRNA的ROC，每个miRNA一条线。这里的Figure5E是把上述4条miRNA都一起进行预测，Figure6根据4个miRNA建立logistic regression model，然后对不同病理分期的肿瘤阶段进行预测。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/bjc2014489>
+
+Figure 5. Receiver operating characteristic (ROC) curves for the ability of the four individual miRNAs (A–D) and **the 4-miRNA panel (E)** to differentiate the CAC patients from the control group in the training phase. Comparison of ROC curves for the ability of the 4-miRNA panel and carcinoembryonic antigen (CEA) (F) to differentiate the CAC patients from the control group in the validation phase.
+
+**对图的解读：**其中Figure 5E是多变量panel下逻辑回归的ROC，Figure 5F是该模型在验证集中的应用。Figure 5和6没有本质区别，只是响应变量改变了，模型没有变化。这里将提供构建multiple-biomarker的predictive model的方法，用ROC评价，及其在验证集中的performance，画出对比的ROC图。
+
+## 应用场景
+
+利用训练集构建多变量二分类逻辑回归模型，将模型应用于测试集计算预测概率，比较二者的ROC，画图。
+
+如果需要计算并绘制单个biomarker的ROC，请参考FigureYa24ROC。
+
+## 环境设置
+
+```{r}
+library(pROC)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input_train.txt，easy_input_test.txt，训练集和测试集，格式一致。第一列是样本ID，第二列为分组（二分类），之后各列是基因表达量。不仅限于基因表达量，还可以是其他量化指标。
+
+```{r}
+# 读取训练集
+train_df <- read.table("easy_input_train.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+train_df[1:3,1:3]
+
+# 读取测试集
+test_df <- read.table("easy_input_test.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+test_df[1:3,1:3]
+```
+
+## 利用训练集构建多变量二分类逻辑回归模型
+
+```{r}
+n <- colnames(train_df) # 取所有变量名
+f <- as.formula(paste('Group ~', paste(n[!n %in% 'Group'], collapse = ' + '))) # 外部生成公式，这里是全变量公式
+
+# 构建模型
+#二分类问题，使用binomial
+logit_model <- glm(f,data=train_df, family = binomial) 
+#若不要全变量，可自行选择纳入逻辑回归的变量，这里选择CD86和FOS
+#logit_model <- glm(Group ~ CD86 + FOS, data=train_df,family = binomial)   
+
+# 根据例文采用逐步回归筛选变量
+logit_step <- step(logit_model, direction = 'backward') #这里采用向后逐步回归，也可以采用both或forward，也可以使用LASSO等其他方法筛选变量
+summary(logit_step)
+
+# 代回训练集评估模型效能
+pred_train <- data.frame(Prob = round(predict(logit_step, newdata = train_df,type="response"),4), GoldStandard = train_df$Group, stringsAsFactors = F)
+
+# 评价模型并计算训练集ROC
+roc.train <- plot.roc(pred_train[,2], pred_train[,1], ylim=c(0,1),xlim=c(1,0), #第一个参数是响应变量，理论上该变量不一定要与训练集所关心的变量一致，可以是其他关心的二分类问题，如例文Figure6用相同的模型预测临床分期
+              smooth=F, #绘制平滑曲线
+              ci=TRUE, 
+              legacy.axes=T)#采用大多数paper的画法，横坐标是“1-specificity”，从0到1
+```
+
+## 将模型应用于测试集计算预测概率
+
+```{r}
+pred_test <- data.frame(Prob = round(predict(logit_step, newdata = test_df,type="response"),4), GoldStandard = test_df$Group, stringsAsFactors = F)
+
+# 计算测试集ROC
+roc.test <- plot.roc(pred_test[,2], pred_test[,1], ylim=c(0,1),xlim=c(1,0),
+                      smooth=F, #绘制平滑曲线
+                      ci=TRUE, 
+                      legacy.axes=T)#采用大多数paper的画法，横坐标是“1-specificity”，从0到1
+```
+
+## ROC比较
+
+```{r}
+compare.roc <- roc.test(roc.train, roc.test, method="bootstrap")
+if(compare.roc$p.value > 0.05) {
+  cat(paste0("p = ",compare.roc$p.value,"\nNo statiscal difference in evaluating model performence on train dataset or test dataset!\n"))
+} else {
+  cat(paste0("p = ",compare.roc$p.value,"\nStatistical difference exsits in evaluating model performence on train dataset or test dataset!\n"))
+}
+```
+
+## 开始画图
+
+个人比较喜欢baseplot绘制ROC，这样更灵活。因为有时可能需要在图片上点出一个特定的灵敏度特异度组合（比如某专家的判断与金标准的比较）。
+
+```{r}
+### 设置颜色 ###
+blue <- "#0093FF"
+peach  <- "#E43889"
+
+legend.paste <- c(paste0("Train dataset AUC: ",round(roc.train$auc,3), " (",paste0(round(roc.train$ci[1],3),"-",round(roc.train$ci[3],3)),")"),
+                  paste0("Test dataset AUC: ",round(roc.test$auc,3)," (",paste0(round(roc.test$ci[1],3),"-",round(roc.test$ci[3],3)),")"),
+                  paste0("Train vs. Test P ",ifelse(round(compare.roc$p.value,3) < 0.001,"< 0.001",paste0("= ",round(compare.roc$p.value,3)))))
+
+pdf("multipanelROC.pdf",width = 4.5,height = 5)
+plot(1-roc.train$specificities, roc.train$sensitivities, #画训练集
+     col=blue, xlab="1-Specificity (FPR)", main="", ylab="Sensitivity (TPR)",
+     lwd=2, type="l",  xlim=c(0,1),ylim=c(0,1))
+lines(x=1-roc.test$specificities,y=roc.test$sensitivities, #补测试集
+      lwd=2,type="l",col=ggplot2::alpha(peach,0.7)) #曲线初始和终末可能重合，设置透明色
+lines(x=c(0,1),y=c(0,1),lwd=1.5,lty=2,col="grey40") #补中斜线
+legend("bottomright", bty="n", #添加图例
+       fill=c(blue,peach,"NA"), 
+       legend.paste,
+       cex=.8, border=NA, y.intersp=1, x.intersp=0.2 )
+invisible(dev.off())
+```
+
+![](multipanelROC.pdf)
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,604 @@
+---
+title: "FigureYa98STEMheatmapV2"
+author: "小丫画图出品"
+date: "2021-4-16"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：李誉辉
+
+**作者介绍：**   
+四川大学研究生，从事数据分析，数据可视化，网络爬虫，2019年R语言中国大会特邀嘉宾。
+
+小丫编辑校验
+
+更新：古潇
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+左侧画出STEM的profile，右侧对应表达量的热图，输出每个profile对应的基因顺序。
+
+![](example.png)
+
+出自<https://www.pnas.org/content/116/15/7409>
+
+Fig. 1C. Analysis of coexpression modules in C. cinerea. Heatmap of 7,475 developmentally expressed genes is arranged based on module assignment, with simplified expression profiles and enriched GO terms (no term means no enriched GO) given for each module (see also Dataset S7). We graphically depict **only 27 modules with >50 genes** (refer to SI Appendix, Figs. S4–S9 for the complete list of modules and data for other species). The distribution of key developmental genes is given on the right side of the heatmap.
+
+难点：一共有50个profile，图中左侧只画了基因数量>50的27个profile，然而右侧heatmap却包含所有50个profile里的基因。那么其余的23个profile里的基因要怎样排进右侧的heatmap里呢？
+
+看图中的效果是其余的23个profile里的基因也聚类到相近的profile附近了。
+
+所以，采取的**基因排序策略**是：先按profile聚类，然后在每个profile内部的基因聚类。
+
+# 应用场景
+
+同时展示表达趋势和表达量热图。
+
+其中左侧折线图更适合时间序列数据，例如发育时期、处理后的时间点等。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+install.packages("readxl")
+```
+
+加载包
+
+```{r}
+library(readxl)
+library(data.table)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(magrittr)
+library(purrr)
+library(tidyr)
+library(tibble)
+library(RColorBrewer)
+library(Cairo)
+library(grid)
+library(gridExtra)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件的准备
+
+先提取Developmentally regulated genes的表达矩阵，然后运行STEM获得profile。
+
+GSE125184_CCAB_RPKM_ExpMatrix.csv.gz，所有基因的表达矩阵，下载自<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE125184>。每行一个基因，每列一个sample，相邻是3到4次重复。
+
+文章筛选developmentally regulated gene的方法描述：These were defined as any gene showing an over four-fold change in expression between any two developmental stages or tissue types and a maximum expression level of FPKM > 4 in at least one developmental stage. 保存在补充材料pnas.1817822116.sd05.xls文件里。然而ID不一致，表达矩阵是jgi，developmentally regulated gene是protID。
+
+然后把表达矩阵拆分成STEM要求的输入格式，即每个重复一个文件，共三个文件。
+
+然后用命令行的方式运行STEM，生成“_profiletable.txt”和“_genetable.txt”两个文件，**用于画左侧的折线图**。与每个profile的相对应，**用右侧热图展示进入profile的基因在各个样品中的表达量**。
+
+## 生成STEM所需的输入文件
+
+如果你的数据已经整理成easy_input*.txt的格式，就可以跳过这步，直接进入“运行STEM，获得profile”。
+
+```{r}
+#所有基因的表达矩阵
+df <- read.csv("GSE125184_CCAB_RPKM_ExpMatrix.csv", check.names = F)
+colnames(df)[1] <- "GeneSymbol"
+dim(df)
+df[1:3,1:6]
+#检查一下列名，发现其中两组有四次重复，只保留3次重复
+#并按发育时期给样品排序
+df %<>% select(GeneSymbol, 
+CC_VM_R1, CC_VM_R2, CC_VM_R3, 
+CC_H_R2, CC_H_R3, CC_H_R4, 
+CC_P1_R1, CC_P1_R2, CC_P1_R3, 
+CC_P2_R1, CC_P2_R2, CC_P2_R3, 
+CC_YFB_S_R1, CC_YFB_S_R2, CC_YFB_S_R3, 
+CC_YFB_C_R1, CC_YFB_C_R2, CC_YFB_C_R3, 
+CC_YFB_L_R1, CC_YFB_L_R2, CC_YFB_L_R3, 
+CC_FB_S_R1, CC_FB_S_R2, CC_FB_S_R3,
+CC_FB_CL_R1, CC_FB_CL_R2, CC_FB_CL_R3)
+
+#筛选over four-fold change in expression between any two developmental stages or tissue types
+myvec <- apply(df[,2:ncol(df)],1,function(x){ifelse(max(x)/min(x)>=2,T,F)}) #这里取了2倍
+table(myvec)
+DRG <- df[myvec,]
+dim(DRG)
+
+#筛选a maximum expression level of FPKM > 4 in at least one developmental stage.
+DRGvec <- apply(DRG[,2:ncol(DRG)],1,function(x){ifelse(max(x)>4,T,F)})
+table(DRGvec)
+DRG <- DRG[DRGvec,]
+dim(DRG)
+#筛选哪些基因做STEM不是重点，在这里不深入探讨。欢迎感兴趣的小伙伴在群里进一步讨论
+
+data1 <- DRG[,c(1, seq(2,ncol(DRG),3))]
+data2 <- DRG[,c(1, seq(3,ncol(DRG),3))]
+data3 <- DRG[,c(1, seq(4,ncol(DRG),3))]
+
+sampleName <- c("VM", "HN", "P1", "P2", "YFB-S", "YFB-C", "YFB-G", "FB-S", "FB-C")
+
+colnames(data1) <- c("GeneSymbol", sampleName)
+colnames(data2) <- c("GeneSymbol", sampleName)
+colnames(data3) <- c("GeneSymbol", sampleName)
+
+write.table(data1, "easy_input_rep1.txt", quote = F, sep = "\t", row.names = F)
+write.table(data2, "easy_input_rep2.txt", quote = F, sep = "\t", row.names = F)
+write.table(data3, "easy_input_rep3.txt", quote = F, sep = "\t", row.names = F)
+```
+
+## 运行STEM，获得profile
+
+下载STEM，进入stem文件夹，手动编辑配置文件example.txt
+
+Default parameters were used, except minimum absolute expression change, which was set to 4.
+
+用命令行方式运行STEM：
+
+```bash
+java -mx1024M -jar stem.jar -b example.txt output
+```
+
+会在output文件夹下产生两个文件：
+
+example_profiletable.txt和example_genetable.txt
+
+# 输入文件
+
+需要如下三种文件：
+
+- easy_input_rep1.txt，easy_input_rep2.txt，easy_input_rep3.txt，所有基因在三次重复中的表达量。需要借助example_genetable.txt文件，得到进入每个profile的基因的表达量。
+- example_profiletable.txt，profile信息，用于画左侧折线图。
+- example_genetable.txt，gene所在的profile，用于提取进入每个profile的基因的表达量。
+
+```{r}
+file_path <- paste0(c(paste0("easy_input_rep", 1:3), 
+                       "example_genetable", "example_profiletable"), 
+                     ".txt")
+
+data1 <- read.delim(file = file_path[1], check.names = F)
+head(data1)
+data2 <- read.delim(file = file_path[2], check.names = F)
+data3 <- read.delim(file = file_path[3], check.names = F)
+
+genetable <- read.delim(file = file_path[4], check.names = F) 
+head(genetable)
+
+profiletable <- read.delim(file = file_path[5], check.names = F) 
+head(profiletable)
+```
+
+## 输出基因名——按STEM原始顺序
+
+提供两种方式输出基因名，这里按STEM原始顺序，后面还有“输出基因名——按热图顺序”的代码可供选择。
+
+有的小伙伴可能想给每个profile做基因功能富集分析等进一步探讨。要把每个profile里的基因输出到文件，每个profile一个文件，就运行下面这段：
+
+```{r eval=FALSE}
+for (gp in 0:max(genetable$Profile)) {
+  geneInProfile <- genetable[genetable$Profile == gp,]$GeneSymbol
+  write.table(geneInProfile, paste0("Profile", gp, ".txt"), sep = "\t", quote = F, row.names=F)
+}
+```
+
+## 计算表达量均值，用于画右侧热图
+
+右侧的热图使用`data1`, `data2`, `data3`取均值。
+
+我们注意到`data_mean`的`Gene.Symbol`变量中存在小写字母，而`genetable`全是大写字母。所以还要大小写转换。
+
+```{r}
+# 自定义一个函数，对多个向量取均值
+p_mean <- function(...) {
+  tibble(...)  %>% rowMeans()
+} 
+
+data_mean <- tibble(GeneSymbol = data1$GeneSymbol) # 创建一个数据框
+
+# 向data_mean中填数据
+for (i in 2:ncol(data1)) {
+  data_mean[,i] <- p_mean(data1[,i], data2[,i], data3[,i])
+}
+
+colnames(data_mean) <- colnames(data1)
+#rm(data1, data2, data3)
+
+# 转换成大写字母
+data_mean %<>% mutate(Gene = toupper(GeneSymbol)) %>% 
+  select(-GeneSymbol) %>% rename(GeneSymbol = Gene)
+
+head(data_mean)
+```
+
+## 用于画左侧折线图的profile
+
+每个profile纵坐标被写进`profiletable`中一列里`Profile.Model`，所以需要分开：每个时间点单独一列。
+
+```{r}
+profiletable %<>% separate(col = `Profile Model`, 
+                           into = as.character(1:9), # 分列的列名
+                           sep = ",", convert = TRUE) %>% 
+  select(Profile = `Profile ID`, `p-value`, !!as.character(1:9)) # !!表示拆分向量
+```
+
+## 取交集，联结表
+
+经过查询，`unique(genetable$Profile)`长度为49，而`profiletable$Profile`长度为50，所以需要取交集。
+
+`data_mean`中没有`Profile`变量，所以需要将其与`genetable`联结表。
+
+```{r}
+# 取交集
+Profile_intersect <- intersect(genetable$Profile, profiletable$Profile)
+
+genetable %<>% filter(Profile %in% Profile_intersect) %>% 
+  mutate_if(is.integer, as.character) # 转换Profile为字符串
+
+profiletable %<>% filter(Profile %in% Profile_intersect) %>% 
+  arrange(`p-value`) %>% # 按pvalue排序
+  mutate_if(is.integer, as.character) %>% # 转换Profile为字符串
+  select(-`p-value`)
+
+# 联结表
+data_mean <- genetable %>% select(GeneSymbol, Profile) %>% 
+  left_join(data_mean, by = "GeneSymbol") %>%  # 添加Profile变量
+  filter(Profile %in% Profile_intersect) %>% 
+  mutate(Profile_f = as.character(Profile)) %>% # 转换Profile为字符串
+  select(-Profile) %>% rename(Profile = Profile_f) %>% 
+  select(-sampleName, Profile, sampleName) #给列重新排序
+head(data_mean)
+
+#rm(genetable, Profile_intersect)
+```
+
+## scale
+
+用`scale`函数对`data_mean`进行处理，相当于pheatmap里的scale="row"。  
+
+然后根据变量`Profile`对`data_mean`分组并计算每个profile内基因的数量。
+
+```{r}
+# scale数据
+data_mean <- data_mean %>% select(sampleName) %>% 
+  #log2(.) %>% #根据自己的数据决定是否取log
+  as.matrix() %>% scale() %>% 
+  as.data.frame() %>% as_tibble() %>% cbind(select(data_mean, -sampleName)) 
+
+#按profile分组，计算每个profile内基因的数量
+data_nest <- data_mean %>% group_by(Profile) %>% nest()
+data_nest$n <- map_int(data_nest$data, nrow)
+head(data_nest)
+```
+
+## 聚类，排序
+
+先按profile聚类，然后在每个profile内部的基因聚类。
+
+通过聚类，获取顺序，然后将顺序通过因子水平的方式，指定给`Profile`变量和`GeneSymbol`变量。
+
+```{r}
+# 自定义一个函数，输入一个数据框和变量，及聚类方式，然后输出根据聚类排序的数据框
+clust_order <- function(df, row_name, method_1 = "euclidean", method_2 = "ward.D") {
+  rnm <- df[[row_name]] # 不能用$筛选，
+  df[[row_name]] <- NULL
+  my_mat <- df %>% as.matrix()
+  rownames(my_mat) <- rnm
+  order_ <- my_mat %>% dist(method = method_1) %>% # method_1 指定距离矩阵计算方法
+    hclust(method = method_2) %>% .$order # method_2 指定聚类方法
+  df$order <- order_
+  df[[row_name]] <- rnm
+  df <- df %>% arrange(order) %>% select(-order)
+  return(df)
+}
+
+# 对profiletable聚类
+profiletable %<>% clust_order(row_name = "Profile") 
+data_nest %<>% right_join(profiletable, by = "Profile") %>%
+  select(Profile, data, n)
+
+Profile_f <- profiletable$Profile %>% as.factor()
+levels(Profile_f) <- profiletable$Profile
+Profile_f %<>% sort()
+profiletable$Profile <- Profile_f
+#按照Profile_f的levels重排data_nest$Profile，并再次对data_nest$Profile进行order
+data_nest$Profile <- factor(data_nest$Profile,levels = levels(Profile_f))
+data_nest %<>% .[order(.$Profile),]
+
+# 筛选基因数目大于50的Profile
+profile_num <- data_nest %>% select(Profile, n) %>% filter(n > 50) #这里的50可以根据自己都需要调整
+profiletable_extract <- profile_num %>% left_join(profiletable, by = "Profile") %>% 
+  select(-n)
+dim(profiletable_extract)[1] #筛选出来的基因数目大于50的profile数量
+
+# 对每个profile内的基因进行聚类
+data_nest_1 <- data_nest %>% filter(n < 2) # 行数小于2没法聚类
+data_nest_2 <- data_nest %>% filter(n >= 2)
+data_nest_2$data_2 <- map(data_nest_2$data, ~clust_order(.x, row_name = "GeneSymbol"))
+data_nest_2 %<>% select(-data) %>% rename(data = data_2) %>% rbind(data_nest_1)
+data_nest <- data_nest_2
+
+#rm(data_nest_1, data_nest_2)
+```
+
+## 输出基因名——按热图顺序
+
+如果想把基因按图中的顺序输出到文件，每个profile一个文件，就运行下面这行：
+
+```{r eval=FALSE}
+for (gh in 1:nrow(data_nest)) {
+  geneInheatmap <- data.frame(data_nest[gh,]$data)$GeneSymbol
+  write.table(geneInheatmap, paste0(gh, "_Profile", data_nest[gh,]$Profile, ".txt"), sep = "\t", quote = F, row.names=F)
+}
+```
+
+# 计算坐标，计算颜色
+
+## 折线图坐标
+
+`profiletable_extract`数据，宽转长，成为折线图坐标。
+
+```{r}
+profiletable_extract %<>% gather(key = "x", value = "y", !!as.character(1:9)) %>% 
+  mutate_at(vars("x", "y"), as.numeric) 
+```
+
+## 计算热图坐标、颜色
+
+转换成`x`, `y`, `heat_value`三个变量的长数据框。
+
+```{r}
+# 提出基因名称
+data_nest$Gene <- map(data_nest$data, ~.x$GeneSymbol)
+# 累加
+end_num <- -(data_nest$n) %>% cumsum() 
+start_num <- c(-1, (end_num[-length(end_num)]) - 1)
+range_y <- map2(start_num, end_num, rbind) %>% map(as.vector)
+data_nest$range_y <- range_y
+
+# 自定义一个函数，输入数据框和小格子宽度，range_y, 就行了。 
+# 返回1数据框。根据小格子宽度调节长宽比，因为高度坐标是固定的。   
+
+generate_coords <- function(df, width_tile = 1, range_y) {
+  nrow_ <- nrow(df)
+  ncol_ <- df %>% select_if(is.numeric) %>% ncol()
+  # 首先产生横坐标，
+  x_coord <- (seq(from = 0.5, len = ncol_, by = 1) * width_tile) %>% 
+    rep(each = nrow_)
+  # 产生纵坐标，
+  y_coord <- (seq(from = range_y[1], to = range_y[2], len = nrow_) + 0.5) %>% 
+    rep(times = ncol_)
+  # 颜色数字
+  heat_value <- df %>% select_if(is.numeric) %>% as.matrix() %>% as.vector()
+  
+  # 合成包含坐标和颜色的数据框
+  tile_data <- tibble(x = x_coord,
+                      y = y_coord,
+                      heat_value = heat_value)
+  return(tile_data)
+}
+
+# 代入函数计算坐标: 
+width_tile <- 3 
+
+data_nest$tile_data <- map2(data_nest$data, data_nest$range_y, 
+                            ~generate_coords(df = .x, 
+                                             range_y = .y, 
+                                             width_tile = width_tile))
+```
+
+## 计算中间阴影区域坐标
+
+阴影区域坐标分为左侧和右侧两种，左侧纵向均分就行了，右侧需要根据`range_y`变量计算。
+
+```{r}
+# 右侧坐标
+## 自定义一个函数，根据rang_y计算右侧坐标，返回数据框
+link_right <- function(v_2) {
+  right_coord <- tibble(x = c(0, 0),
+                        y = c(v_2[1] + 1, v_2[2]),
+                        order = 1:2)
+  return(right_coord)
+}
+
+data_nest$right_coord <- map(data_nest$range_y, link_right)
+```
+
+**左侧坐标，需要指定**`width_link`,即阴影区域的宽度。
+
+```{r}
+# 左侧坐标
+link_left_y <- seq(from = 0, to = -nrow(data_mean), len = nrow(profile_num) + 1)
+
+# 左侧坐标：
+width_link <- 7
+
+left_coord <- data.frame(Profile = profile_num$Profile,
+                         x1 = -width_link, 
+                         x2 = -width_link,
+                         y1 = link_left_y[-length(link_left_y)],
+                         y2 = link_left_y[-1]) %>% 
+  group_by(Profile) %>% nest() %>% arrange(Profile)
+
+# 自定义一个函数
+trans_coord <- function(df) {
+  df <- cbind(c(df$x1, df$x2), c(df$y1, df$y2)) %>% as_tibble() 
+  colnames(df) <- c("x", "y")
+  df$order = c(4,3)
+  return(df)
+}
+
+left_coord$coord_left <- map(left_coord$data, trans_coord)  
+left_coord %<>% select(-data)
+```
+
+**合并左右侧坐标：**   
+
+```{r}
+link_coord <- data_nest %>% select(Profile, right_coord, n) %>% 
+  right_join(left_coord, by = "Profile")
+link_coord$coords <- map2(link_coord$coord_left, link_coord$right_coord, rbind)
+link_coord$coords_2 <- map(link_coord$coords, ~arrange(.x, order))
+link_coord %<>% select(Profile, coords = coords_2, n)
+
+link_data <- link_coord %>% unnest()
+```
+
+# 开始画图
+
+这里使用编造的坐标，用`ggplot2::geom_tile()`画热图。
+
+使用`ggplot2::geom_polygon()`画中间的阴影连接区域。
+
+使用`ggplot2::geom_line()`加**分面**画左侧的折线图。
+
+## 热图，阴影区域
+
+首先画热图和中间的阴影连接区域。
+提取单独的热图图例。
+
+```{r}
+tile_data <- data_nest %>% select(Profile, tile_data) %>% unnest()
+
+ncol_ <- data_mean %>% select_if(is.numeric) %>% ncol()
+my_breaks <- seq(from = width_tile/2, by = width_tile, len = ncol_)
+my_labels <- data_mean %>% select_if(is.numeric) %>% colnames() %>% 
+  str_pad(., width = max(nchar(.)), side = "right") # 增加空格，使得字符串长度相同
+
+plot_right <- ggplot(tile_data) + 
+  geom_tile(aes(x = x, y = y, fill = heat_value)) + 
+  geom_polygon(data = link_data, 
+               aes(x = x, y = y, group = Profile), 
+               fill = "grey90", color = "white", size = 0.25, linetype = "solid") + 
+  
+  # 自定义配色，参考了FigureYa179AMDAplot
+  scale_fill_gradientn(limits = c(-3, 3), na.value="#ff0000",
+                     breaks = c(-2, 0, 2),
+                     labels = c("-2", "0", "2"),
+                     #values=c(0,0.1,0.5,0.9,1),
+                     colours = c('#0000ff','#0000ff','#ffffff','#ff351c', '#ff0000')
+                     ) +
+  scale_x_continuous(breaks = my_breaks, labels = my_labels, position = "top") + 
+  theme(panel.background = element_blank(),
+        axis.title = element_blank(), 
+        axis.ticks = element_blank(),
+        axis.text.y = element_blank(),
+        axis.text.x.top = element_text(angle = 45, hjust = 0.05, vjust = -0.9),
+        plot.margin = unit(c(0.25,0.25,0.25,0.25), "cm"), # 最后一个为左侧宽度，
+        # 为了在左侧添加其它图形，必须将左侧宽度设置大一点。  
+        panel.border = element_blank())
+plot_right
+```
+
+## 折线图
+
+```{r}
+#先自定义画图函数
+line_generate <- function(df) {
+  myplot <- 
+  ggplot(df) + 
+    geom_line(aes(x = x, y = y)) + 
+    theme(axis.title = element_blank(), 
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          plot.margin = unit(c(0,0,0,0), "mm"),
+          panel.background = element_rect(fill = "white"),
+          panel.border = element_rect(color = "black", fill = NA, 
+                                      size = 0.25, linetype = "solid")
+          )
+  return(myplot)
+}
+
+#调用函数画图
+line_data <- profiletable_extract %>% group_by(Profile) %>% 
+  nest() %>% arrange(Profile)
+line_data$plot_ls <- map(line_data$data, line_generate)
+line_data <- left_join(line_data, left_coord, by = "Profile")
+
+# 新建一个函数，根据left_coord$coord_left 生成折线图的坐标, width_line表示折线图的宽度
+# 返回一个向量，依次是：xmin, xmax, ymin, ymax
+line_coord <- function(df, width_line) {
+  df %<>% arrange(order)
+  xmax <- df$x %>% .[1]
+  ymin <- df$y %>% .[1] 
+  ymax <- df$y %>% .[2]
+  xmin <- xmax - width_line
+  rectangle_range <- c(xmin, xmax, ymin, ymax)
+  return(rectangle_range)
+}
+
+#调用函数生成坐标
+width_line <- 10
+line_data$rectangle_range <- map(line_data$coord_left,~line_coord(.x, width_line = width_line))
+line_data %<>% select(Profile, plot_ls, rectangle_range)
+```
+
+## 添加文字
+
+P*是STEM给的profile的序号，括号里是该profile里基因的数量。
+
+```{r}
+left_coord$y <- map(left_coord$coord_left, ~.x$y)
+left_coord$y_up <- map(left_coord$y, ~.x[1])
+left_coord$y_down = map(left_coord$y, ~.x[2])
+
+left_coord %<>% select(Profile, y_up, y_down) %>% unnest() %>% arrange(Profile)%>%
+
+  mutate(y_inter = (y_up + y_down)/2) %>% 
+  mutate(y_1 = (y_up + y_inter)/2, y_2 = (y_down + y_inter)/2) %>% 
+  select(Profile, y_1, y_2) %>% 
+  left_join(profile_num, by = "Profile") %>% 
+  mutate(text_1 = paste0("P", Profile), text_2 = paste0("(", n, ")"))
+
+text_data <- left_coord
+
+# 指定x轴坐标
+x_just <- -4 # 文本x坐标微调，向左为负
+text_data$x <- (-width_link - width_line + x_just) %>% 
+  rep(., nrow(profile_num))
+```
+
+## 拼图输出
+
+采用`gridExtra`包拼图。
+如果需要改变图例位置的，自己在前面的`plot_right`中调整。
+或者使用`cowplot`包提取图例。
+
+```{r, fig.width=4, fig.height=7}
+CairoPDF(file = "STEMheatmap.pdf", width = 5, height = 7)
+
+# 添加文本
+plot_draw <- plot_right + 
+  geom_text(data = text_data, 
+            aes(x = x, y = y_1, label = text_1), size = 3) + 
+  geom_text(data = text_data,
+            aes(x = x, y = y_2, label = text_2), size = 3)
+
+# 循环拼图
+for (i in 1:nrow(profile_num)) {
+  plot_draw <- plot_draw + 
+    annotation_custom(
+      grob = line_data$plot_ls %>% .[[i]] %>% ggplotGrob(),
+      xmin = line_data$rectangle_range %>% .[[i]] %>% .[1],
+      xmax = line_data$rectangle_range %>% .[[i]] %>% .[2],
+      ymin = line_data$rectangle_range %>% .[[i]] %>% .[3],
+      ymax = line_data$rectangle_range %>% .[[i]] %>% .[4]
+    ) 
+}
+
+plot_draw
+dev.off()
+```
+
+```{r}
+sessionInfo()
+```
