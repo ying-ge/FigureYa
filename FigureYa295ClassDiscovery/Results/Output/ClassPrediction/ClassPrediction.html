@@ -1,0 +1,390 @@
+<!-- This is an HTML document.  Please make sure the filename has either
+     an .htm or .html extension, and view this file in a web browser. -->
+
+<HTML>
+<HEAD>
+<TITLE>Class Prediction Results</TITLE>
+<STYLE>
+P {font-size: 9pt}
+TABLE {font-size: 9pt}
+</STYLE>
+<script src='file:///sorttable.js'></script>
+</HEAD>
+<BODY>
+<SCRIPT>
+function popUp(text) {
+   var prop =
+   "location=no,scrollbars=yes,menubars=no,toolbars=no,resizable=yes";
+   popup = window.open("","mywin",prop);
+   popup.document.open();
+   popup.document.write(text);
+   popup.document.close();
+   popup.focus();
+   }
+   </SCRIPT>
+<script language='JavaScript' type='text/javascript'>
+function check_value(fieldvalue)
+{    
+switch(fieldvalue)
+	{
+   case 1:
+       document.getElementById('imagedest').innerHTML = "<img src='roc_all.png'>";
+           break;
+   case 2:
+       document.getElementById('imagedest').innerHTML = "<img src='roc_ccp.png'>";
+           break;
+   case 3:
+       document.getElementById('imagedest').innerHTML = "<img src='roc_dlda.png'>";
+           break;
+   case 4:
+       document.getElementById('imagedest').innerHTML = "<img src='roc_bccp.png'>";
+           break;
+	}
+}
+</script>
+<H2 align="center"> Class Prediction using Multiple Methods</H2>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P>
+<P><a name="Description"><H3><B><U>Description of the problem:</U></B></H3>
+<P>
+Number of classes: 2
+<BR>
+Number of genes that passed filtering criteria: 1
+<BR>
+Column of the Experiment Descriptors sheet that defines class variable:  rC1 vs rC2
+<BR>
+Number of arrays in each class:  8 in class label<I> rC1 </I>, 5 in class label<I> rC2 </I>
+<BR>
+WARNING: Distribution assumptions underlying the random variance model are not satisfied. Random variance model was not used.  
+<P><B><U>Feature selection criteria:</U></B>
+ 
+<BR>Genes significantly different between the classes at 0.001 significance level were used for class prediction.
+ 
+<P><B><U>Cross-validation method:</U></B>
+ 
+<BR>Leave-one-out cross-validation method was used to compute mis-classification rate.
+ 
+<BR><BR>Note<BR>T-values used for the (Bayesian) compound covariate predictor were truncated at abs(t)=10 level.<BR>
+Equal class prevalences is used in the Bayesian compound covariate predictor.<BR>
+Threshold of predicted probability for a sample being predicted to a class from the Bayesian compound covariate predictor
+0.8
+.<BR>
+</P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="performance"><H3><B><U>Performance of classifiers during cross-validation.</U></B></H3>
+<BR>
+<table border='1' class='sortable'>
+<TR><TH>&nbsp;<TH> Array id <TH>Class label <TH WIDTH=65>Mean Number of genes in classifier<TH>Compound<BR>Covariate<BR>Predictor<BR> Correct?<TH>Diagonal Linear<BR>Discriminant<BR>Analysis<BR> Correct?<TH>1-Nearest<BR>Neighbor<TH>3-Nearest<BR>Neighbors<BR> Correct?<TH>Nearest<BR>Centroid<BR> Correct?<TH>Support<BR>Vector<BR>Machines<BR> Correct?<TH>Bayesian<BR>Compound<BR>Covariate<BR>Predictor<BR> Correct?
+<TR ALIGN=center><TH>  1<TD>HB83<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  2<TD>HB81<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  3<TD>HB5<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  4<TD>HB75<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  5<TD>HB59<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  6<TD>HB69<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  7<TD>HB74F<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  8<TD>HB49<TD>rC1<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH>  9<TD>HB80<TD>rC2<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH> 10<TD>HB74e<TD>rC2<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH> 11<TD>HB86<TD>rC2<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH> 12<TD>HB72<TD>rC2<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<TR ALIGN=center><TH> 13<TD>HB73<TD>rC2<TD>18<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES<TD>YES
+<tfoot><TH><TR ALIGN=center><TH>Mean percent<BR>of correct<BR>classification:<TH>&nbsp;<TH>&nbsp;<TH>&nbsp;<TH>100<TH>100<TH>100<TH>100<TH>100<TH>100<TH>100<TH></tfoot>
+</TABLE>
+</P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="predprob"><H3><B><U>Predicted probability of each sample belonging to the class  (rC1) during cross-validation from the Bayesian Compound Covariate:</U></B></H3></P>
+<table border='1' class='sortable'>
+<TR><TH><BR><TH> Array id <TH>Class label<TH>Probability</TH></TR>
+
+<TR><TD><B> 1 </B></TD><TD> HB83 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 2 </B></TD><TD> HB81 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 3 </B></TD><TD> HB5 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 4 </B></TD><TD> HB75 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 5 </B></TD><TD> HB59 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 6 </B></TD><TD> HB69 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 7 </B></TD><TD> HB74F </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 8 </B></TD><TD> HB49 </TD><TD> rC1 </TD><TD> 1 </TD></TR>
+
+<TR><TD><B> 9 </B></TD><TD> HB80 </TD><TD> rC2 </TD><TD> p < 1.0e-3 </TD></TR>
+
+<TR><TD><B> 10 </B></TD><TD> HB74e </TD><TD> rC2 </TD><TD> p < 1.0e-3 </TD></TR>
+
+<TR><TD><B> 11 </B></TD><TD> HB86 </TD><TD> rC2 </TD><TD> p < 1.0e-3 </TD></TR>
+
+<TR><TD><B> 12 </B></TD><TD> HB72 </TD><TD> rC2 </TD><TD> p < 1.0e-3 </TD></TR>
+
+<TR><TD><B> 13 </B></TD><TD> HB73 </TD><TD> rC2 </TD><TD> p < 1.0e-3 </TD></TR>
+
+</TABLE>
+</P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="sensitivity"><H3><B>Sensitivity and specificity during cross-valudation:</B></H3></P>
+<P>Let, for some class A,
+<BR>&nbsp; &nbsp; &nbsp; n11 = number of class A samples predicted as A
+<BR>&nbsp; &nbsp; &nbsp; n12 = number of class A samples predicted as non-A 
+<BR>&nbsp; &nbsp; &nbsp; n21 = number of non-A samples predicted as A
+<BR>&nbsp; &nbsp; &nbsp; n22 = number of non-A samples predicted as non-A
+<BR> Then the following parameters can characterize performance of classifiers:
+<BR> &nbsp; &nbsp; &nbsp; Sensitivity = n11/(n11+n12)
+<BR> &nbsp; &nbsp; &nbsp; Specificity = n22/(n21+n22)
+<BR> &nbsp; &nbsp; &nbsp; Positive Predictive Value (PPV) =  Sensitivity*Prevalence/(Sensitivity*Prevalence+(1-Specificity)*(1-Prevalence))
+<BR> &nbsp; &nbsp; &nbsp; Negative Predictive Value (NPV) =  Specificity*(1-Prevalence)/((1-Sensitivity)*Prevalence+Specificity*(1-Prevalence))
+<BR> Sensitivity is the probability for a class A sample to be correctly predicted as class A,
+<BR> Specificity is the probability for a non class A sample to be correctly predicted as non-A,
+<BR> PPV is the probability that a sample predicted as class A actually belongs to class A,
+<BR> NPV is the probability that a sample predicted as non class A actually does not belong to class A.
+<BR> Note that positive and negative predictive values are influenced by class prevalences. 
+<BR> Prevalence for class rC1 are 0.615385.
+<BR> Prevalence for class rC2 are 0.384615.
+<BR>For each classification method and each class, these parameters are listed in the tables below
+</P>
+<P><B><U>Performance of the Compound Covariate Predictor Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the Diagonal Linear Discriminant Analysis Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the 1-Nearest Neighbor Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the 3-Nearest Neighbors Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the Nearest Centroid Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the Support Vector Machine Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<P><B><U>Performance of the Bayesian Compound Covariate Classifier:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH><BR> Class<TH>Sensitivity<TH>Specificity<TH>PPV<TH>NPV </BR>
+<TR><TH> rC1 <TD> 1<TD>1<TD>1<TD>1
+<TR><TH> rC2 <TD> 1<TD>1<TD>1<TD>1
+</TABLE>
+</P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><B><U>Predictions of classifiers for new samples:</U></B></P>
+<table border='1' class='sortable'>
+<BR><TH> Array id<TH>True Class<TH>Compound<BR>Covariate<BR>Predictor<TH>Linear<BR>Discriminant<BR>Analysis<TH>1-Nearest<BR>Neighbor<TH>3-Nearest<BR>Neighbors<TH>Nearest<BR>Centroid<TH>Support<BR>Vector<BR>Machines<TH>Bayesian<BR>Compound<BR>Covariate<BR>Predictor
+<TR ALIGN=center><TH> HB11<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB28<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB33<TD>predict<TD>rC2<TD>rC2<TD>rC2<TD>rC2<TD>rC2<TD>rC2<TD>rC2
+<TR ALIGN=center><TH> HB48<TD>predict<TD>rC2<TD>rC2<TD>rC2<TD>rC1<TD>rC2<TD>rC2<TD>rC2
+<TR ALIGN=center><TH> HB54<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB60<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB62<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB63<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB70<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB78<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB79<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> HB82<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> NT1<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> NT2<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> NT3<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+<TR ALIGN=center><TH> NT4<TD>predict<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1<TD>rC1
+</TABLE>
+<P>NC = Not Classified</P>
+</P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><B><U>Predicted probability of each new sample belonging to the class  (rC1) from the Bayesian Compound Covariate:</U></B></P>
+<table border='1' class='sortable'>
+<TR><TH> Array id <TH>Probability</TH></TR>
+
+<TR><TD><B> HB11 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB28 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB33 </B></TD><TD> p < 1.0e-3 </TD></TR>
+
+<TR><TD><B> HB48 </B></TD><TD> 0.003 </TD></TR>
+
+<TR><TD><B> HB54 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB60 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB62 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB63 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB70 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB78 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB79 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> HB82 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> NT1 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> NT2 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> NT3 </B></TD><TD> 1 </TD></TR>
+
+<TR><TD><B> NT4 </B></TD><TD> 1 </TD></TR>
+
+</TABLE>
+<P></P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="classifier"><H3><B><U>Composition of classifier:</U></B></H3></P>
+<P><B><U>Table</U> - Sorted by t -value:</B></P>
+<font size=2>Class 1: <I>rC1</I></font>; <font size=2>Class 2: <I>rC2</I></font>.
+<table border='1' class='sortable'>
+<CAPTION style='text-align:left'>
+
+</CAPTION>
+<TR><TH>&nbsp;  <TH> Parametric <NOBR>p-value</NOBR> <TH NOWRAP> t-value <TH> % CV <NOBR>support</NOBR> <TH> Geom mean of  values  in class  1 <TH> Geom mean of  values  in class  2 <TH> Fold-change <TH> UniqueID
+<TR><TD> 1<BR><TD>< 1e-07<BR><TD>-13.038<BR><TD>100<BR><TD>158.19<BR><TD>5543.37<BR><TD>0.029<BR><TD>204694_at<BR>
+<TR><TD> 2<BR><TD>6e-07<BR><TD>-10.244<BR><TD>100<BR><TD>123.73<BR><TD>248.33<BR><TD>0.5<BR><TD>218305_at<BR>
+<TR><TD> 3<BR><TD>9e-07<BR><TD>-9.793<BR><TD>100<BR><TD>55.43<BR><TD>524.67<BR><TD>0.11<BR><TD>207695_s_at<BR>
+<TR><TD> 4<BR><TD>1e-06<BR><TD>-9.74<BR><TD>100<BR><TD>467.84<BR><TD>1010.66<BR><TD>0.46<BR><TD>33132_at<BR>
+<TR><TD> 5<BR><TD>1.2e-06<BR><TD>-9.548<BR><TD>100<BR><TD>99.16<BR><TD>246.15<BR><TD>0.4<BR><TD>203867_s_at<BR>
+<TR><TD> 6<BR><TD>2.2e-06<BR><TD>-8.964<BR><TD>100<BR><TD>22.43<BR><TD>77.2<BR><TD>0.29<BR><TD>209642_at<BR>
+<TR><TD> 7<BR><TD>2.4e-06<BR><TD>-8.886<BR><TD>100<BR><TD>173.03<BR><TD>1499.89<BR><TD>0.12<BR><TD>205777_at<BR>
+<TR><TD> 8<BR><TD>3.4e-06<BR><TD>-8.554<BR><TD>100<BR><TD>2227.42<BR><TD>4932.31<BR><TD>0.45<BR><TD>200036_s_at<BR>
+<TR><TD> 9<BR><TD>4.6e-06<BR><TD>-8.3<BR><TD>100<BR><TD>39.67<BR><TD>155.37<BR><TD>0.26<BR><TD>221586_s_at<BR>
+<TR><TD> 10<BR><TD>8.9e-06<BR><TD>-7.742<BR><TD>100<BR><TD>23.75<BR><TD>170.38<BR><TD>0.14<BR><TD>203764_at<BR>
+<TR><TD> 11<BR><TD>1e-05<BR><TD>7.644<BR><TD>100<BR><TD>5733.88<BR><TD>1032.93<BR><TD>5.55<BR><TD>205568_at<BR>
+<TR><TD> 12<BR><TD>8.3e-06<BR><TD>7.798<BR><TD>100<BR><TD>14347.3<BR><TD>4167.91<BR><TD>3.44<BR><TD>209975_at<BR>
+<TR><TD> 13<BR><TD>6.5e-06<BR><TD>8.007<BR><TD>100<BR><TD>4621.22<BR><TD>1747.96<BR><TD>2.64<BR><TD>201425_at<BR>
+<TR><TD> 14<BR><TD>4.9e-06<BR><TD>8.247<BR><TD>100<BR><TD>1672.53<BR><TD>181.26<BR><TD>9.23<BR><TD>206738_at<BR>
+<TR><TD> 15<BR><TD>3.4e-06<BR><TD>8.564<BR><TD>100<BR><TD>413.59<BR><TD>45.93<BR><TD>9.01<BR><TD>205498_at<BR>
+<TR><TD> 16<BR><TD>1.2e-06<BR><TD>9.526<BR><TD>100<BR><TD>2769.95<BR><TD>518.19<BR><TD>5.35<BR><TD>206024_at<BR>
+<TR><TD> 17<BR><TD>7e-07<BR><TD>10.065<BR><TD>100<BR><TD>4123.65<BR><TD>143.68<BR><TD>28.7<BR><TD>206350_at<BR>
+<TR><TD> 18<BR><TD>< 1e-07<BR><TD>12.538<BR><TD>100<BR><TD>5479.29<BR><TD>1503.14<BR><TD>3.65<BR><TD>208747_s_at<BR>
+</TABLE>
+<P></P><HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="rule"><H3><B><U>Prediction rule from the linear predictors:</U></B></H3></P>
+<P>The prediction rule is defined by the inner sum of the weights (<var>w<sub>i</sub></var>)
+          and expression (<var>x<sub>i</sub></var>) of significant genes. The expression is the log ratios for dual-channel data and log intensities for single-channel data. 
+<P>A sample is classified to the class 
+<B>
+rC1
+</B>
+if the sum is greater than the threshold; that is,
+&#8721;<sub><var>i</var></sub><var>w<sub>i</sub></var>
+          <var>x<sub>i</sub> > </var>threshold.</P>
+<P>
+The threshold for the Compound Covariate predictor is  -13.362 <BR>
+The threshold for the Diagonal Linear Discriminant predictor is  -343.987 <BR>
+The threshold for the Support Vector Machine predictor is  0.61 <BR>
+</P>
+<table border='1' class='sortable'>
+<P><U>Table.</U> Gene Weights </P>
+<CAPTION ALIGN=left></CAPTION>
+<TR><TH>&nbsp;<TH>Genes <TH>Compound<BR>Covariate<BR>Predictor <TH>Diagonal Linear<BR>Discriminant<BR>Analysis <TH>Support<BR>Vector<BR>Machines </TR>
+<TR><TH> 1 <TH> 204694_at <TD> -13.038 <TD> -10.767 <TD> -0.0813
+<TR><TH> 2 <TH> 208747_s_at <TD> 12.538 <TD> 27.379 <TD> 0.0439
+<TR><TH> 3 <TH> 206350_at <TD> 10.065 <TD> 6.7988 <TD> 0.1068
+<TR><TH> 4 <TH> 207695_s_at <TD> -9.7925 <TD> -9.611 <TD> -0.0659
+<TR><TH> 5 <TH> 206024_at <TD> 9.526 <TD> 12.195 <TD> 0.0386
+<TR><TH> 6 <TH> 205777_at <TD> -8.8864 <TD> -8.2372 <TD> -0.0525
+<TR><TH> 7 <TH> 203867_s_at <TD> -9.5484 <TD> -22.591 <TD> -0.0296
+<TR><TH> 8 <TH> 209642_at <TD> -8.9641 <TD> -14.644 <TD> -0.0279
+<TR><TH> 9 <TH> 218305_at <TD> -10.244 <TD> -33.931 <TD> -0.0175
+<TR><TH> 10 <TH> 205498_at <TD> 8.5644 <TD> 7.5181 <TD> 0.0681
+<TR><TH> 11 <TH> 33132_at <TD> -9.7404 <TD> -27.749 <TD> -0.019
+<TR><TH> 12 <TH> 206738_at <TD> 8.2471 <TD> 6.8951 <TD> 0.0519
+<TR><TH> 13 <TH> 221586_s_at <TD> -8.3005 <TD> -11.369 <TD> -0.0593
+<TR><TH> 14 <TH> 200036_s_at <TD> -8.5542 <TD> -20.736 <TD> -0.0259
+<TR><TH> 15 <TH> 203764_at <TD> -7.742 <TD> -6.8527 <TD> -0.0331
+<TR><TH> 16 <TH> 205568_at <TD> 7.6441 <TD> 7.6799 <TD> 0.0308
+<TR><TH> 17 <TH> 209975_at <TD> 7.7985 <TD> 11.083 <TD> 0.0299
+<TR><TH> 18 <TH> 201425_at <TD> 8.007 <TD> 14.856 <TD> 0.0246
+</TABLE>
+<P></P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="centroid"><H3><B><U>Centroid of each class:</U></B></H3></P>
+<table border='1' class='sortable'>
+<TR><TH><BR><TH>Genes <TH> rC1<TH> rC2 </TH></TR>
+
+<TR><TH><B> 1 </B></TH><TH> 204694_at </TH> <TD> 7.3055 </TD><TD> 12.4365 </TD> </TR>
+
+<TR><TH><B> 2 </B></TH><TH> 208747_s_at </TH> <TD> 12.4198 </TD><TD> 10.5538 </TD> </TR>
+
+<TR><TH><B> 3 </B></TH><TH> 206350_at </TH> <TD> 12.0097 </TD><TD> 7.1667 </TD> </TR>
+
+<TR><TH><B> 4 </B></TH><TH> 207695_s_at </TH> <TD> 5.7926 </TD><TD> 9.0353 </TD> </TR>
+
+<TR><TH><B> 5 </B></TH><TH> 206024_at </TH> <TD> 11.4356 </TD><TD> 9.0173 </TD> </TR>
+
+<TR><TH><B> 6 </B></TH><TH> 205777_at </TH> <TD> 7.4349 </TD><TD> 10.5506 </TD> </TR>
+
+<TR><TH><B> 7 </B></TH><TH> 203867_s_at </TH> <TD> 6.6317 </TD><TD> 7.9434 </TD> </TR>
+
+<TR><TH><B> 8 </B></TH><TH> 209642_at </TH> <TD> 4.4871 </TD><TD> 6.2705 </TD> </TR>
+
+<TR><TH><B> 9 </B></TH><TH> 218305_at </TH> <TD> 6.951 </TD><TD> 7.9561 </TD> </TR>
+
+<TR><TH><B> 10 </B></TH><TH> 205498_at </TH> <TD> 8.6921 </TD><TD> 5.5213 </TD> </TR>
+
+<TR><TH><B> 11 </B></TH><TH> 33132_at </TH> <TD> 8.8699 </TD><TD> 9.9811 </TD> </TR>
+
+<TR><TH><B> 12 </B></TH><TH> 206738_at </TH> <TD> 10.7078 </TD><TD> 7.5019 </TD> </TR>
+
+<TR><TH><B> 13 </B></TH><TH> 221586_s_at </TH> <TD> 5.31 </TD><TD> 7.2796 </TD> </TR>
+
+<TR><TH><B> 14 </B></TH><TH> 200036_s_at </TH> <TD> 11.1212 </TD><TD> 12.268 </TD> </TR>
+
+<TR><TH><B> 15 </B></TH><TH> 203764_at </TH> <TD> 4.57 </TD><TD> 7.4126 </TD> </TR>
+
+<TR><TH><B> 16 </B></TH><TH> 205568_at </TH> <TD> 12.4853 </TD><TD> 10.0125 </TD> </TR>
+
+<TR><TH><B> 17 </B></TH><TH> 209975_at </TH> <TD> 13.8085 </TD><TD> 12.0251 </TD> </TR>
+
+<TR><TH><B> 18 </B></TH><TH> 201425_at </TH> <TD> 12.1741 </TD><TD> 10.7715 </TD> </TR>
+
+
+</TABLE>
+<P></P>
+<HR SIZE=5 WIDTH="100%" NOSHADE>
+<P><a name="roc"><H3><B><U>Cross-validation ROC curves</U></B></H3><BR>
+
+<form name='test'>
+<input type='radio' name='field' value='one' onclick='check_value(1)' checked='checked'>All
+<input type='radio' name='field' value='two' onclick='check_value(2)'>CCP
+<input type='radio' name='field' value='three' onclick='check_value(3)'>DLDA
+<input type='radio' name='field' value='four' onclick='check_value(4)'>BCCP
+</form>
+<div id='imagedest'>
+<img src='roc_all.png'>
+</div>
+</P>
+<P>Note: <BR>1. ROC curve for Bayesian Compound Covariate Predictor does not use uncertainty threshold.
+<BR>2. Internet Explorer users need to enable ActiveX control for the radio buttons to work.
+Click the HELP button at the top about the instruction.
+</P>
+<P></P> <HR SIZE=5 WIDTH="100%" NOSHADE> classpredict package version 0.2 </P><P></P>
+</BODY>
+</HTML>

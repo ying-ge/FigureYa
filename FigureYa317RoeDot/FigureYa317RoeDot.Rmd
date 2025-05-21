@@ -1,0 +1,181 @@
+---
+title: "FigureYa317RoeDot"
+author: "小丫画图出品"
+date: "2023-6-30"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠，他的更多作品看这里<https://k.koudai.com/OFad8N0w>
+
+单位：法国斯特拉斯堡遗传与分子生物学研究所，肿瘤功能基因组实验室
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+基于Ro/e分析对这些细胞亚群进行了组织富集分析，结果观察到肥大细胞和髓系细胞优先分布在动脉粥样硬化核心(AC)部位，而淋巴细胞优先分布在邻近部位。
+
+![](example.png)
+
+出自<https://bmcbiol.biomedcentral.com/articles/10.1186/s12915-023-01540-2>
+
+Fig. 1 Dissection of the immune landscape in atherosclerosis with scRNA-seq.
+e Line chart showing tissue prevalence for each cell type estimated by Ro/e score
+
+# 应用场景
+
+根据单细胞数据，计算细胞比例分布特异度（Ro/e），并绘制折线图
+
+输入：Seurat对象，具有样本来源（Group）和细胞类型（Celltypes）信息
+
+输出：折线图（Proportion.pdf）和Ro/e表格
+
+把多组Ro/e绘制成热图，可参考FigureYa312CellPreference<https://k.youshop10.com/2Pg4u-pL>。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+
+```{r}
+library(Seurat)
+library(GEOquery) # 用于从GEO里的GSE159677_series_matrix.txt.gz文件读取样本信息
+library(magrittr)
+library(plyr)
+library(openxlsx)
+library(GSVA)
+library(epitools) # 用于生成期望频数表
+library(reshape2)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+从GEO下载输入数据，<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159677>，下载Supplementary file表格里的`GSE159677_RAW.tar`，和Download family里的`Series Matrix File(s)`，存放在InputData文件夹里。也可以从语雀下载<https://www.yuque.com/figureya/figureyaplus/easyinput>
+
+![](InputData.png)
+
+单细胞数据的准备
+
+```{r eval=FALSE}
+# 目标：生成一个注释好的Seurat对象，以备作图需求
+# Seurat对象应包含以下信息
+# 样本分组（group）和细胞类型（Celltypes）
+
+# 设置存放输入数据的路径
+data.path <- file.path("InputData") 
+# 读取样本信息
+sample.info <- getGEO(filename = file.path(data.path,"GSE159677_series_matrix.txt.gz"))
+sample.info <- as.data.frame(sample.info)
+sample.info$title <- gsub(" scRNA-seq", "", sample.info$title)
+sample.info <- data.frame(
+  "geo" = sample.info$geo_accession,
+  "patient" = gsub("(.+)\ (.+)\ (.+)", "\\1\\2", sample.info$title),
+  "group" = gsub("(.+)\ (.+)\ (.+)", "\\3", sample.info$title)
+)
+
+# 批量读取表达矩阵
+samples <- list.dirs("InputData", full.names = T)[-1]
+mtx.list <- lapply(samples, function(sample){
+  mtx = Read10X(data.dir = sample)
+  colnames(mtx) = paste0(substr(basename(sample), 1, 10), colnames(mtx))
+  return(mtx)
+})
+mtx <- do.call(cbind, mtx.list)
+
+# 生成Seurat对象
+seu <- CreateSeuratObject(mtx, min.cells = 3, min.features = 200)
+seu$Sample <- substr(colnames(seu), 1, 10)
+seu$Patient <- mapvalues(x = seu$Sample,
+                         from = sample.info$geo, to = sample.info$patient)
+seu$Group <- mapvalues(x = seu$Sample,
+                       from = sample.info$geo, to = sample.info$group)
+seu <- FindVariableFeatures(seu) %>% NormalizeData() %>% ScaleData()
+seu <- RunPCA(seu)
+seu <- RunUMAP(seu, dims = 1:20)
+seu <- FindNeighbors(seu, dims = 1:20) %>% FindClusters(resolution = 0.4)
+DimPlot(seu, group.by = "seurat_clusters", label = T)
+
+# 此处使用机器注释，实际情况中应使用手动注释
+marker <- read.xlsx("marker.xlsx")
+marker <- split(marker$GeneSymbol, marker$Celltype)
+marker.score <- gsva(expr = AverageExpression(seu)[[1]],
+                     gset.idx.list = marker)
+anno <- data.frame(
+  "cluster" = colnames(marker.score),
+  "celltype" = rownames(marker.score)[apply(marker.score, 2, which.max)]
+)
+seu$Celltypes <- mapvalues(x = seu$seurat_clusters,
+                           from = anno$cluster, to = anno$celltype)
+saveRDS(seu, "seu.rds") # 保存seu对象
+```
+
+# 计算Ro/e
+
+```{r}
+# 读取Seurat对象
+seu <- readRDS("seu.rds")
+observe.data <- as.matrix(as.data.frame.matrix(table(seu$Group, seu$Celltypes)))
+
+# 计算Ro/e
+expected.data <- expected(observe.data)
+Ratio <- observe.data/expected.data
+
+# 输出Ro/e表格
+write.table(Ratio, "output_RatioOE.txt",
+            sep = "\t", row.names = F, col.names = T, quote = F)
+```
+
+# 绘制Ro/e折线图
+
+```{r}
+# 生成绘图数据
+plot.data <- melt(Ratio)
+colnames(plot.data) <- c("Group", "Celltype", "Ratio")
+plot.data$Celltype <- factor(as.character(plot.data$Celltype),
+                             levels = colnames(Ratio)[order(Ratio[1, ])])
+
+color <- setNames(object = c("#CD2626", "#4682B4"), 
+                 nm = c("AC", "PA"))
+
+# 画折线图
+ggplot(plot.data, aes(x = Celltype, y = Ratio, group = Group, color = Group))+
+  geom_point(size = 3) +
+  geom_line(linetype = "dashed") +
+  scale_color_manual(values = color) +
+  theme_classic() + 
+  labs(x = "", y = "Ro/e", fill = "position") + 
+  theme(axis.text.x = element_text(hjust = 0.5, size = 12, color = "black"),
+        axis.title.y = element_text(hjust = 0.5, size = 12, color = "black"),
+        axis.text.y = element_text(hjust = 0.5, size = 12, color = "black"),
+        axis.ticks = element_line(size = 0.2, color="black"),
+        axis.ticks.length = unit(0.2, "cm"),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = c(0.9, 0.9), # 自己调整，把图例放到空白处
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 10))
+ggsave("Roedot.pdf", width = 5, height = 4)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
