@@ -1,0 +1,16 @@
+sambamba markdup -r -t 4 SRR5388866.bam SRR5388866.rmdup.bam
+sambamba markdup -r -t 4 SRR5388867.bam SRR5388867.rmdup.bam
+sambamba markdup -r -t 4 SRR5388868.bam SRR5388868.rmdup.bam
+sambamba markdup -r -t 4 SRR5388869.bam SRR5388869.rmdup.bam
+sambamba markdup -r -t 4 SRR5388870.bam SRR5388870.rmdup.bam
+sambamba markdup -r -t 4 SRR5388871.bam SRR5388871.rmdup.bam
+sambamba markdup -r -t 4 SRR5388872.bam SRR5388872.rmdup.bam
+sambamba markdup -r -t 4 SRR5388873.bam SRR5388873.rmdup.bam
+sambamba markdup -r -t 4 SRR5388874.bam SRR5388874.rmdup.bam
+sambamba markdup -r -t 4 SRR5388875.bam SRR5388875.rmdup.bam
+sambamba markdup -r -t 4 SRR5388876.bam SRR5388876.rmdup.bam
+sambamba markdup -r -t 4 SRR5388877.bam SRR5388877.rmdup.bam
+sambamba markdup -r -t 4 SRR5388878.bam SRR5388878.rmdup.bam
+sambamba markdup -r -t 4 SRR5388879.bam SRR5388879.rmdup.bam
+sambamba markdup -r -t 4 SRR5388880.bam SRR5388880.rmdup.bam
+sambamba markdup -r -t 4 SRR5388881.bam SRR5388881.rmdup.bam

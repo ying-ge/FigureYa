@@ -1,0 +1,334 @@
+---
+title: "FigureYa174squareCross"
+author: "小丫画图出品"
+date: "2020-4-19"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：hazard
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+这篇文章自带的R代码里没找到这张图的代码……
+我其实就想要基因表达和药物连线，他右侧target 和pathway的连线。
+感觉用的地方其实挺多的，想学学连线的方法。
+
+![](example.png)
+
+出自<https://doi.org/10.1038/s42255-019-0045-8>
+
+Fig. 5 | Effects of multidimensional hypoxia-associated signatures on drug response. a, Interaction of hypoxia-associated mRNAs, DNA methylation, miRNAs and drug response. Upregulated genes (red bars in upper panel) in hypoxia score-high ESCA negatively correlate (green lines, drug-sensitive) with the response to 17 drugs. Downregulated miRNAs (blue bars, left panel), hypomethylation (blue bars, bottom panel) for the corresponding upregulated genes positively correlate (magenta lines, drug-resistant) to drug response. The target genes and targeted pathways of drugs are listed in the panel to the right. The gold line indicates miRNA-targeted mRNAs; the red line links the drug to its target and targeted pathway. DNA-PK, DNA-dependent protein kinase; Hsp90, heat shock protein 90; KIF11, kinesin family member 11; PRKC, serine/threonine-protein kinase; SHP-1/2, Src homology 2 domain- containing protein tyrosine phosphatase 1/2; STLC, S-trityl-l-cysteine. 
+
+# 应用场景
+
+任意两组、多组连线。
+
+多列或上下左右的排布方式。
+
+根据自己数据的生物学意义，来排列各个节点的顺序。或许能够出现特殊的模式，从而展示出有意义的生物学规律。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+devtools::install_github("zzwch/crosslinks") 
+install.packages("aplot")
+```
+
+加载包
+
+```{r}
+library(ggplot2)
+library(aplot)
+library(dplyr)
+library(crosslinks)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input_nodes.txt，所有节点id及其类别type。
+
+easy_input_edges.txt，每两个被连起来的节点为一行。
+
+```{r}
+# 载入连线所需的节点类型
+nodes <- read.table("easy_input_nodes.txt", header = T)
+head(nodes)
+table(nodes$type)
+
+# 载入连线所需的节点间的关系
+edges <- read.table("easy_input_edges.txt", header = T)
+head(edges)
+```
+
+为了画上下左三面的bar plot，需提供节点对应的数值：
+
+- easy_input_geneData.txt
+- easy_input_methData.txt
+- easy_input_mirData.txt
+
+```{r fig.width=10, fig.height=6}
+# 载入画bar plot所需的数值
+geneData <- read.table("easy_input_geneData.txt", header = T)
+head(geneData)
+methData <- read.table("easy_input_methData.txt", header = T)
+head(methData)
+mirData <- read.table("easy_input_mirData.txt", header = T)
+head(mirData)
+```
+
+## 左右连线（列之间）
+
+左右多列之间连线，用columnCross函数来画。
+
+两列
+
+```{r}
+columns <- list(
+  Target = nodes$id[nodes$type == "Tar"], # set the order as you like
+  Pathway = nodes$id[nodes$type == "Path"]# set the order as you like
+)
+columns
+columnCross(edges, columns, height = 10, flank_mult = 0.1, segment_shrink = 0.2) +
+     scale_color_manual(values = "navy") # 自定义线的颜色
+ggsave("squareCross_2.pdf", width = 5, height = 5)
+```
+
+三列
+
+```{r}
+columns <- list(
+  #用输入文件中的默认顺序
+  Drug = nodes$id[nodes$type == "Drug"],
+  #也可以换成下面这行，手动按自己想要的顺序写入
+  #Drug = c("Drug3", "Drug2", "Drug1", "Drug4", "Drug5", "Drug8", "Drug7", "Drug6"),
+  Target = nodes$id[nodes$type == "Tar"], # set the order as you like
+  Pathway = nodes$id[nodes$type == "Path"]# set the order as you like
+)
+columns
+columnCross(edges, columns, height = 10, flank_mult = 0.1, segment_shrink = 0.2) +
+  scale_color_manual(values = c("navy","red")) # 自定义线的颜色
+
+ggsave("squareCross_3.pdf", width = 5, height = 5)
+```
+
+四列
+
+```{r}
+columns <- list(
+  Gene = nodes$id[nodes$type == "Gene"],
+  Drug = nodes$id[nodes$type == "Drug"],
+  Target = nodes$id[nodes$type == "Tar"], # set the order as you like
+  Pathway = nodes$id[nodes$type == "Path"]# set the order as you like
+)
+columns
+columnCross(edges, columns, height = 10, flank_mult = 0.1, segment_shrink = 0.2) +
+  scale_color_manual(values = c("navy","red","orange")) # 自定义线的颜色
+ggsave("squareCross_4.pdf", width = 6, height = 5)
+```
+
+## 上下左右连线（行、列之间）
+
+上下左右连线，用squareCross函数来画
+
+```{r}
+top <- nodes$id[nodes$type == "Gene"] # set the order as you like
+bottom <- nodes$id[nodes$type == "Meth"] # set the order as you like
+left <- nodes$id[nodes$type == "Mir"] # set the order as you like
+right <- nodes$id[nodes$type == "Drug"] # set the order as you like
+
+squareCross(edges, top ,bottom, left, right, 
+            height = 10, width = 10, flank_mult = 0.1,
+            show_node_label = T) + # 显示node label 
+  # 自定义线的颜色
+  scale_color_manual(values = c("navy", "red", "yellow", "forestgreen"))
+ggsave("squareCross_22.pdf", width = 5, height = 5)
+```
+
+## 复现原图
+
+```{r fig.width=10, fig.height=8}
+# 例文顶部按基因变化倍数从高到低排序，底部跟顶部一致
+top <- geneData$gene[order(geneData$lfc, decreasing = T)] # set the order as you like
+bottom <- methData$meth[order(geneData$lfc, decreasing = T)] # In this case, Meth should be the same order with Gene
+left <- nodes$id[nodes$type == "Mir"] # set the order as you like
+right <- nodes$id[nodes$type == "Drug"] # set the order as you like
+
+# 右侧要画的3列
+columns <- list(
+  Drug = nodes$id[nodes$type == "Drug"], # set the order as you like
+  Target = nodes$id[nodes$type == "Tar"], # set the order as you like
+  Pathway = nodes$id[nodes$type == "Path"]# set the order as you like
+)
+
+height <- 10
+width <- 10
+flank_mult <- c(top = 0.1, bottom = 0.1,left = 0.1, right = 0.1)
+
+# 先分别画出3个bar plot
+topAnn <- geneData %>%
+  mutate(gene_f = factor(gene, top)) %>%
+  ggplot(mapping = aes(
+    newCoord(gene_f, width, flank_mult[['top']]),
+    lfc)) +
+  geom_bar(fill = "red",
+           stat = "identity",
+           width = 0.5) + # 间距跟bar同宽
+  geom_text(mapping = aes(label = gene), angle = 90, hjust =-0.2, fontface ="italic") +
+  labs(x = NULL, y = "log2(Fold Change)") +
+  theme_classic() +
+  theme(axis.text.x = element_blank(),
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank())
+#topAnn
+
+# Bottom plot
+botAnn <- methData %>%
+  mutate(meth_f = factor(meth, bottom)) %>%
+  ggplot(mapping = aes(newCoord(meth_f, width, flank_mult[['bottom']]),
+                       lfc)) +
+  geom_bar(fill = "blue",
+           stat = "identity",
+           width = 0.5) +
+  #geom_text(mapping = aes(label = gene), angle = 90, hjust =-0.2, fontface ="italic") +
+  labs(x = NULL, y = "Difference") +
+  theme_classic() +
+  theme(axis.text.x = element_blank(),
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank())
+#botAnn
+
+# left plot
+lftAnn <- mirData %>%
+  mutate(mir_f = factor(mir, left)) %>%
+  ggplot(mapping = aes(newCoord(mir_f, height, flank_mult[['left']]),
+                       lfc)) +
+  geom_bar(fill = "red",
+           stat = "identity", 
+           width = 0.5) +
+  geom_text(mapping = aes(y = 0,label = mir), 
+            #fontface ="italic", 
+            vjust = -1, 
+            hjust = 1) +
+  labs(x = NULL, y = "log2(Fold Change)") +
+  theme_classic() +
+  theme(axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  coord_flip()
+#lftAnn
+
+# 画连线并跟3个bar plot拼一起
+p <- (squareCross(edges, top ,bottom, left, right, height = 10, width = 10, flank_mult = 0.1) +
+        #自定义配色，例文把miRNA和DNA甲基化都归为resistant，因此这两个方向的连线都用了紫色
+        #实际应用时，根据自己数据的意义调整颜色
+        scale_color_manual(values = c("purple", "purple", "yellow", "green"))) %>%
+  insert_top(topAnn, 0.4) %>%
+  insert_bottom(botAnn, 0.4) %>%
+  insert_left(lftAnn, 0.4) %>%
+  
+  # 在右侧加入多列之间的连线
+  insert_right(columnCross(edges, columns, height = 10, flank_mult = 0.1, segment_shrink = 0.2) +
+     scale_color_manual(values = c("red", "red")) , 0.6)
+p
+ggsave(plot = p, filename = "squarecross.pdf", width = 8, height = 5)
+```
+
+# 后期处理
+
+输出的pdf文件是矢量图，可以用矢量图编辑器打开（例如Illustrator）调整图形、文字。
+
+# 附：示例数据生成过程
+
+```{r example_data, eval = F, include=T}
+# nodes
+nodes <- data.frame(
+  id = c(paste0("Gene", 1:10), paste0("Meth", 1:10),
+         paste0("Mir", 1:6), paste0("Drug", 1:8),
+         paste0("Tar", 1:8), paste0("Path", 1:6)),
+  type = c(rep("Gene", 10), rep("Meth", 10), 
+           rep("Mir", 6), rep("Drug", 8),
+           rep("Tar", 8), rep("Path", 6))
+  )
+# 保存到文件
+write.table(nodes, "easy_input_nodes.txt", quote = F, sep = "\t", row.names = F)
+
+# edges
+edges <- data.frame(rbind(
+  # gene vs mir
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Gene"],
+                    replace = T, 30),
+    target = sample(nodes$id[nodes$type == "Mir"],
+                    replace = T, 30)),
+  # gene vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Gene"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 100)),
+  # meth vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Meth"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 100)),
+  # mir vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Mir"],
+                    replace = T, 20),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 20)),
+  
+  # drug vs target
+  data.frame(
+    source = nodes$id[nodes$type == "Drug"],
+    target = nodes$id[nodes$type == "Tar"]),
+  # target vs path
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Tar"],
+                    replace = T, 15),
+    target = sample(nodes$id[nodes$type == "Path"],
+                    replace = T, 15))
+))
+write.table(edges, "easy_input_edges.txt", quote = F, sep = "\t", row.names = F)
+
+# gene annotation
+geneData <- data.frame(
+  gene = nodes$id[nodes$type == "Gene"],
+  lfc = runif(length(nodes$id[nodes$type == "Gene"]), 0, 6))
+write.table(geneData, "easy_input_geneData.txt", quote = F, sep = "\t", row.names = F)
+
+# meth annotation
+methData <- data.frame(
+  meth = nodes$id[nodes$type == "Meth"],
+  lfc = runif(length(nodes$id[nodes$type == "Meth"]), -0.5, -0.2))
+write.table(methData, "easy_input_methData.txt", quote = F, sep = "\t", row.names = F)
+
+# mir annotation
+mirData <- data.frame(
+  mir = nodes$id[nodes$type == "Mir"],# set the order as you want
+  lfc = runif(length(nodes$id[nodes$type == "Mir"]), -4,0))
+write.table(mirData, "easy_input_mirData.txt", quote = F, sep = "\t", row.names = F)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

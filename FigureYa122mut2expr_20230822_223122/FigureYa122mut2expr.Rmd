@@ -1,0 +1,461 @@
+---
+title: "FigureYa122mut2expr"
+author: "小丫画图出品"
+date: "2019-7-29"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：赵龙，中科院遗传所在读博士
+
+擅长：ChIP-seq，MNase-seq，ATAC-seq，HiC，ChIA-PET，GWAS分析，R语言。
+
+兴趣：单细胞RNA-seq，ATAC-seq，机器学习相关。
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+虽然原文附件给出了代码，但自己看着费劲，请高手带我们理解并复现原文的Figure 1b建模。
+
+![](example.png)
+
+出自<http://www.nature.com/articles/ncomms6901>
+
+代码在原文补充材料中有提供，里面有很多东西值得学习。同时我自己写了一些比原文精简的代码（一些数据命名尽量和原文一致，确保小伙伴跑的时候能够理解不同做法的异曲同工）。
+
+**小丫碎碎念：**像这种附带代码的好文章越来越多，是非常好的学习资源。
+
+这类文章怎么找到呢？小丫的经验是：在感兴趣的期刊主页的高级搜索里，搜code或script，同时限定research article和发表年份等信息。检索结果里会有上下文，一眼扫过去，就能看到哪些文章带代码。
+
+怎样学习这类代码？这次众筹就从这篇带代码的文章带你上手，以后你就可以自己去挖宝藏了。推荐路线：
+
+- 先尝试自己写，或者至少在脑子里猜测作者是用什么方法哪个包实现的
+- 看原文代码，边看边实践
+- 记笔记，思考这段代码能应用到哪些场景上，可以尝试按照FigureYa的格式来写，或者干脆写成R包（Y叔说写R包要趁早）
+- 用在自己的数据上，争取能用到paper里，经历了这一过程，你会有质的提升
+
+自己死磕一篇文章的代码是孤独的，遇到问题也没人讨论，以后有机会我们可以搞个学习小组，感兴趣的小伙伴一起讨论同一篇文章的代码。
+
+## 应用场景
+
+已有genotype和转录数据，通过线性模型解析突变对基因表达的贡献，即基因表达如何响应不同的genotype，不同的突变如何影响基因表达。
+
+该模型的假设：
+
+1. 每个突变位点只是影响特定的一些基因的表达；
+
+2. 包含2种以上突变的个体，基因表达变化为两个或多个突变影响基因集合的并集；
+
+缺点：该模型忽略了基因间的相互调控。
+
+如果想要系统的研究基因之间的相互关系，就需要更多的基因样本容量，所以该线性模型方法是相对小样本量的很好的方式。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("hgu133plus2.db")
+```
+
+加载包
+
+```{r}
+library(openxlsx)
+library(affy) #芯片数据处理
+library(gcrma) #芯片数据处理
+library(org.Hs.eg.db) #人类基因注释
+library(hgu133plus2.db) #人类基因注释
+library(limma) #线性模型
+library(RColorBrewer) #颜色
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入数据的预处理
+
+需要两种输入数据：表达数据和基因型数据
+
+表达数据：159个突变体和17个正常个体芯片数据，下载地址：< http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE58831>，点击Download里的http下载（早上下载速度更快），解压缩到当前文件夹。
+
+genotype和表型数据：Supplementary Data 1—ncomms6901-s2.xlsx，其中部分个体数据缺失。
+
+### 芯片数据处理：
+
+以下是芯片数据处理过程，主要用到affy，gcrma包
+
+下面这一步需要较长的运行时间，我把运行结果gset保存在文件里，便于再次运行时读取
+
+```r
+celFiles <- dir("GSE58831_RAW",full.names=T)  #读取文件夹下面文件
+affyBatch <- read.affybatch(filenames = celFiles)  #Read CEL files into an Affybatch
+gset <- gcrma(affyBatch)  #converts an AffyBatch into an ExpressionSet
+save(gset, file = "gset.RData")
+```
+
+```{r}
+#读入gset
+load("gset.RData")
+
+#把sample名字GSM1420467_MDS194.CEL.gz模式替换成GSM1420467
+samples <- sub("_.+","", sampleNames(gset)) 
+sampleNames(gset) <- samples
+
+#替换探针id替换成ENTREZID，这里需要用到hgu133plus2.db。但是存在多对一的情况，例如1570001_at，222201_s_at两个探针都对应9994这个ENTREZID，所以需要把两个探针数据取平均值：
+e <- exprs(gset)  #calculate expression 
+e[1:3,1:3] #探侦组的表达矩阵
+tab <- select(hgu133plus2.db, keys = keys(hgu133plus2.db), columns = c("ENTREZID"))   #build a data with tow columns,1,probe id 2,ENTREZID
+```
+
+上面的e里面保存了探针组的表达矩阵，需要转换成ENTREZID对应的表达矩阵，这里提供三种方式，便于理解：
+
+**方式一：**我自己用的code，比较繁琐，也容易理解。
+
+思路是：在表达数据中加入ENTREZID，然后根据ENTREZID把dataframe通过split转换成list。之后把list中第一列的PROBEID和最后一列的ENTREZID去掉，最后通过sapply得到表达数据：
+
+```r
+expr <- as.data.frame(e)
+expr$PROBEID <- rownames(expr)
+expr.id <- merge(expr,tab,by="PROBEID")
+list <- split(expr.id, expr.id[,178])
+list_new <- list
+for (i in 1:length(list_new)){
+list_new[[i]] <- list[[i]][,2:177] 
+}
+geneExpr <- t(sapply(list_new,colMeans))
+```
+
+**方式二：**这是文章作者的代码，明显简洁许多，运行速度也快了很多，主要是在转换list这里节省了大量时间。
+
+作者的思路是：首先把只含有PROBEID和ENTREZID两列数据按照ENTREZID转换成list，然后通过sapply加一个function就可以了:
+
+```{r}
+geneExpr <- t(sapply(split(tab[,1], tab[,2]), function(ids){
+                    colMeans(e[ids,,drop=FALSE])
+                }))
+```
+
+**方式三：**如果以上理解有点困难，可以通过以下代码进行逐步操作，就会明白了：
+
+```{r}
+list <- split(tab[,1], tab[,2])
+colmean <- function(ids){
+ colMeans(e[ids,,drop=FALSE])
+ }
+
+geneExpr1 <- sapply(list,colmean)
+geneExpr <- t(geneExpr1)
+```
+
+这里有一个小tip就是`e[ids,,drop=FALSE]`，一般来讲用中括号[]来提取大于一列时，得到的是matrix，但是提取某一列的时候一般得到的数据是vector，如果加上drop=FALSE参数，即使提取一列，同样也会得到matrix。
+
+### genotype突变信息
+
+```{r}
+mdsData <- read.xlsx("ncomms6901-s2.xlsx", startRow = 2, check.names = F) #从第2行开始读入
+head(mdsData)
+nu <- which(is.na(mdsData$PDID)) #mdsData中PDID为NA的行名
+design <- mdsData[-nu,c(27:79,7,90)] #把mdsData中PDID为NA的行去掉（其中包括了normal的行）
+design[1:3,1:3]
+```
+
+把normal信息整合成起来，normal信息的所有突变基因列为0。定义年龄数据为NA：
+
+```{r}
+normal <- mdsData[mdsData[,6]=="Normal",c(27:79,7,90)]
+normal[is.na(normal)] <- 0
+normal$age_imp <- NA
+
+# 把突变体信息和野生型信息rbind到一起。根据7503基因表达定义性别，如果该基因表达大于5，则认为是男性选取突变基因：选取标准是至少有5个个体含有这个突变。（如果小于5的rare突变，该模型表现不会很好）
+design <- rbind(design,normal)
+design[125:141,"Gender"] <- geneExpr["7503",as.character(mdsData[mdsData[,6]=="Normal",2])] > 5
+design = design[,colSums(design,na.rm=T)>=5]
+design$Normal <- c(rep(0,nrow(design)-nrow(normal)),rep(1,nrow(normal)))
+ design$offset <- 1
+design <- design[,c(20,1:16,19,17:18)]
+design$age_imp <- scale(design$age_imp,center=T,scale=F)
+rownames(design) <- c(as.character(mdsData[-nu,2]), as.character(mdsData[mdsData[,6]=="Normal",2]))
+
+#把design中NA替换成平均值,这个在日常数据处理过程中会经常用到
+for(j in 1:ncol(design))
+    design[is.na(design[,j]),j] <- mean(design[,j], na.rm=TRUE)
+head(design)
+```
+
+## 构建线性模型
+
+这里主要用到limma包，其中F.stat，是F-statistic检验，该值越大，一般p值越小，即差异显著。
+
+```{r}
+glm <- lmFit(geneExpr[,rownames(design)], design = design ) 
+glm <- eBayes(glm)
+
+F.stat <- classifyTestsF(glm[,-1],fstat.only=TRUE)
+```
+
+## 开始画图-b
+
+b图里有三个小图，我们分别来画。
+
+定义颜色，主要定义19种颜色，每种颜色在之后会代表每一个design的列信息：
+
+```{r}
+colMutations = c(brewer.pal(8,"Set1")[-6], rev(brewer.pal(8,"Dark2")), brewer.pal(7,"Set2"))[c(1:12,16:19,13:15)]
+o <- order(apply(col2rgb(colMutations),2,rgb2hsv)[1,])
+colMutations <- colMutations[rev(o)][(4*1:19 +15) %% 19 + 1]
+names(colMutations) <- colnames(design)[-1]
+
+library("scales")
+show_col(colMutations)
+```
+
+选取Fstat最大的前1000个基因用于作图
+
+```{r}
+w <- names(sort(F.stat, decreasing = TRUE)[1:1000])
+z <- design[,-1]
+geneExpr <- geneExpr[,rownames(design)]
+```
+
+### b中间图：
+
+这是另外一种画heatmap的方法，也是最让我惊艳的一部分。
+
+大体思路就是：首先通过hclust对数据进行聚类，之后通过rasterImage按照聚类的顺序画heatmap。
+
+```{r, fig.width=8, fig.height=5}
+par(bty="n", mgp = c(2,.33,0), mar=rep(0,4), las=1, tcl=-.25, xpd=NA)
+plot(NA,NA, xlim=c(0,ncol(design)), ylim=c(0,nrow(design)), xaxt="n", yaxt="n", xlab="",ylab="", xaxs="i", yaxs="i")
+h <- hclust(dist(z[,1:16]))
+j <- hclust(dist(t(z)))
+
+rasterImage(sapply(1:ncol(z), function(i) ifelse(z[,i]>0, colMutations[i-1], "#FFFFFF"))[h$order,j$order], 0, 0, ncol(design), nrow(design), interpolate=FALSE)
+```
+
+可以把画图部分分解来做:
+
+```r
+func <- function(i) ifelse(z[,i]>0, colMutations[i-1], "#FFFFFF")
+matrix <-sapply(1:ncol(z), func)
+matrix_order <- matrix[h$order,j$order]
+rasterImage(matrix_order, 0, 0, ncol(design), nrow(design), interpolate=FALSE)
+```
+
+### b左侧图：
+
+首先是把基因表达的大小分成12份，然后换成11个颜色，之后组成颜色的矩阵。通过rasterImage画出来。rasterImage还有其他有意思的用法，可以参考Y叔的<https://guangchuangyu.github.io/cn/2017/04/ggimage/>
+
+```{r}
+par(bty="n", mgp = c(2,.33,0), mar=rep(0,4), las=1, tcl=-.25, xpd=NA)
+z <- geneExpr[w,]-rowMeans(geneExpr[w,])
+h <- hclust(dist(z))
+i <- hclust(dist(t(z)))
+plot(NA,NA, xlim=c(0,ncol(geneExpr)), ylim=c(0,1000), xaxt="n", yaxt="n", xlab="",ylab="", xaxs="i", yaxs="i")
+rasterImage(matrix(brewer.pal(11,"RdBu")[cut(z[h$order,i$order], 12)], ncol=ncol(geneExpr)), 0,0,ncol(geneExpr),1000, interpolate=FALSE)
+```
+
+### b右侧图：
+
+```{r}
+par(bty="n", mgp = c(2,.33,0), mar=rep(0,4), las=1, tcl=-.25, xpd=NA)
+plot(NA,NA, xlim=c(0,ncol(design)-1), ylim=c(0,1000), xaxt="n", yaxt="n", xlab="",ylab="", xaxs="i", yaxs="i")
+rasterImage(matrix(brewer.pal(11,"RdBu")[cut(glm$coefficients[w,-1][h$order,j$order], seq(-3,3,l=12))], ncol=ncol(design)-1), 0,0,ncol(design)-1,1000, interpolate=FALSE)
+```
+
+## c和d
+
+仅用b图的heatmap回答基因表达如何响应不同的genotype以及各种不同的突变如何影响基因表达还不够完美，作者又画了c和d图。
+
+原文代码用baseplot画c和d图，我自己用ggplot2复现了c和d图。
+
+```{r}
+set1 = c(brewer.pal(9,"Set1"),brewer.pal(8, "Dark2"))
+source("mg14.R") #From https://github.com/mg14/mg14
+```
+
+### 1. 构建随机的表型数据。
+
+方法和上面的”构建线性模型” 是一样的，只不过随机一下表型数据，即基因型数据，从而能够展现出基因型的差异对基因表达值是有影响的。但是这部分不考虑后面的“Normal”,“Gender”,"Age"等，所以用到的是glm中2-17列（这里我认为原文的2：16是有错误的，因为这样就没有了del(20q)这一列，因为有17个突变体信息，而且仔细看看原文里面的图和补充材料里提供的图是有差别的，所以这里不用太纠结，明白代码原理最重要）
+
+```{r}
+F.stat <- classifyTestsF(glm[,2:17],fstat.only=TRUE)
+set.seed(42)
+rlm <- lmFit(geneExpr[,rownames(design)], apply(design, 2, sample))
+rlm <- eBayes(rlm)
+R.stat <- classifyTestsF(rlm[,2:17],fstat.only=T)
+```
+
+到这里为止，我们有两个 t-statistics数值，分别为F.stat和R.stat，分别代表真实的基因型对基因表达的影响和随机出来的基因型对表达的影响。F.stat的官方解释是：For each gene, classify a series of related t-statistics as significantly up or down using nested F-tests。也就是说，对于一个基因来说，F.stat越大，不同的基因型之间表达差异越明显，so基因型是对这个基因是决定因素的可能性越大。
+
+### 2. 计算基因型差异和表达差异之间的R平方。
+
+实话实说作者的计算公式没太理解。一般来讲计算R平方R2=SSR/SST=1-SSE/SST，其中：SST=SSR+SSE，SST(total sum of squares)为总平方和，SSR(regression sum of squares)为回归平方和，SSE(error sum of squares) 为残差平方和。这里的代码是：
+
+```{r}
+Rgenetics = 1 - 1/(1 + F.stat * 15/(nrow(design)-ncol(design)))
+Pgenetics = 1 - 1/(1 + R.stat * 15/(nrow(design)-ncol(design)))
+names(Rgenetics) <- names(Pgenetics) <- rownames(geneExpr)
+```
+
+Rgenetics正式基因型数据；Pgenetics随机基因型数据。
+
+### 3. 寻找adjust.p值小于0.05的基因（相关性最强的基因）
+
+```{r}
+df1 <- attr(F.stat,"df1")
+df2 <- attr(F.stat,"df2")
+F.p.value <- pchisq(df1*F.stat,df1,lower.tail=FALSE)
+
+r <- min(Rgenetics[p.adjust(F.p.value,"BH")<0.05])
+```
+
+前三步为计算p值。r：adjust.p <0.05的最小的Rgenetics(相关系数)的值.我们认为Rgenetics大于r的基因都是和突变有相关性的基因。
+
+### 4. 原文画c图的代码
+
+```{r}
+par(bty="n", mgp = c(2,.33,0), mar=c(3,2.5,1,1)+.1, las=1, tcl=-.25, xpd=NA)
+#计算Pgenetics的density
+d <- density(Pgenetics,bw=1e-3)
+#这里的f代表缩放的尺度，原文是说由nrow(gexpr)/512得到的。
+f <- 1
+plot(d$x, d$y * f, col='grey', xlab=expression(paste("Explained variance per gene ", R^2)), main="", lwd=2, type="l", ylab="", xlim=c(0,0.7))
+title(ylab="Density", line=1.5)
+#计算Rgenetics的density
+d <- density(Rgenetics, bw=1e-3)
+#找出Rgenetics大于r的基因
+x0 <- which(d$x>r)
+#画fill的密度曲线
+polygon(d$x[c(x0[1],x0)], c(0,d$y[x0])* f, col=paste(set1[1],"44",sep=""), border=NA)
+lines(d$x, d$y* f, col=set1[1], lwd=2)
+#添加文字。这里和原文差了~20个基因，也没太深究原因
+text(d$x[x0[1]], d$y[x0[1]]*f, pos=4, paste(sum(Rgenetics > r), "genes q < 0.05"))
+arrows(Rgenetics["22"], par("usr")[4]/7, Rgenetics["22"], par("usr")[4]/50, length=0.05)
+#找出相关性最强的基因。
+M_Rgenetics <- sort(Rgenetics,decreasing=T)
+head(M_Rgenetics)
+#这里ENTREZID ID 22就是ABCB7，相关性0.5863562（不是本专业，对生物学问题完全无感）
+text(Rgenetics["22"], par("usr")[4]/8, "ABCB7", font=3, pos=3)
+legend("topright", bty="n", col=c(set1[1], "grey"), lty=1, c("Observed","Random"), lwd=2)
+```
+
+这张图只要能说明：
+
+1. 突变体确实和基因表达相关，因为随机出来的random突变信息和表达像相关性要小于真实的（灰线和红线）。
+2. 4049个基因和这16中突变类型是有比较强的相关性（浅红色填充部分）。
+3. ABCB7基因，和突变类型相关性最强（所以下一张图在详细展示ABCB7）。
+
+### 5. 原文画d图的代码
+
+首先通过上面得到的线性模型预测一下基因表达水平。首先是预测所有的基因和突变的关系。这里涉及到一个“%*%”，这个代表矩阵相乘的含义。矩阵相乘是第一个矩阵的row * 第二个矩阵column的和。
+
+```{r}
+glmPrediction <- glm$coefficients %*% t(design)
+
+par(bty="n", mgp = c(1.5,.33,0), mar=c(2.5,2.5,1,1)+.1, las=1, tcl=-.25)
+#首先画一个散点，这个是ABCB7这个基因，横坐标代表预测的基因表达值，纵坐标代表真实的值，因为有141个样本突变信息和表达数据能够对应，所以一共有141个点。
+plot(glmPrediction["22",], geneExpr["22",rownames(design)], ylab=expression(paste("Observed ",italic("ABCB7"), " expression")), xlab=expression(paste("Predicted ",italic("ABCB7"), " expression")), pch=16, cex=.8)
+abline(0,1)
+#在右下方添加小图，首先定义出小图的位置，通过par("usr")得到大图的位置，然后计算小图的位置，x0，y0分别代表小图的横纵坐标x，y轴在大图中的位置
+y <- glm$coefficients["22",-1]+glm$coefficients["22",1]
+u <- par("usr")
+par(xpd=NA)
+x0 <- rep(u[3]+1,ncol(design)-1)
+y0 <- u[4] + 0.05*(u[4]-u[3]) - rank(-y)/length(y) * (u[4]-u[3])/1.2
+#计算ABCB7这个基因和各个基因型信息的相关性分布
+y <- glm$coefficients["22",-1]+glm$coefficients["22",1]
+d <- density(y)
+#画相关性的density分布，这个有点像boxplot的外边
+lines(d$x, d$y/5+1+u[3], col="grey")
+lines(d$x, -d$y/5+1+u[3], col="grey")
+points(x=y, y=x0+violinJitter(y, magnitude=0.25)$y, col=colMutations, pch=16)
+text(x=glm$coefficients["22",1], y= 1.5 +u[3], "Model coefficients", cex=0.8)
+#找出和ABCB7最相关的基因型，首先找到p值小于0.01的基因型
+w <- glm$p.value["22",-1] < 0.01
+rotatedLabel(y[w], x0[w]+0.1, labels=colnames(design)[-1][w], font=ifelse(grepl("[[:lower:]]", colnames(design)[-1]),1,3)[w], cex=.66, pos=1, col=colMutations[w])
+axis(at=-1:1 + glm$coefficients["22",1], labels=-1:1, side=1, cex.axis=.8, line=-1, mgp = c(1.5,.05,0), tcl=-.15)
+#添加相关系数，这里substitute(paste(R^2==r),list(r=round(Rgenetics["22"],2)))代表是首先把r替换成22号基因（ABCB7）基因和突变表型的相关性，并且相关性精确到两位有效数字。因为我们在上面说过相关性最强的是ABCB7，相关系数为0.5863562。
+text(u[1],u[4], substitute(paste(R^2==r),list(r=round(Rgenetics["22"],2))), pos=4)
+```
+
+### 6. 用ggplot2画c和d图
+
+构建数据
+
+```{r}
+library(ggplot2)
+genetics <- data.frame(Observed=Rgenetics,Random=Pgenetics)
+
+for (i in 1:nrow(genetics)){
+ if (genetics[i,1] > r) { 
+ genetics[i,3] <- "sign"
+ } else {
+ genetics[i,3] <- "nc"
+ }}
+```
+
+画图
+
+```{r}
+ggplot(genetics) +
+  geom_density(aes(Random,stat(count)),col="grey",adjust=0.01,size=1)+
+  geom_density(aes(Observed,stat(count),fill=V3),col="red",adjust=0.01,size=1,alpha=0.3)+
+  geom_text(aes(r+0.2,530000),label= paste(sum(Rgenetics > r), "genes q < 0.05"),size =5,)+
+  geom_segment(aes(x=Rgenetics["22"], xend=Rgenetics["22"], y=250000, yend=1), size = 1.5,arrow = arrow(length = unit(0.3, "cm")))+
+  geom_text(aes(Rgenetics["22"],300000),label= "ABCB7",size =5,fontface = "italic")+
+  scale_fill_manual(values=c("white","red"))+
+  labs(x=expression(paste("Explained variance per gene ", R^2)))+
+  theme_bw(base_size=16)+
+  theme(panel.grid=element_blank(),legend.position="none")+
+  coord_cartesian(xlim=c(0,0.7))
+```
+
+```{r}
+expr <- data.frame(Predict=glmPrediction["22",],Overseved=geneExpr["22",rownames(design)])
+vio_data <- as.data.frame(glm$coefficients["22",-1])
+colnames(vio_data) <- "coefficients"
+vio_data$color <- rownames(vio_data)
+
+p1 <- ggplot(expr,aes(Predict,Overseved))+
+  geom_point(size=2)+
+  geom_segment(aes(x=6,xend=10,y=6, yend=10), size = 1)+
+  labs(x=expression(paste("Predicted ",italic("ABCB7"), " expression")),y=expression(paste("Observed ",italic("ABCB7"), " expression")))+
+  geom_text(aes(6.5,9.8,label= "R^2 = 0.6"),size=8)+
+  theme_bw(base_size=16)+
+  theme(panel.grid=element_blank(),legend.position="none")
+  vio_data$color <- rownames(vio_data)
+
+p2 <- ggplot(vio_data,aes(x=1,y=coefficients))+
+  geom_violin(bw=0.1)+
+  geom_jitter(aes(color=color),size=4)+
+  geom_text(aes(1.2,-1.5),label= "SF3B1",size=5,col=colMutations["SF3B1"])+
+  geom_text(aes(1.2,-1),label= "del(5q)",size=5,col=colMutations["del(5q)"])+
+  coord_flip()+
+  scale_color_manual(values=colMutations)+
+  theme_classic(base_size=16)+
+  theme(panel.grid=element_blank(),legend.position="none",
+  axis.title.y=element_blank(),
+  axis.text.y=element_blank(),
+  axis.ticks.y=element_blank(),
+  axis.line.y=element_blank())
+
+#组图
+library(cowplot)
+p1+
+  annotation_custom(ggplotGrob(p2),
+  xmin=7,ymin=4.9,xmax=10,ymax=6.5)
+```
+
+```{r}
+sessionInfo()
+```

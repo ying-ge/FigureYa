@@ -1,0 +1,323 @@
+---
+title: "FigureYa131CMap_update"
+author: "小丫画图出品"
+date: "2021-10-26"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：SRF
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
+# 需求描述
+
+药物分析，Connectivity map(CMap)分析鉴定能够靶向干性特征的潜在化合物/抑制剂，重复出下图
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S0092867418303581?via%3Dihub#app2>
+
+Figure 7. Correlation of cancer stemness with drug resistance – Connectivity map analysis
+(A) Heatmap showing enrichment score (positive in blue, negative in red) of each compound from the CMap for each cancer type. Compounds sorted from right to left by descending number of cancer type significantly enriched.
+(B) Heatmap showing each compound (perturbagen) from the CMap that share Mechanism of actions (rows). Sorted by descending number of compound with shared mechanism of actions.
+See also Figure S7 and Tables S3 and S4.
+
+# 应用场景
+
+任何感兴趣的差异基因都可以用CMap分析得到可能的靶向药物，关于CMap的介绍和原理可以参考[The Connectivity Map-揭示化合物，基因和疾病状态的功能联系](https://mp.weixin.qq.com/s/N0ZvANnWsbBB3XJpSr1j1g).
+
+[CMap build 02](https://portals.broadinstitute.org/cmap/)包含~1,300小分子化合物处理的Affymetrix芯片数据，目前还可以使用但是已经不更新和维护了。考虑到新版的[clue.io](https://clue.io/)query只能上传最多150个上调和下调差异基因，而CMap build 02版本可以总共上传1000个基因（上调和下调基因总和不超过1000个基因）。
+
+作者在查询这个步骤依旧使用的是CMap build 02.
+
+而在分析mechanism of actions (MoA)和drug-target部分则选用的是[CLUE](https://clue.io/)，对感兴趣的小分子进行MoA药物作用机制分析，探索其共同的内在作用机制。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(xlsx)
+library(tidyverse)
+library(GEOquery)
+library(plyr)
+library(circlize)
+library(ComplexHeatmap)
+
+options(java.parameters = "-Xmx8000m")
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# PART 1: 重复出文章Figure 7A
+
+## 生成CMap输入文件
+
+pandif_mRNAsi.xlsx，这里用的是TCGA泛癌数据根据mRNAsi指标高低求出的差异基因。出自例文附件Table S3<https://ars.els-cdn.com/content/image/1-s2.0-S0092867418303581-mmc3.xlsx>，你也可以用任何你感兴趣的差异基因作为输入。
+
+```{r}
+#CMap要求输入基因是GPL96 platform ID的形式
+GPL96 <- getGEO("GPL96", destdir = getwd())
+GPL96 <- Table(GPL96)[, c("ID", "Gene Symbol")]
+
+pan_n <- 33
+pancancertype <- c("ACC", "BLCA", "BRCA", "CESC", "CHOL", "COAD", "DLBC", "ESCA", "GBM", "HNSC", 
+                   "KICH", "KIRC", "KIRP", "LAML", "LGG", "LIHC", "LUAD", "LUSC", "MESO", "OV",
+                   "PAAD", "PCPG", "PRAD", "READ", "SARC", "SKCM", "STAD", "TGCT", "THCA", "THYM",
+                   "UCEC", "UCS", "UVM")
+diflist <- list()
+
+# 读取数据
+for (i in 1:pan_n){
+  print(paste0("Load ", pancancertype[i], " differentially expressed gene data"))
+  difdata <- openxlsx::read.xlsx("pandif_mRNAsi.xlsx", sheet = i, colNames = TRUE) %>% 
+    merge(GPL96, ., by.x = "Gene Symbol", by.y = "GeneSymbol")
+  difdata$logFC <- as.numeric(difdata$logFC)
+  difdata <- difdata[order(difdata$logFC, decreasing = T), ]
+  diflist[[i]] <- difdata
+}
+names(diflist) <- pancancertype
+
+# 输出grp文件(one gene per line)
+if (!file.exists("./grpfile")){
+  dir.create("./grpfile")
+}
+for (i in 1:pan_n){
+  print(paste0(pancancertype[i], " processing"))
+  tmpdata <- diflist[[i]]
+  tmp_updata <- tmpdata[tmpdata$logFC > 0, ]
+  tmp_downdata <- tmpdata[tmpdata$logFC < 0, ]
+  # 选择差异最大的前500个基因
+  if (nrow(tmp_updata) > 500){
+    top500up <- tmp_updata[, "ID"][1:500]
+  } else {top500up <- tmp_updata[, "ID"]}
+  
+  if (nrow(tmp_downdata) > 500){
+    top500down <- rev(tmp_downdata[, "ID"])[1:500]
+  } else {top500down <- rev(tmp_downdata[, "ID"])}
+  # 写成grp格式文件
+  write.table(top500up, paste0("grpfile/", pancancertype[i], "_up500.grp"),
+              row.names = F, sep = "\t", quote = F, col.names = F)
+  write.table(top500down, paste0("grpfile/", pancancertype[i], "_down500.grp"),
+              row.names = F, sep = "\t", quote = F, col.names = F)
+}
+```
+
+## CMap query
+
+需要用到CMap，具体操作方法见同一文件夹下的**CMap query_update.docx**文件，这里以ACC为例，获得ACC_CMap_result.xls。
+
+把按照操作文档运行的结果ACC_CMap_result.xls跟文章提供附件结果做对比。Connectivity_Map_Output.xlsx出自例文附件Table S4，<https://ars.els-cdn.com/content/image/1-s2.0-S0092867418303581-mmc4.xlsx>。
+
+```{r}
+# 按操作文档得到的结果
+ACC_CMap_result <- xlsx::read.xlsx("ACC_CMap_result.xls", sheetIndex = 1, header = T)
+ACC_CMap_result$p <- as.numeric(ACC_CMap_result$p)
+# p < 0.05 筛选具有统计学意义的化合物
+ACC_CMap_sig <- na.omit(ACC_CMap_result)
+ACC_CMap_sig <- ACC_CMap_sig[ACC_CMap_sig$p < 0.05, ]
+dim(ACC_CMap_sig)
+
+# 例文的结果
+ACC_CMap_paper <- openxlsx::read.xlsx("Connectivity_Map_Output.xlsx", sheet = 1, colNames = T) #读取sheet1 ACC
+dim(ACC_CMap_paper)
+
+# 两个结果的交集
+camp_inter <- length(intersect(ACC_CMap_sig$cmap.name, ACC_CMap_paper$cmap.name)) 
+camp_inter
+paper_cmap <- ACC_CMap_result[ACC_CMap_result$cmap.name %in% ACC_CMap_paper$cmap.name, ]
+head(paper_cmap)
+```
+
+虽然跟原文提供的结果不是完全一致。分析的原因可能是在处理输入差异基因这一步骤上，文章说在匹配gpl96探针数据FC排序之后去掉重复的ID。这一步骤我是多个探针匹配同一个基因只保留一个探针。还试过删除掉多个探针匹配一个基因的全部探针以及保留全部的unique探针。结果都不能达到完全一致。
+
+可以看到在`r nrow(ACC_CMap_paper)`有`r camp_inter`个交集，并且rank在前面的compound基本一致。
+
+因此差异应该是由于数据预处理问题，方法是没有问题的。
+
+## 画图
+
+按照操作文档**CMap query_update.docx**里的方法，对全部癌种执行完CMap query之后，整理好文件。
+
+这里就不重复这一过程了，我们直接拿文章的附件来画图。
+
+Connectivity_Map_Output.xlsx: 全部癌种的Connectivity Map Output结果。出自例文附件Table S4，<https://ars.els-cdn.com/content/image/1-s2.0-S0092867418303581-mmc4.xlsx>。
+
+```{r}
+camp_outputlist <- list()
+for (i in 1:pan_n){
+  camp_output_tmp <- openxlsx::read.xlsx("Connectivity_Map_Output.xlsx", sheet = i, colNames = T)
+  camp_outputlist[[i]] <- camp_output_tmp
+}
+names(camp_outputlist) <- pancancertype
+camp_output <- plyr::ldply(camp_outputlist, data.frame)
+colnames(camp_output)[1] <- "Cancer"
+str(camp_output)
+summary(camp_output$p)
+
+# 整理成complexheatmap的输入形式
+oncoplotdata <- reshape2::dcast(camp_output[, c("Cancer", "cmap.name", "enrichment")], Cancer ~ cmap.name)
+rownames(oncoplotdata) <- oncoplotdata$Cancer
+oncoplotdata <- oncoplotdata[, -1]
+mean(apply(oncoplotdata, 1, function(x) sum(!is.na(x)))) #average of 74 compounds per tumor type
+
+#可以发现Figure4A enrichment score跟提供的数据是方向是完全相反的，我认为作者是为了更好地解释结果。enrichment score越高，代表这个药物引起的改变和stemness改变越相似，enrichment score越负，改变越相反，因而该种药物才有可能inhibit stemness-related tumorigenicity。在这里我就不对其进行改变，保留原始CMap output结果。
+
+oncoplotdata[, "zardaverine"]
+# 作者画图的处理并没有进一步的说明，作者在文中只提到筛选p<0.05，并且展示在多于3个癌种都有富集的复合物。但看文章显示的结果应该有进行进一步的筛选。
+
+# 这里我们选取富集多于10个癌种的复合物进行展示。
+# compounds associated with stemness in at least 10 cancer types.
+oncoplotdata2 <- oncoplotdata[, apply(oncoplotdata, 2, function(x) sum(!is.na(x)) > 10)]
+# compounds ordered by number of significantly enriched
+col_sum <- apply(oncoplotdata2, 2, function(x)sum(!is.na(x)))
+oncoplotdata2 <- oncoplotdata2[, order(col_sum, decreasing = F)]
+calculate_sum <- function(x){
+  sumdata <- data.frame(positive = sum(x > 0,na.rm = T), negative = sum(x < 0, na.rm = T))
+  return(sumdata)
+}
+campsum <- apply(oncoplotdata2, 2, calculate_sum)
+campsum <- plyr::ldply(campsum, data.frame)
+rownames(campsum) <- campsum$.id
+campsum <- campsum[, -1]
+column_ha = HeatmapAnnotation(cancernumber = anno_barplot(campsum, axis = TRUE,
+                                                          axis_param = list(side = "right"),
+                                                          bar_width = 1, border = F,
+                                                          gp = gpar(fill = c("#E41A1C",
+                                                                             "#377EB8")),
+                                                          height = unit(2.5, "cm")),
+                              show_annotation_name = FALSE)
+col_fun = colorRamp2(c(-1, 0, 1), c("#377EB8", "white", "#E41A1C"))
+
+pdf("CMap_heatmap.pdf", width = 12, height = 8)
+ht_list = Heatmap(as.matrix(oncoplotdata2), col = col_fun, name = "legend",
+                  heatmap_width = unit(1, "npc"),
+                  heatmap_height = unit(0.8, "npc"),
+                  column_names_side = "top", show_row_dend = FALSE, show_column_dend = FALSE,
+                  show_column_names = TRUE, show_row_names = TRUE,
+                  bottom_annotation = column_ha,na_col = "white", rect_gp = gpar(col = "grey"),
+                  cluster_rows =  F, cluster_columns = F, 
+                  heatmap_legend_param = list(grid_width = unit(2, "cm"),
+                                              grid_height = unit(1.5, "cm")))
+draw(ht_list, column_title = "specific inhibitors", column_title_gp = gpar(fontsize = 25))
+decorate_annotation("cancernumber", {
+    grid.text("Number of cancer \ntype with p < 0.05", 
+              unit(1, "npc") + unit(8, "mm"), just = "left",
+              gp = gpar(fontsize = 12, col="black"))})
+dev.off()
+```
+
+![](CMap_heatmap.pdf)
+
+# PART 2: 重复出文章Figure 7B
+
+## MoA分析
+
+探讨感兴趣药物的作用机制，具体操作方法参考操作文档CMap_MoA.docx。
+
+moa_target_export.txt: 是从网站下载的全部MoA和target信息，只需要对感兴趣的药物进行筛选整理就可以得到文章的输入文件。
+
+```{r eval=FALSE}
+MoAinput2 <- read.table("moa_target_export.txt", sep = "\t", header = T, )
+# 原文中提及74 compounds没有明确说明筛选方法，这里取前50个。
+# 实际运行时，自己先筛选一下感兴趣的compouds
+MoAinput2 <- MoAinput2[1:50,]
+
+# 整理成oncoPrint需要的输入形式
+PerturbagenID <- MoAinput2$Name
+names(PerturbagenID) <- MoAinput2$ID
+MoAinput2$Type <- NULL
+MoAinput2$Name <- NULL
+MoAinput2$MoA <- NULL
+MoAinput2$Target <- NULL
+colnames(MoAinput2) <- c("inhibitors", "mechanisms of action") 
+
+oncoprintinput <- reshape2::dcast(MoAinput2, `mechanisms of action` ~ inhibitors)
+rownames(oncoprintinput) <- oncoprintinput$`mechanisms of action` 
+oncoprintinput <- oncoprintinput[, -1] %>% as.matrix(oncoprintinput)
+oncoprintinput[!is.na(oncoprintinput)] <- "inhibitor"
+oncoprintinput[is.na(oncoprintinput)] <- ""
+colnames(oncoprintinput) <- PerturbagenID[colnames(oncoprintinput)]
+oncoprintinput <- oncoprintinput[, order(colnames(oncoprintinput))]
+```
+
+下面我们就用文章提供的附件重复原图：
+
+Connectivity_Map_Output.xlsx，出自例文附件Table S4里的TableS4B，<https://ars.els-cdn.com/content/image/1-s2.0-S0092867418303581-mmc4.xlsx>。表34是MoA结果，作为Figure 7B的输入结果。
+
+```{r}
+MoAinput <- openxlsx::read.xlsx("Connectivity_Map_Output.xlsx", sheet = 34, colNames = T)
+#parthenolide药物在NFkB pathway inhibitor有2个，其Perturbagen.Id不同
+MoAinput[MoAinput$MoA == "NFkB pathway inhibitor", ]
+
+# 整理成oncoPrint需要的输入形式
+PerturbagenID <- unlist(str_split(MoAinput$Name, ", "))
+names(PerturbagenID) <- unlist(str_split(MoAinput$Perturbagen.Id, ", ")) 
+MoAinput <- MoAinput[, c("MoA", "Perturbagen.Id")] %>% split(.$MoA) %>% lapply("[[", 2) %>% 
+  lapply(., function(x)unlist(str_split(x, ", "))) %>% plyr::ldply(., data.frame)
+colnames(MoAinput) <- c("mechanisms of action", "inhibitors") 
+oncoprintinput <- reshape2::dcast(MoAinput, `mechanisms of action` ~ inhibitors)
+rownames(oncoprintinput) <- oncoprintinput$`mechanisms of action` 
+oncoprintinput <- oncoprintinput[, -1] %>% as.matrix(oncoprintinput)
+oncoprintinput[!is.na(oncoprintinput)] <- "inhibitor"
+oncoprintinput[is.na(oncoprintinput)] <- ""
+colnames(oncoprintinput) <- PerturbagenID[colnames(oncoprintinput)]
+oncoprintinput <- oncoprintinput[, order(colnames(oncoprintinput))]
+```
+
+## 画图
+
+```{r}
+alter_fun = list(
+    background = function(x, y, w, h) 
+        grid.rect(x, y, w*0.9, h*0.9, gp = gpar(fill = "white", col = "grey")),
+    # dots
+    inhibitor = function(x, y, w, h) 
+        grid.points(x, y, pch = 16, size = unit(0.8, "char"))
+    
+)
+ha_coldata <- colSums(apply(oncoprintinput, 2, function(x) x=="inhibitor") + 0) %>% as.numeric()
+ha_rowdata <- rowSums(apply(oncoprintinput, 2, function(x) x=="inhibitor") + 0) %>% as.numeric() 
+top_ha <- HeatmapAnnotation(inhibitors = anno_barplot(ha_coldata, axis = F, border = F, 
+                                                      gp = gpar(fill = "grey"),
+                                                      bar_width = 1),
+                            annotation_name_side = "left",
+                            annotation_name_rot = 90)
+right_ha <- rowAnnotation(count = anno_barplot(ha_rowdata, axis = F, border = F, 
+                                               gp = gpar(fill = "grey"),
+                                               bar_width = 1, width = unit(1.5, "cm")),
+                          annotation_name_side = "top",
+                          annotation_name_rot = 0)
+
+pdf("MoA.pdf", width = 10, height = 8, onefile = F)
+oncoPrint(oncoprintinput, alter_fun = alter_fun, 
+          show_column_names = TRUE, column_names_side = "top",
+          column_order = 1:ncol(oncoprintinput), 
+          top_annotation = top_ha,
+          right_annotation = right_ha,
+          show_pct = FALSE, show_heatmap_legend = F)
+decorate_annotation("inhibitors", {
+    grid.text("mechanism of action", unit(1, "npc") + unit(3, "mm"), just = "left")})
+dev.off()
+```
+
+![](MoA.pdf)
+
+```{r}
+sessionInfo()
+```

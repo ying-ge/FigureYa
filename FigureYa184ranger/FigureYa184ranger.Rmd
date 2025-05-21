@@ -1,0 +1,212 @@
+---
+title: "FigureYa184ranger"
+author: "小丫画图出品"
+date: "2020-6-28"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+实现随机森林滑动窗口法。
+
+![](example.png)
+
+出自<https://www.tandfonline.com/doi/full/10.1080/15592294.2019.1573066>
+
+Figure 2. Ranger provides variable importance score (VIS) for each CpG probe for lung adenocarcinoma (LUAD) patients only in the discovery phase and the validation phase. "Out of bag (OOB)" error rate of top CpG probes in the model, when probes were included one by one based on their VIS ranks in the discovery (A) and the validation phase (B).
+
+# 应用场景
+
+使用加权随机森林对生存数据降维，根据sliding windows sequential forward feature selection法筛选变量
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("ranger")
+install.packages("randomForest")
+install.packages("survival")
+```
+
+加载包
+
+```{r}
+library(ranger)
+library(randomForest)
+library(survival)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+# 显示进程
+display.progress = function (index, totalN, breakN=20) {
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}  
+```
+
+# 输入文件
+
+easy_input_expr.csv，表达矩阵。
+
+easy_input_cli.csv，临床信息。这两个文件跟FigureYa128Prognostic、FigureYa182RFSurv的一样，可以对比感受一下筛选效果。
+
+```{r}
+exp <- read.csv("easy_input_expr.csv",header = T,row.names = 1,check.names = F,stringsAsFactors = F)
+cli <- read.csv("easy_input_cli.csv",header = T,row.names = 1,check.names = F,stringsAsFactors = F)
+
+# 提取既有表达数据又有临床数据的样本
+com_sam <- intersect(colnames(exp),rownames(cli))
+exp <- exp[,com_sam]
+cli <- cli[com_sam,]
+
+# 去除无表达的基因
+exp <- exp[rowSums(exp) > 0,]
+
+# 去除超过10%的样本表达量为0的基因
+exp <- exp[rowSums(exp == 0) < 0.1 * ncol(exp),]
+
+# 对数转化
+exp <- log(exp + 1)
+```
+
+# 单变量cox模型筛选预后基因
+
+理论上表达谱会优先进行一些筛选避免增加运算时间，如使用单变量cox模型筛选预后基因(P < 0.01)
+
+```{r}
+# 过滤出与OS有关的基因
+cox.pcutoff <- 0.001
+Coxoutput.OS <- NULL
+for (i in 1:nrow(exp)) {
+  display.progress(index = i,totalN = nrow(exp)) # 显示进度
+  
+  # 产生临时变量存储生存以及变量表达值
+  tmp <- data.frame(gene = as.numeric(exp[i,]),
+                    OS.time = cli[,"OS.time"],
+                    OS = cli[,"OS"],
+                    stringsAsFactors = F)
+  
+  # 单变量cox比例风险模型
+  cox <- coxph(Surv(OS.time, OS) ~ gene, data = tmp)
+  coxSummary = summary(cox)
+  
+  # 生成cox结果数据框，包括基因名，风险比，z值，waldtest p值，以及HR置信区间
+  Coxoutput.OS=rbind.data.frame(Coxoutput.OS,data.frame(gene=rownames(exp)[i],
+                                                        HR=as.numeric(coxSummary$coefficients[,"exp(coef)"]),
+                                                        z=as.numeric(coxSummary$coefficients[,"z"]),
+                                                        pvalue=as.numeric(coxSummary$coefficients[,"Pr(>|z|)"]),
+                                                        lower=as.numeric(coxSummary$conf.int[,3]),
+                                                        upper=as.numeric(coxSummary$conf.int[,4]),
+                                                        stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+write.csv(Coxoutput.OS,"univariate cox regression for gene filtering.csv",row.names = F,quote = F)
+```
+
+前面跟FigureYa182RFSurv的相同，下面就不一样了。
+
+# 加权随机森林进一步降维
+
+```{r}
+gene.sel <- Coxoutput.OS[which(Coxoutput.OS$pvalue < cox.pcutoff),"gene"]
+tmp <- exp[gene.sel,]
+rownames(tmp) <- gsub("-","_",rownames(tmp)) # 防止出现“-”导致程序报错
+dt.rf <- cbind.data.frame(cli,t(tmp))
+dt.rf <- dt.rf[,setdiff(colnames(dt.rf),"OS.time")] # 二分类分类树，结局考虑overall survival
+
+ntree <- 500
+mtry <- floor(sqrt(length(gene.sel)))
+weight <- 0.999999 # 算法要求无法取1但无限接近1，该参数表示变量被选择的概率，原文为100%。
+seed <- 001
+
+set.seed(seed) # 设置外部种子保证结果可重复
+surv.rf <- ranger(formula = OS ~ ., 
+                  data = dt.rf,
+                  num.trees = ntree,
+                  mtry = mtry,
+                  importance = "impurity",
+                  split.select.weights = rep(weight,length(gene.sel)))
+
+# 变量重要性按照降序排列
+var.imp <- sort(ranger::importance(surv.rf),decreasing = T)
+```
+
+# 逐步回归筛选变量
+
+例文采用sliding windows sequential forward feature selection
+
+简单思路为，根据重要性逐步纳入基因，每一次做当前基因组合下的随机森林并计算oob，取oob达到最小时的组合。
+
+```{r}
+ntree <- 500 # 树的数目，一般为500
+nPerm <- 50 # 扰动次数，一般为50
+var.now <- oob <- c()
+for (var in names(var.imp)) {
+  cat(var,"\n")
+  set.seed(seed)
+  var.now <- c(var.now,var)
+  swsfs.dt <- dt.rf[,c("OS",var.now)]
+  swsfs.dt$OS <- factor(swsfs.dt$OS)
+  model_RF <- randomForest(OS ~ ., 
+                           data = swsfs.dt,
+                           ntree = ntree, 
+                           nPerm = nPerm, 
+                           mtry = floor(sqrt(ncol(swsfs.dt))), 
+                           proximity = T,
+                           importance = F)
+  oob <- c(oob,model_RF$err.rate[ntree,1])
+}
+names(oob) <- names(var.imp)
+signature <- var.imp[1:which.min(oob)] # 取oob达到最小时候的gene组合作为最终signature
+write.table(data.frame(signature = names(signature),importance = as.numeric(signature),stringsAsFactors = F),
+            "signature with importance.txt",sep = "\t",row.names = F,quote = F)
+```
+
+# 开始画图
+
+```{r}
+#pdf("oob from swsfs.pdf",width = 6,height = 5.5)
+par(bty = "o", mgp = c(1.5,.33,0), mar = c(3,4,1,2),las = 1, tcl = -.25)
+plot(1:length(gene.sel),oob,
+     xlab = "Number of Genes",
+     ylab = "",
+     type = "l",
+     lty = 4,
+     col = "red", # 可修改线的颜色
+     cex = 1.5)
+mtext("OOB error rate",side = 2,line = 2.5,las = 3) # 添加y标签
+points(1:length(gene.sel),oob,# 加圆圈
+       col = "red", # 可修改圆圈颜色
+       pch = 19)
+abline(v = which.min(oob),lty = 2, col = "red") # 找到oob最小的位置添加垂直虚线
+#invisible(dev.off())
+
+# save.image("ranger.RData")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

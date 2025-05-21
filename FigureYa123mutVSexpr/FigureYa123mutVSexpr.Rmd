@@ -1,0 +1,144 @@
+---
+title: "FigureYa123mutVSexpr"
+author: "小丫画图出品"
+date: "2019-7-29"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+昨天在群里问了一下突变和表达的相关性，有小伙伴说只能做分组的bar图，我找到一个网站，可以做出这样的图，都是TCGA的数据，想用R复现：<http://tumorsurvival.org/TCGA/Lung_TCGA_LUAD/process.php?geneName=CD274&devidePatientN=median&LowVal=&HighVal=&subtype=All>
+
+![](example.png)
+
+出自TCGAportal<http://tumorsurvival.org/TCGA/Lung_TCGA_LUAD/data/expression_cBioportal_mutation_figures/CD274_ENSG00000120217.12_expression_mutation.png>
+
+## 应用场景
+
+用于展示突变与表达之间的相关性（独立性）
+
+## 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(coin) # 用于置换检验
+library(ComplexHeatmap) # 用于热图绘制（带柱状图注释）
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+display.progress = function ( index, totalN, breakN=20) {
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}
+```
+
+## 输入文件
+
+需要表达谱数据和突变数据：
+
+- SKCM_EXP_CD274.txt，CD274的表达数据
+- SKCM_MUT.txt，突变的01矩阵，从XENA下载：<https://xenabrowser.net/datapages/?dataset=TCGA.SKCM.sampleMap%2Fmutation&host=https%3A%2F%2Ftcga.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+```{r}
+# 表达谱
+expr <- read.table("SKCM_EXP_CD274.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+expr[,1:3]
+
+# 突变
+muta <- read.table("SKCM_MUT.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+muta[1:3, 1:3]
+
+com_sam <- intersect(colnames(expr),colnames(muta)) # 提取相同的样本
+expr <- log2(expr[,com_sam] + 1) # 表达谱对数转化
+muta <- muta[rowSums(muta) > 0.1* ncol(muta),com_sam] # 只提取突变率大于10%的基因（少了也没有意义）
+```
+
+## 置换检验独立性
+
+```{r}
+gene <- "CD274" # 关心的基因名
+
+# 循环做置换检验
+p <- c()
+for (i in 1:nrow(muta)) {
+  display.progress(i,nrow(muta)) # 显示进度
+  tmp <- data.frame(exp=as.numeric(expr[gene,]), mut=factor(muta[i,]),stringsAsFactors = F) 
+  p <- c(p,pvalue(independence_test(exp ~ mut,data = tmp))) # 置换检验
+}
+names(p) <- rownames(muta)
+```
+
+## 开始画图
+
+```{r}
+### 设置颜色 ###
+darkred   <- "#F2042C"
+blue      <- "#2874C5"
+lightgrey <- "#dcddde"
+
+p.cutoff <- 0.005 # 设置p的阈值
+mut_sel <- names(p[p < p.cutoff]) # 这里仅保留少量的相关突变
+
+sam_order <- as.numeric(expr[gene,]); names(sam_order) <- colnames(expr); sam_order <- sort(sam_order,decreasing = T)
+mat <- muta[mut_sel,names(sam_order)] # 根据表达谱排序后确定热图输入数据
+rownames(mat) <- paste(mut_sel,format(p[mut_sel],digits = 3,scientific = T)) # 行名添加保留3位科学计数法的p值
+
+# 设置图例
+column_ha = HeatmapAnnotation(bar = anno_barplot(as.numeric(sam_order),
+                                                 gp = gpar(col = blue,fill = blue), # 设置颜色，柱子的填充和边框均为蓝色
+                                                 border = F, # 取消柱状图最外缘的矩形
+                                                 axis = T), # 添加y轴
+                              height = unit(1.5,"cm")) # 控制注释的高度
+# 绘图
+hm <- Heatmap(mat, # 注意这里是排序后的数据
+              name = "Mut", # 图例的名称
+              width  = unit(12, "cm"), # 控制热图的宽度
+              col = c(lightgrey,darkred), # 热图填充的颜色，这里是二分类
+              cluster_columns = F, # 列不聚类
+              cluster_rows = F, # 行不聚类
+              show_column_names = F, # 不显示列名
+              show_row_names = T, # 显示行名
+              row_names_side = "left", # 行名显示在左侧
+              split = 1:length(mut_sel), # 每个突变分割开
+              top_annotation = column_ha) # 顶部柱状图注释
+
+pdf("mutVSexpr.pdf",width = 10,height = 3.5)
+draw(hm, 
+     row_title = "Significantly associated mutations", # 设置热图的行title
+     column_title = paste("Expression of ",gene), # 设置热图的列title
+     heatmap_legend_side = "right") # 确定legend的位置
+invisible(dev.off())
+```
+
+![](mutVSexpr.pdf)
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,314 @@
+---
+title: "FigureYa165heatmapPvalue"
+author: "小丫画图出品"
+date: "2020-3-1"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+热图展示亚型表达谱，并给出表达谱组间比较p值。
+
+![](example.png)
+
+出自<https://www.frontiersin.org/articles/10.3389/fonc.2019.01038>
+
+Figure 1. Expression of m6A RNA methylation regulators in gliomas with different clinicopathological features. (A-D) The expression levels of thirteen m6A RNA methylation regulators in gliomas with different WHO grades. 
+
+# 应用场景
+
+针对两组或多组样本，做组间差异检验，提供4种常用非参或参数检验法：
+
+- 两组，参数检验"t.test", 非参数检验"wilcox"
+- 多组，参数检验"anova", 非参数检验"kruskal"
+
+用热图展示亚型表达谱，并给出每个基因对应的表达谱组间比较p值。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+```
+
+加载包
+
+```{r}
+library(stringr)
+library(pheatmap)
+library(gplots)
+library(grid)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+加载自定义函数
+
+```{r}
+# 显示进程
+display.progress = function (index, totalN, breakN=20) {
+  
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+  
+} 
+
+# 计算组间统计差异
+cross_subtype_compr <- function(expr = NULL,
+                                subt = NULL,
+                                subt.label = "Subtype",
+                                two_sam_compr_method = "wilcox",
+                                multi_sam_compr_method = "kruskal",
+                                res.path = NULL) {
+  
+  if (!is.element(two_sam_compr_method, c("t.test", "wilcox"))) {stop("Two samples comparison should be t.test or wilcox!\n") }
+  if (!is.element(multi_sam_compr_method, c("anova", "kruskal"))) {stop("multiple samples comparison should be kruskal or anova!\n") }
+  
+  subt.name <- unique(subt[,subt.label])
+  n.subt <- length(subt.name)
+  if(n.subt < 2) {stop("The number of subtype should be greater than 2!\n")}
+  
+  comprTab <- NULL
+  
+  # 两个亚型且为非参数检验
+  if(n.subt == 2 & two_sam_compr_method == "wilcox") {
+    for (i in 1:nrow(expr)) {
+      display.progress(index = i,totalN = nrow(expr))
+      tmp1 <- as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[1]),,drop = F])])
+      tmp2 <- as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[2]),,drop = F])])
+      wt <- wilcox.test(tmp1,tmp2)
+      comprTab <- rbind.data.frame(comprTab,
+                                   data.frame(gene = rownames(expr)[i],
+                                              nominal.p.value = wt$p.value,
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+    }
+  }
+  
+  # 两个亚型且为参数检验
+  if(n.subt == 2 & two_sam_compr_method == "t.test") {
+    for (i in 1:nrow(expr)) {
+      display.progress(index = i,totalN = nrow(expr))
+      tmp1 <- as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[1]),,drop = F])])
+      tmp2 <- as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[2]),,drop = F])])
+      tt <- t.test(tmp1,tmp2)
+      comprTab <- rbind.data.frame(comprTab,
+                                   data.frame(gene = rownames(expr)[i],
+                                              nominal.p.value = tt$p.value,
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+    }
+  }
+  
+  # 多个亚型且为非参数检验
+  if(n.subt > 2 & multi_sam_compr_method == "kruskal") {
+    for (i in 1:nrow(expr)) {
+      display.progress(index = i,totalN = nrow(expr))
+      tmp.list <- list()
+      for (n in 1:n.subt) {
+        tmp.list[[n]] <- data.frame(value = as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[n]),,drop = F])]),
+                                    subt = subt.name[n],
+                                    stringsAsFactors = F)
+      }
+      tmp <- do.call(rbind,tmp.list)
+      kt <- kruskal.test(value ~ subt,data = tmp)
+      comprTab <- rbind.data.frame(comprTab,
+                                   data.frame(gene = rownames(expr)[i],
+                                              nominal.p.value = kt$p.value,
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+    }
+  }
+  
+  # 多个亚型且为参数检验
+  if(n.subt > 2 & multi_sam_compr_method == "anova") {
+    for (i in 1:nrow(expr)) {
+      display.progress(index = i,totalN = nrow(expr))
+      tmp.list <- list()
+      for (n in 1:n.subt) {
+        tmp.list[[n]] <- data.frame(value = as.numeric(expr[i,rownames(subt[which(subt[,subt.label] == subt.name[n]),,drop = F])]),
+                                    subt = subt.name[n],
+                                    stringsAsFactors = F)
+      }
+      tmp <- do.call(rbind,tmp.list)
+      at <- summary(aov(value ~ subt,data = tmp))
+      comprTab <- rbind.data.frame(comprTab,
+                                   data.frame(gene = rownames(expr)[i],
+                                              nominal.p.value = at[[1]][1,5],
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+    }
+  }
+  
+  # 调整p值
+  comprTab$adjusted.p.value = p.adjust(comprTab$nominal.p.value,method = "BH")
+  # 按p值排序
+  #comprTab <- comprTab[order(comprTab$adjusted.p.value, decreasing = F),] 
+  
+  write.table(comprTab,file.path(res.path,"comprTab.txt"),sep = "\t",row.names = F,quote = F)
+  return(comprTab)
+}
+```
+
+# 输入文件
+
+如果你自己的数据已经整理成easy_input*文件的格式，就直接跳到“差异表达分析”。
+
+## 输入文件的下载
+
+基因表达矩阵，CGGA.mRNA_array_301_gene_level.20191128.txt，每行一个基因，每列一个sample。从CGGA下载：[Expression Data (gene level)](http://www.cgga.org.cn/download?file=download/20191128/CGGA.mRNA_array_301_gene_level.20191128.txt.zip&type=mRNA_array_301_gene_level&time=20191128) ，解压；
+
+分组信息，CGGA.mRNA_array_301_clinical.20191128.txt，至少包含CGGA_ID和Grade两列，这里用Grade为LGG和GBM分组。从CGGA下载：[Clinical Data](http://www.cgga.org.cn/download?file=download/20191128/CGGA.mRNA_array_301_clinical.20191128.txt.zip&type=mRNA_array_301_clinical&time=20191128)，解压；
+
+## 读取基因表达矩阵
+
+```{r}
+#exp_data <- read.table("CGGA.mRNA_array_301_gene_level.20191128.txt", header=T, row.names=1, sep="\t")
+# 为方便传输，只保留小数点后1位
+#write.csv(round(exp_data,1), "easy_input_expr_ori.csv", quote = F)
+exp_data <- read.csv("easy_input_expr_all.csv", row.names = 1)
+exp_data[1:3,1:3]
+```
+
+## 读取分组信息
+
+用到两列：CGGA_ID和Grade
+
+```{r}
+clinical_data <- read.table("CGGA.mRNA_array_301_clinical.20191128.txt", header=T, sep="\t")
+clinical_data <- clinical_data[!is.na(clinical_data$Grade), ]
+clinical_data[1,]
+
+Subtype <- data.frame(Subtype = clinical_data$Grade)
+row.names(Subtype) <- clinical_data$CGGA_ID
+# 保存到文件，便于模仿格式
+write.csv(Subtype, "easy_input_group.csv", quote = F)
+```
+
+## 提取感兴趣的基因的表达矩阵
+
+```{r}
+# 读取基因名
+mygene <- read.table("easy_input_gene.txt")$V1
+
+# 获取感兴趣的基因表达谱
+mygene_data <- exp_data[mygene, ]
+mygene_data[1:5, 1:5]
+# 保存到文件
+write.csv(mygene_data, "easy_input_expr.csv", quote = F)
+```
+
+# 差异表达分析
+
+```{r}
+## 读取感兴趣的基因表达矩阵
+mygene_data <- read.csv("easy_input_expr.csv", row.names = 1)
+# 或者读取全部基因的表达矩阵，后面画Top 20个基因
+#mygene_data <- read.csv("easy_input_expr_all.csv", row.names = 1)
+mygene_data[1:3, 1:3]
+
+## 读取分组信息
+Subtype <- read.csv("easy_input_group.csv", row.names = 1)
+# 查看各组名字和sample数量，画图时要用
+table(Subtype$Subtype)
+
+## 取表达矩阵和分组信息中共有的sample
+com_sam <- intersect(colnames(mygene_data),rownames(Subtype))
+mygene_data <- mygene_data[,com_sam]
+Subtype <- Subtype[com_sam,,drop = F]
+head(Subtype)
+
+## 用前面的自定义函数计算组间统计差异
+comprTab <- cross_subtype_compr(expr = mygene_data, # 或log2(mygene_data + 1)，如果用参数检验，请注意对数转化；若非参均可
+                                subt = Subtype,
+                                #two_sam_compr_method = "wilcox", # 两组"t.test", "wilcox"
+                                multi_sam_compr_method = "kruskal", # 多组"anova", "kruskal"
+                                res.path = ".")
+# 用全部基因来画
+n.show_top_gene <- nrow(mygene_data)
+# 或者取top 20个基因来画
+#n.show_top_gene <- 20 
+
+# 按分组排序
+subt.order <- Subtype[order(Subtype$Subtype),,drop = F]
+indata <- mygene_data[comprTab$gene[1:n.show_top_gene],rownames(subt.order)]
+```
+
+# 开始画图
+
+```{r}
+# 数据标准化和边界设置
+plotdata <- t(scale(t(indata)))
+plotdata[plotdata > 2] <- 2
+plotdata[plotdata < -2] <- -2
+
+# 调整行名
+blank <- "    " # 行名和p值之间的间隔
+p.value <- comprTab$adjusted.p.value[1:n.show_top_gene]
+sig.label <- ifelse(p.value < 0.001,"****",
+                    ifelse(p.value < 0.005,"***",
+                           ifelse(p.value < 0.01,"**",
+                                  ifelse(p.value < 0.05,"*",""))))
+p.label <- formatC(p.value, # 将p值变成保留两位小数的科学计数法
+                   format = "e",
+                   digits = 2)
+
+add.label <- str_pad(paste0(rownames(plotdata),sig.label), # 固定行名宽度并再右侧补齐" "
+                     max(nchar(paste0(rownames(plotdata),sig.label))), 
+                     side = "right")
+
+annCol <- subt.order # 获得排序后的亚型注释信息，这里只有一个变量需要注释
+colnames(annCol)[1] <- paste(str_pad(colnames(annCol)[1], # 注释列名补上"P-value"，宽度和刚才一致
+                                     max(nchar(paste0(rownames(plotdata),sig.label))), 
+                                     side = "right"),
+                             "P-value",
+                             sep = blank)
+
+annColors <- list(c("WHO II"="lightblue", "WHO III"="darkgreen", "WHO IV"="pink")) # 如果有多个变量要注释颜色请补充c()
+names(annColors) <- colnames(annCol)[1] # 如果有多个变量要注释颜色请补充每张list的name
+
+# 绘制热图
+pheatmap(cellheight = 15, cellwidth = 1,
+         mat = plotdata, # 输入数据
+         scale = "none", # 不标准化因为数据已经被标准化
+         annotation_col = annCol, # 列注释信息
+         annotation_colors = annColors, # 列注释对应的颜色
+         cluster_cols = F, # 列不聚类
+         cluster_rows = F, # 行不聚类
+         show_colnames = F, # 不显示列名
+         show_rownames = T, # 显示基因名
+         #annotation_legend = F, # 不显示图例
+         labels_row = paste(add.label, p.label, sep=blank), # 自定义样本名义blank作间隔
+         fontfamily = "mono", # 关键，使用fixed font而不是proportional font
+         gaps_col = c(173), # 根据自己的数据设置空白间隔的位置
+         filename = "heatmapPvalue.pdf")
+```
+
+![](heatmapPvalue.pdf)
+
+# 后期处理
+
+输出的pdf文件是矢量图，可使用Illustrator等矢量图工具打开，仿照例文将各个亚型的名字添加在annotation bar的上方。
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

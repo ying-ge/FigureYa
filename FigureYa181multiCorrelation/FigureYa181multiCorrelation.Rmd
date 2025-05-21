@@ -1,0 +1,200 @@
+---
+title: "FigureYa181multiCorrelation"
+author: "小丫画图出品"
+date: "2020-6-14"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：赵龙，中科院遗传所在读博士
+
+擅长：ChIP-seq，MNase-seq，ATAC-seq，HiC，ChIA-PET，GWAS分析，R语言。 
+
+兴趣：单细胞RNA-seq，ATAC-seq，机器学习相关。
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+1. 求出来的p值做一个fdr矫正得到q值；
+
+2. 希望把所有的group能像这张图一样合在一张图做出来，并且又不同的颜色。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41586-019-1236-x>
+
+Fig. 5 | Correlational networks capture multi-omics association structures that differ between insulin-resistant and insulin-sensitive groups. 
+
+b, Examples of microbial-cytokines correlations (by CLR+rmcorr) that are significant in insulin-sensitive but not insulin-resistant participants. Longitudinal measurements and the correlation trend line are coloured per individual and q values are indicated at the top right of each comparison.
+
+# 应用场景
+
+有时我们需要展示多组数据的两个变量之间的相关性，绘制散点图和趋势线。
+
+- 大部分文章会批量绘制，像FigureYa73batchCorrelation那样，每组数据单独一个小图，所有组数据放在一起组成一个figure panel。
+- 如果每组内的观察值较少，就可以像本文这样，把多组数据画到同一个图上，更方便地平行对比多组数据的斜率。
+- 另外，如果要展示A跟B、A跟C的相关性，就可以绘制成双坐标轴的散点图，可参考FigureYa62twoAxis的画法。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+```
+
+加载包
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input*.csv，每行为一组，每列一个观察值。将计算easy_input1.txt跟easy_input2.txt里面同一group之间的相关性。
+
+```{r}
+input1 <- read.table("easy_input1.txt",head=T)
+input1[1:3, 1:3]
+input2 <- read.table("easy_input2.txt",head=T)
+input2[1:3, 1:3]
+```
+
+# 计算相关系数、pvalue、fdr（q）
+
+```{r}
+cor.value <- rep(1, nrow(input1))
+p.value <- rep(1, nrow(input1))
+fdr <- rep(1, nrow(input1))
+
+# 通过循环每一行计算相关系数和pvalue
+for (i in 1:nrow(input1)){
+    input1.value <- input1[i,-1] %>% as.numeric()
+    input2.value <- input2[i,-1] %>% as.numeric() 
+    cor.value[i] <- cor.test(input1.value,input2.value)$estimate
+    p.value[i] <- cor.test(input1.value,input2.value)$p.value
+    }
+
+# 校正pvalue
+fdr <- p.adjust(p.value, method="fdr") 
+
+cor_result <- data.frame(
+    group=input1$group,
+    cor=cor.value,
+    p.value=p.value,
+    fdr=fdr
+    )
+head(cor_result)
+
+# 把相关性分析结果输出到文件
+write.csv(cor_result, "cor_output.csv", quote = F, row.names = F)
+```
+
+# 开始画图
+
+```{r}
+# 行变列
+input1_long <- input1 %>% pivot_longer(-"group",names_to="Time",values_to="input1")
+input2_long <- input2 %>% pivot_longer(-"group",names_to="Time",values_to="input2")
+data <- inner_join(input1_long,input2_long)
+head(data)
+
+# 计算总体的fdr(q)
+cor.value <- cor.test(data$input1,data$input2)$estimate
+p.value <- cor.test(data$input1,data$input2)$p.value
+fdr <- p.adjust(p.value, method="fdr") 
+fdr
+
+# 把fdr写成图中展示的格式
+eq <- substitute(~~italic(q)~"="~r, list(r = format(round(fdr, 4),nsmall= 4)))
+q <- as.character(as.expression(eq))
+```
+
+用原始数据画图
+
+```{r}
+# 把q值写在图上的位置，需根据你自己的数据灵活调整
+x <- max(data$input1)*(0.93)
+y <- max(data$input2)*(1.1)
+
+ggplot(data) +
+  geom_point(aes(input1,input2,color=group)) +
+  geom_smooth(aes(input1,input2,color=group,group=group), method='lm') +
+  theme_bw() + 
+  theme(panel.grid = element_blank()) + #去除网格线
+  annotate("text", x = x, y = y, label = q, parse = TRUE)
+```
+
+结果惨不忍睹，因为不同的group不在一个range内，所以log标准化一下会好很多。
+
+```{r}
+# 把q值写在图上的位置，需根据你自己的数据灵活调整
+x <- log(max(data$input1))*(0.93)
+y <- log(max(data$input2))*(1.1)
+
+ggplot(data) +
+  geom_point(aes(log(input1+1),log(input2+1),color=group)) +
+  geom_smooth(aes(log(input1+1),log(input2+1),color=group,group=group),method='lm',se=F) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) + #去除网格线
+  annotate("text", x = x, y = y, label = q, parse = TRUE)
+
+ggsave("multiCorrelation_all.pdf", width = 8, height = 6)
+```
+
+提取fdr最小的5个groups作图
+
+```{r}
+cor_top5 <- cor_result %>% arrange(fdr) %>% head(n=5) 
+group_top5 <- cor_top5[,1] %>% as.character()
+data_top5 <- data[data$group %in% group_top5,]
+head(data_top5)
+# 把top5 groups输出到文件
+write.csv(data_top5, "top5_group.csv", quote = F, row.names = F)
+
+# 计算Top5总体的fdr(q)
+cor.value <- cor.test(data_top5$input1,data_top5$input2)$estimate
+p.value <- cor.test(data_top5$input1,data_top5$input2)$p.value
+fdr <- p.adjust(p.value, method="fdr") 
+fdr
+
+# 把fdr写成图中展示的格式
+eq <- substitute(~~italic(q)~"="~r, list(r = format(round(fdr, 4),nsmall= 4)))
+q <- as.character(as.expression(eq))
+
+# 把q值写在图上的位置，需根据你自己的数据灵活调整
+x <- log(max(data$input1))*(0.7)
+y <- log(max(data$input2))*(1.1)
+
+ggplot(data_top5) +
+    geom_point(aes(log(input1+1),log(input2+1),fill=group),shape=21,size=4) +
+    geom_smooth(aes(log(input1+1),log(input2+1),color=group,group=group),
+                se=F, #如果想画出confidence interval就删掉这个参数
+                method='lm') +
+    scale_fill_brewer(palette="Dark2") + #点的配色
+    scale_color_brewer(palette="Dark2") + #线的配色
+    theme_bw() +
+    theme(panel.grid = element_blank()) + #去除网格线
+    labs(x="Log(input1 + 1)",y="Log(input2 + 1)") +
+    annotate("text", x = x, y = y, label = q, parse = TRUE)
+
+ggsave("multiCorrelation_top5.pdf", width = 8, height = 6)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

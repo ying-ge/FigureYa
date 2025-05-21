@@ -1,0 +1,54 @@
+---
+title: "Create Environment"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+指定一个新的包环境目录
+```{r}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+.libPaths(newpath)
+.libPaths()
+```
+
+```{r}
+## install packages
+## 1. Seurat v2.2.0
+install.packages('devtools')
+# NMF and SDMTools should be installed
+BiocManager::install("NMF")
+# SDMTools is not avaliable for R v3.6.2, removed from cran
+# we can install it from github: https://github.com/cran/SDMTools
+devtools::install_github("cran/SDMTools")
+devtools::install_version(package = 'Seurat', version = package_version('2.2.0'))
+
+## 2. velocyto.R v0.17
+BiocManager::install("pcaMethods")
+# v0.17 release is removed, install the latest version
+devtools::install_github("velocyto-team/velocyto.R")
+
+## 3. monocle v2.14.0
+BiocManager::install("monocle")
+
+## 4. scmap
+BiocManager::install(c("scmap"))
+
+## 5. DESeq2
+BiocManager::install("DESeq2")
+
+## 6. IHW, for multiple testing
+BiocManager::install("IHW")
+```
+
+测试安装包
+```{r}
+library(Seurat, lib.loc = newpath)
+library(monocle, lib.loc = newpath)
+library(velocyto.R, lib.loc = newpath)
+library(scmap, lib.loc = newpath)
+library(DESeq2, lib.loc = newpath)
+library(IHW, lib.loc = newpath)
+```
+

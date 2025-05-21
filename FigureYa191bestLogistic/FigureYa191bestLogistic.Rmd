@@ -1,0 +1,218 @@
+---
+title: "FigureYa191bestLogistic"
+author: "小丫画图出品"
+date: "2020-8-17"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+找最佳截断值，然后用截断值分组，生成分组后的数据。最好每一个变量带有一个标有最佳截断值的roc曲线。
+
+换句话说：y~x，这个x原本是连续变量，现在要换成分类变量，使得它在预测y的时候有最小的p值。
+
+# 应用场景
+
+利用ROC寻找连续变量的最佳cutoff，并根据该cutoff划分两组做单变量逻辑回归
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("tdROC")
+```
+
+加载包
+
+```{r}
+library(SimDesign) # 用于沉默逐步回归的信息
+library(tdROC) # 用于计算曲线下面积
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.csv，每行一个sample，第一列是sample ID，第二列为分组（响应变量），其后每列一个特征（自变量）。
+
+```{r}
+dat <- read.table("easy_input.txt",row.names = 1,sep = "\t",header = T,check.names = F,stringsAsFactors = F)
+rownames(dat) <- paste0("P",rownames(dat))
+colnames(dat)[2:10] <- paste0("V",colnames(dat)[2:10]) 
+dat[1:3, 1:3]
+
+# 自定义颜色，可以继续添加
+jco <- c("#2874C5","#EABF00","#868686","#C6524A","#80A7DE")
+```
+
+# 循环运算单变量逻辑回归并画图
+
+```{r}
+rname <- "Response" #设置响应变量y的变量名
+vname <- setdiff(colnames(dat), rname) # 设置自变量x的变量名
+
+#auc.cutoff <- 0.6 # auc的阈值
+outTab <- NULL
+new_dat <- data.frame(r = dat[,rname],row.names = rownames(dat),stringsAsFactors = F); colnames(new_dat) <- rname
+
+for (v in vname) {
+  # 计算ROC相关统计量
+  TP.value <- c()
+  FP.value <- c()
+  FN.value <- c()
+  TN.value <- c()
+  TPR.value <- c()
+  FPR.value <- c()
+
+  subdat <- as.data.frame(na.omit(dat[,c(rname,v)]))
+  value <- sort(subdat[,v]) # ROC的滑动窗口
+  for (pb in value) {
+    tmp <- subdat
+    tmp$PredClass <- ifelse(tmp[,v] >= pb,1,0)
+
+    TP = sum(tmp$PredClass == 1 & tmp[,rname] == 1)
+    FP = sum(tmp$PredClass == 1 & tmp[,rname] == 0)
+    FN = sum(tmp$PredClass == 0 & tmp[,rname] == 1)
+    TN = sum(tmp$PredClass == 0 & tmp[,rname] == 0)
+    TPR = TP / (TP + FN)
+    FPR = FP / (FP + TN)
+
+    TP.value <- c(TP.value,TP)
+    FP.value <- c(FP.value,FP)
+    FN.value <- c(FN.value,FN)
+    TN.value <- c(TN.value,TN)
+    TPR.value <- c(TPR.value,TPR)
+    FPR.value <- c(FPR.value,FPR)
+  }
+  ROC.point <- data.frame(FPR = FPR.value, TPR = TPR.value)
+  auc <- round(calc.AUC(1-ROC.point$FPR,ROC.point$TPR),3)
+  if(auc < 0.5) { # 如果AUC小于0.5，反向绘制ROC
+    
+    TP.value <- c()
+    FP.value <- c()
+    FN.value <- c()
+    TN.value <- c()
+    TPR.value <- c()
+    FPR.value <- c()
+    
+    for (pb in value) {
+      tmp <- subdat
+      tmp$PredClass <- ifelse(tmp[,v] >= pb,0,1)
+      
+      TP = sum(tmp$PredClass == 1 & tmp[,rname] == 1)
+      FP = sum(tmp$PredClass == 1 & tmp[,rname] == 0)
+      FN = sum(tmp$PredClass == 0 & tmp[,rname] == 1)
+      TN = sum(tmp$PredClass == 0 & tmp[,rname] == 0)
+      TPR = TP / (TP + FN)
+      FPR = FP / (FP + TN)
+      
+      TP.value <- c(TP.value,TP)
+      FP.value <- c(FP.value,FP)
+      FN.value <- c(FN.value,FN)
+      TN.value <- c(TN.value,TN)
+      TPR.value <- c(TPR.value,TPR)
+      FPR.value <- c(FPR.value,FPR)
+    }
+    ROC.point <- data.frame(FPR = FPR.value, TPR = TPR.value)
+    auc <- round(calc.AUC(1-ROC.point$FPR,ROC.point$TPR),3)
+  }
+  
+  # if(auc < auc.cutoff) { # 如果AUC低于阈值则跳过该变量
+  # next()
+  # } else{
+    cat(paste0("Variable of ",v," has an AUC of ", auc,".\n"))
+    youden <- ROC.point$TPR - ROC.point$FPR # 计算Youden指数：sensitivity + specificity - 1
+    y.index <- which.max(youden) # 找到Youden指数达到最大值时的索引
+    
+    # 绘制ROC曲线
+    pdf(paste0("roc for cutoff of ",v,".pdf"),width = 4,height = 4)
+    par(bty="o", mgp = c(1.9,.33,0), mar=c(3.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25)
+    plot(ROC.point$FPR, ROC.point$TPR, 
+         col=jco[1], 
+         xlab="1-Specificity (FPR)", 
+         ylab="Sensitivity (TPR)", 
+         main="", lwd=2, type="l", 
+         xlim=c(0,1),ylim=c(0,1))
+    lines(x=c(0,1),y=c(0,1),lwd=1.5,lty=2,col="grey60")
+    text(0,1,paste0("AUC = ",auc),pos = 4,cex = 1.2) # 写出AUC
+    points(ROC.point$FPR[y.index], # 标记最优点
+           ROC.point$TPR[y.index],
+           col = jco[2],
+           pch = 19,
+           cex = 1.5)
+    if(ROC.point$FPR[y.index] < 0.5) {
+      text(ROC.point$FPR[y.index] + 0.02, # 写出最优点的变量阈值
+           ROC.point$TPR[y.index],
+           labels = paste0("Best cutoff = ",round(value[y.index],2)),
+           pos = 4,
+           cex = 1.2)
+    } else {
+      text(ROC.point$FPR[y.index] - 0.02, # 写出最优点的变量阈值
+           ROC.point$TPR[y.index],
+           labels = paste0("Best cutoff = ",round(value[y.index],2)),
+           pos = 2,
+           cex = 1.2)
+    }
+    
+    invisible(dev.off())
+    
+    # 执行单变量逻辑回归
+    subdat$new_group <- ifelse(subdat[,v] >= value[y.index], 1,0)
+    f <- as.formula(paste0(rname,"~ new_group")) # 创建公式
+    t <- subdat[,c(rname,"new_group")]
+    
+    # 单变量逻辑回归
+    l <- glm(f, 
+             data = t, 
+             family = "binomial", 
+             control = list(maxit = 50), 
+             na.action = na.exclude)
+    s <- format(round(exp(cbind("OR" = coef(l), confint.default(l, level = 0.95)))[2,],3),nsmall = 3) # 调整格式
+    s <- paste0(s[1]," (",s[2],"-",s[3],")")
+    p <- format(round(summary(l)$coefficients[2,4],3),nsmall = 3)
+    
+    # 生成表格
+    outTab <- rbind.data.frame(outTab,
+                               data.frame(variable = v,
+                                          auc = auc,
+                                          cutoff = value[y.index],
+                                          logistic.pvalue = p,
+                                          logistic.or = s,
+                                          stringsAsFactors = F),
+                         stringsAsFactors = F)
+    subdat2 <- dat[,v,drop = F]
+    subdat2$new_group <- ifelse(subdat2[,v] >= value[y.index], 1,0)
+    tmp <- data.frame(o = subdat2[,v],
+                      v = subdat2$new_group,
+                      stringsAsFactors = F) 
+    colnames(tmp) <- c(v,paste0(v,"_new"))
+    new_dat <- cbind.data.frame(new_dat,tmp)
+  #}
+}
+
+# 输出表格
+write.table(outTab,"univariate logistic results under best roc cutoff.txt",sep = "\t",row.names = F,quote = F)
+write.table(new_dat,"new data under best roc cutoff.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

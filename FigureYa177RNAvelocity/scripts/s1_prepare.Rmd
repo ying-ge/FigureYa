@@ -1,0 +1,108 @@
+---
+title: "Prepare Data"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+```{r}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+## 数据预处理
+
+### load data
+```{r}
+## 加载Read10X_V3函数，专门用于导入cellranger v3.0以上版本的基因表达矩阵，
+## 返回一个sparse matrix，行为基因，列为细胞
+source("functions.R")
+
+old1 <- Read10X_V3("../data/matrix/old1/")
+colnames(old1) <- paste0("old1_", colnames(old1))
+old2 <- Read10X_V3("../data/matrix/old2")
+colnames(old2) <- paste0("old2_", colnames(old2))
+old3 <- Read10X_V3("../data/matrix/old3/")
+colnames(old3) <- paste0("old3_", colnames(old3))
+
+## 检查基因名排序是否一致
+all(rownames(old1) == rownames(old2))
+all(rownames(old1) == rownames(old3))
+
+## 合并不同的样本
+old <- do.call(cbind, list(old1, old2, old3))
+
+young1 <- Read10X_V3("../data/matrix/young1/")
+colnames(young1) <- paste0("young1_", colnames(young1))
+young2 <- Read10X_V3("../data/matrix/young2/")
+colnames(young2) <- paste0("young2_", colnames(young2))
+young3 <- Read10X_V3("../data/matrix/young3/")
+colnames(young3) <- paste0("young3_", colnames(young3))
+
+all(rownames(young1) == rownames(young2))
+all(rownames(young1) == rownames(young3))
+
+young <- do.call(cbind, list(young1, young2, young3))
+
+## 清理不用的变量
+rm(list = c("old1", "old2", "old3", "young1", "young2", "young3"))
+## 释放内存
+gc()
+
+## 创建一个名为expr_mm的list，用于存储基因表达矩阵(mtx)、基因信息(features)以及
+## 细胞信息(cells)
+expr_mm <- list(
+  mtx = cbind(old, young)
+)
+
+rm(list = c("old", "young"))
+gc()
+
+## 计算基因在多少个细胞中表达(expressed_in_cells)，用于过滤未检测到的基因
+expr_mm$features <- data.frame(
+  row.names = rownames(expr_mm$mtx),
+  gene_symbol = rownames(expr_mm$mtx),
+  expressed_in_cells = rowSums(as.matrix(expr_mm$mtx) > 0)
+)
+
+## 提取样本ID、年龄等cell meta信息，计算每个细胞检测到多少个基因(expressed_genes)
+## 用于过滤低质量细胞
+expr_mm$cells <- data.frame(
+  row.names = colnames(expr_mm$mtx),
+  cell_id = colnames(expr_mm$mtx),
+  sample_id = sapply(strsplit(colnames(expr_mm$mtx), "_"), function(x) x[1]),
+  age = sub("[0-9]+", "", sapply(strsplit(colnames(expr_mm$mtx), "_"), function(x) x[1])),
+  expressed_genes = colSums(as.matrix(expr_mm$mtx) > 0)
+)
+```
+
+
+### filter cells and genes
+
+> Only genes expressed in at least 40 different nuclei and nuclei with a minimum of 200 genes were generally kept for analysis.
+
+hard filter:
+
+- genes >= 40 cells
+- cells >= 200 genes
+
+```{r}
+message("before filtration:")
+sapply(expr_mm, dim)
+## 保留在至少40个细胞中有表达的基因
+kept.features <- rownames(subset(expr_mm$features, expressed_in_cells >= 40))
+## 保留至少检测到200个基因表达的细胞
+kept.cells <- rownames(subset(expr_mm$cells, expressed_genes >= 200))
+expr_mm$mtx <- expr_mm$mtx[kept.features, kept.cells]
+expr_mm$features <- expr_mm$features[kept.features, ]
+expr_mm$cells <- expr_mm$cells[kept.cells, ]
+message("after filtration:")
+sapply(expr_mm, dim)
+
+## 保存临时变量
+saveRDS(expr_mm, "tmp/s1-expr_mm.rds")
+```

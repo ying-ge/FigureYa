@@ -1,0 +1,230 @@
+---
+title: "FigureYa151pathifier"
+author: "小丫画图出品"
+date: "2019-12-1"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+使用R package "pathifier"，根据样本基因表达水平，计算指定基因通路得分，并绘制热图。
+
+![](example.png)
+
+出自<https://www.thno.org/v08p6386.htm>
+
+Figure 4. Identification of “non-luminal-like” subgroup from ER+PR-HER2- breast cancer. (B) Enriched pathways in the Kyoto Encyclopedia of Genes and Genomes (KEGG) collection of the non-luminal-like subgroup compared to the luminal-like subgroup of the TCGA cohort by **Pathifier algorithm**. Heatmap showing the pathway scores of each ER+PR-HER2- tumor.
+
+The non-luminal-like subtype in the ER+PR-HER2- group presented **higher Pathifier [29] scores in** biosynthesis, metabolism and DNA replication (Figure 4B) and lower endocrine sensitivity scores (P<0.05, Figure 4C and Figure S7A).
+
+# 应用场景
+
+用差异基因列表做富集分析，或做GSEA，有时会因为参数设置原因而看不到自己感兴趣的通路，这时可以把基因的表达矩阵转换为通路的表达矩阵，就可以直接观察自己感兴趣的通路的表达矩阵了。
+
+另外，R包GSVA也能够实现类似的功能，用法可参考FigureYa61GSVA。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("pathifier")
+```
+
+加载包
+
+```{r}
+library(pathifier)
+library(data.table)
+library(pheatmap)
+library(gplots)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数（来自cogena）
+
+```{r}
+# 读取gmt文件为列表形式，满足pathifier的输入要求
+gmt2list <- function(annofile){
+  if (!file.exists(annofile)) {
+    stop("There is no such gmt file.")
+  }
+  
+  if (tools::file_ext(annofile) == "xz") {
+    annofile <- xzfile(annofile)
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+    close(annofile)
+  } else if (tools::file_ext(annofile) == "gmt") {
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+  } else {
+    stop ("Only gmt and gmt.xz are accepted for gmt2list")
+  }
+  
+  y <- strsplit(x, "\t")
+  names(y) <- sapply(y, `[[`, 1)
+  
+  annoList <- lapply(y, `[`, c(-1,-2))
+}
+```
+
+# 感兴趣的通路genelist
+
+运行pathifier时，gmt文件里的通路/基因越多，时间越长。
+
+怎样获得感兴趣的通路的gmt文件？
+
+- 方法一：从GSEA网站下载gmt文件<http://software.broadinstitute.org/gsea/downloads.jsp>，可以直接用（运行时间长）；
+- 方法二：从方法一获得的gmt文件里提取感兴趣的通路；
+- 方法三：用已发表的文章里的差异基因，思路可参考这篇：<https://mp.weixin.qq.com/s/O1xd5l5h33fXUWOvX3UBGw>"如果我真的对其中某一个概念和Term很感兴趣与执着的话，我会重新找到发表相关功能或者通路的文章，重新构建Term的genelist。"类似的思路可参考FigureYa136fgsea。
+
+## 方法一：直接用下载的gmt文件
+
+```{r}
+gset <- gmt2list("customized.gmt") 
+gset[1]
+```
+
+后面将以customized.gmt为例来展示分析和画图方法，也就是gset。
+
+## 方法二：从gmt文件提取感兴趣的通路
+
+```{r}
+# 例如提取带有`METABOLISM`字样的通路
+gset_meta <- gset[names(gset) %like% "METABOLISM"]
+gset_meta
+#gset <- gset_meta
+```
+
+## 方法三：用文章里的基因
+
+把感兴趣的基因名保存到文本文件里，每行一个基因，共一列，命名为`gene_paper*.txt`
+
+```{r}
+read.aschar <- function(filename){
+  file <- read.table(filename)
+  file <- file$V1
+}
+
+fnames <- list.files(pattern = "gene_paper")
+fnames
+gset_paper <- lapply(fnames, read.aschar)
+# 用文件名作为通路的名字
+names(gset_paper) <- fnames
+gset_paper
+# 或者自己另外起通路的名字
+names(gset_paper) <- c("author1_year1", "author2_year2", "author3_year3")
+gset_paper
+#gset <- gset_paper
+```
+
+# 输入文件
+
+easy_input_expr.txt，基因表达矩阵。
+
+easy_input_info.txt，样本信息。
+
+```{r}
+## 表达矩阵
+expr <- read.table("easy_input_expr.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+expr[1:3, 1:3]
+# 移除低表达的基因
+expr <- expr[rowSums(expr) > 1,]
+
+## 提取肿瘤和正常样本，用于计算pathway score
+sinfo <- read.table("easy_input_info.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+head(sinfo)
+
+tum.sam <- intersect(colnames(expr)[grep("-01A",colnames(expr))],rownames(sinfo)) # 提取原发且符合要求的肿瘤（例文为ER+PR-HER2-）
+nor.sam <- colnames(expr)[grep("-11A",colnames(expr))] # 提取癌旁组织
+
+expr <- expr[,c(tum.sam,nor.sam)] # 重新排序
+tissue.logic <- rep(c(F,T),c(length(tum.sam),length(nor.sam))) # 构建样本是否为正常的指示变量
+
+## 按luminal-like和Non-luminal-like分为两组，画图时要用到该分组
+# luminal-like samples
+lum.sam <- intersect(rownames(sinfo[which(sinfo$PAM50 == "Luminal-like"),]),tum.sam)
+# Non-luminal-like samples
+nonlum.sam <- intersect(rownames(sinfo[which(sinfo$PAM50 == "Non-luminal-like"),]),tum.sam)
+```
+
+# 运行pathifier
+
+用肿瘤和癌旁计算pathway score。
+
+**注意：**这里用的是手动矫正过的gmt文件，如果用GSEA的通路（>1000），该算法运行速度会非常慢；
+
+粗略估计运行GSEA中的c5免疫相关通路可能需要10天以上。
+
+```{r}
+indata <- as.matrix(log2(expr + 1))
+gname <- rownames(expr)
+path.res <- quantify_pathways_deregulation(data = indata, # 表达谱，行为基因，列为样本(必须为矩阵)
+                                           allgenes = gname, # 表达谱的基因名
+                                           syms = gset, # 感兴趣的通路列表
+                                           pathwaynames = names(gset), # 通路列表的通路名
+                                           normals = tissue.logic, # 指示变量，如为癌旁则为TRUE
+                                           attempts = 100, # 运行次数，默认为100，提高次数可增加稳定性
+                                           min_exp = 0, # 默认值为4，倘若表达值低于该阈值，则填补该阈值
+                                           min_std = 0) # 默认值位0.4，倘若某基因的标准差低于该阈值，则标准化时除以该阈值，而不使用真实标准差
+
+# 生成pathway score
+path.score <- as.data.frame(rbindlist(lapply(path.res$scores,as.data.frame))); dimnames(path.score) <- list(names(gset),colnames(expr))
+# 保存到文件
+write.csv(path.score, "pathifier_output.csv", quote = F)
+```
+
+下一步画出感兴趣的通路的热图；
+
+还可以算出所有通路的score，做差异表达分析，方法跟基因的差异表达分析类似，可参考FigureYa61GSVA。
+
+# 开始画图
+
+这里复现原文里的画法，不聚类。
+
+更多聚类、排序的热图画法可参考FigureYa91cluster_heatmap。
+
+```{r, fig.width=12, fig.height=3}
+# 这里在图中用颜色画出样本信息
+# 也可以像例文那样用illustrator打开pdf文件，添加横线
+annCol <- data.frame(PAM50 = sinfo$PAM50,row.names = rownames(sinfo),stringsAsFactors = F)
+annColors <- list("PAM50" = c("Luminal-like" = "red","Non-luminal-like" = "blue"))
+
+# 热图数据标准化
+plotdata <- t(scale(t(path.score[,c(nonlum.sam,lum.sam)])))
+plotdata[plotdata > 1]  <- 1 # 数值大于1赋1
+plotdata[plotdata < -1] <- -1 # 数值小于-1赋-1
+
+#pdf("pathifier.pdf",width = 15,height = 3)
+pheatmap(plotdata,
+         border_color = NA, #不画边框
+         cluster_cols = F, cluster_rows = F, #不聚类
+         #color = greenred(64), #原文的红绿配色
+         annotation_col = annCol[c(nonlum.sam,lum.sam),,drop = F], #样本信息
+         annotation_colors = annColors, #样本信息配色
+         show_rownames = T, #显示通路名
+         show_colnames = F) #不显示样本名
+#dev.off()
+```
+
+![](pathifier.pdf)
+
+```{r}
+sessionInfo()
+```

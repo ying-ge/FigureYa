@@ -1,0 +1,302 @@
+---
+title: "FigureYa206scHeatmap"
+author: "小丫画图出品"
+date: "2020-11-20"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Hazard
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+这个图信息量很大，非常高大上，热图和气泡图合用，展示差异富集信号通路信息，最好给众筹一下哈
+
+![](example.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S0092867420300568>
+
+Figure 1. Distinct Ovarian Cell Subpopulations with Transcriptional Signatures Determined by Single-Cell RNA-Seq Analysis of Monkey Ovaries
+(H) Left: heatmap showing expression signatures of top 50 specifically expressed genes in each cell type; the value for each gene is row-scaled Z score. Right: representative GO terms.
+
+# 应用场景
+
+单细胞RNA-seq的表达谱和基因功能富集分析结果的展示。
+
+左侧表达谱热图跟右侧富集分析结果对应，更直观。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("batchelor")
+install.packages("Seurat")
+install.packages("Hmisc")
+```
+
+加载包
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(Seurat) # v3.1.5
+
+library(pheatmap)
+library(RColorBrewer)
+library(aplot)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+## 下载单细胞RNA-seq数据
+
+1) UMI count，从NCBI[GSE130664](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE130664)下载：`GSE130664_merge_UMI_count.txt.gz`文件。
+
+![](download.png)
+
+```{r download}
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE130664&format=file&file=GSE130664%5Fmerge%5FUMI%5Fcount%2Etxt%2Egz", 
+              destfile = "GSE130664_merge_UMI_count.txt.gz")
+```
+
+2) metadata，从[例文的](https://doi.org/10.1016/j.cell.2020.01.009)Supplementary Tables获得：`1-s2.0-S0092867420300568-mmc1.xlsx`
+
+## Read data
+
+```{r preprocessing}
+umi <- read.table(file = gzfile("GSE130664_merge_UMI_count.txt.gz"), header = T, row.names = 1, sep = "\t")
+qc <- readxl::read_excel("1-s2.0-S0092867420300568-mmc1.xlsx", sheet = 2)
+meta <- readxl::read_excel("1-s2.0-S0092867420300568-mmc1.xlsx", 3) %>% 
+  column_to_rownames("cell")
+```
+
+# 数据预处理
+
+See Methods:  
+QUANTIFICATION AND STATISTICAL ANALYSIS -> Single-Cell RNA-Seq Data Processing
+
+```{r}
+# QC of Cells
+cells <- qc %>% 
+  filter(`Mapping rate` >= 0.2 &
+           `Gene number` >= 700 &
+           UMI >= 3000) %>%
+  pull(Rename)
+
+# seurat object
+sc <- CreateSeuratObject(counts = umi[,cells], meta.data = meta)
+
+# expression transformation
+sc@assays$RNA@data <- sc@assays$RNA@counts %>% 
+  apply(2, function(x){
+    log2(10^5*x/sum(x)+1)
+    })
+
+# remove other cells
+sc <- sc[,sc$cluster != "other"]
+
+# 给cluster改名
+sc$cluster_short <- factor(
+  plyr::mapvalues(sc$cluster, 
+                  c("Oocyte", "Natural killer T cell", "Macrophage",
+                    "Granulosa cell", "Endothelial cell", 
+                    "Smooth muscle cell", "Stromal cell"),
+                  c("OO", "NKT", "M", "GC", "EC", "SMC", "SC")),
+  levels = c("OO", "NKT", "M", "GC", "EC", "SMC", "SC"))
+
+# 给cluster自定义颜色
+cluster_colors <- setNames(brewer.pal(7, "Set1"), levels(sc$cluster_short))
+
+# 保存一下，便于停下来接着跑
+#save(sc, cluster_colors, file = "sc.seurat.Rdata")
+
+# 还可以把表达矩阵输出到文件
+#write.csv(sc@assays$RNA@data, "easy_input_expr.csv", quote = F)
+```
+
+# 差异表达分析
+
+See Methods:  
+QUANTIFICATION AND STATISTICAL ANALYSIS -> Identification of Cell Types and Cell Type-Specific Markers
+
+原文：We used a standard area under the curve (AUC) classifier to identify cell type-specific markers (DEGs among different cell types) with the function FindAllMarkers in the R package Seurat (Satija et al., 2015). **Markers** were selected only if the average difference of the **log2-transformed TPM was greater than 0.5, with a corresponding power value greater than 0.25 and a percentage of expressed cells (TPM s 0) greater than 30%.**
+
+```{r deg}
+#load(file = "sc.seurat.Rdata")
+
+Idents(sc) <- "cluster_short"
+degs <- FindAllMarkers(sc, logfc.threshold = 0.5,
+                       test.use = "roc", 
+                       return.thresh = 0.25, 
+                       min.pct = 0.3, only.pos = T) 
+# NOTE: seem like only parameter logfc.threshold is valid when do filter
+degs_sig <- degs %>% 
+  filter(pct.1 > 0.3 &
+           power > 0.25) %>%
+  filter(cluster != "other") %>%
+  arrange(cluster, -power) # 按power排序，这是热图呈好看的对角线排列的关键
+
+# 输出差异表达分析结果
+write.csv(degs_sig, file = "output_degs_sig.csv")
+
+# 输出每个cluster的基因到单独的文件，用于富集分析
+for (clustername in levels(sc$cluster_short)){
+  write.table(rownames(degs_sig[degs_sig$cluster == clustername, ]), paste0("output_deg_", clustername, ".txt"), row.names = F, col.names = "Gene", quote = F)
+}
+```
+
+# 富集分析
+
+为重复原文，这里也用[ToppGene做富集分析](https://toppgene.cchmc.org/enrichment.jsp) (a easy to use webserver)。
+
+原文：GO analysis of cell type-specific markers was performed with ToppGene (Chen et al., 2009). We selected GO terms representing the function of each cell type with **P value < 0.05 among top 30 terms** (Figure 1H).
+
+1) 用除了Excel以外的文本编辑器，每次打开一个`output_deg_*.txt`文件，复制其中的基因名，粘贴到`Enrichment Gene Set`框，`Background Gene Set`框可以留空。
+
+![](step1.png)
+
+2) 例文选了GO的MF、BP和CC，你也可以尝试其他注释
+
+![](step2.png)
+
+3) 点击Download下载，把下载到的文件命名为`ouput_enrich_[cluster的名字].txt`，用于画dotplot。
+
+例如，打开`output_deg_OO.txt`，复制基因名，用ToppGene富集分析获得的文件重命名为`output_enrich_OO.txt`。
+
+![](step3.png)
+
+> 所有cluster都按上述方法操作和命名，并保存在当前文件夹下。后面画图时会根据文件名批量读入富集分析结果文件。
+
+> 另外，还可以用clusterprofiler等命令行式的工具，就可以批量做，更方便。后面画图用到的这几列在所有富集分析结果中都有：Name（term）, p-value, Hit Count in Query List, Hit Count in Genome（背景）
+
+# 开始画图
+
+分别画热图和点图，然后拼起来。输出的pdf文件是矢量图，可以用Illustrator等矢量图编辑器进一步修饰图和文字。
+
+## Heatmap
+
+```{r heatmap, fig.width=3, fig.height=5}
+# 加载前面预处理好的scRNA-Seq数据，要用到表达矩阵、cluster及配色
+#(load(file = "sc.seurat.Rdata"))
+
+# select degs for heatmap
+degs_top50 <- degs_sig %>% 
+#  filter(cluster!="other") %>%
+  group_by(cluster) %>% 
+  top_n(50, power) %>%
+  top_n(50, avg_diff) %>%
+  arrange(cluster, -power)
+
+# 每个基因在每个cluster里的平均值
+avgData <- sc@assays$RNA@data[degs_top50$gene,] %>% 
+  apply(1, function(x){
+    tapply(x, sc$cluster_short, mean) # ExpMean
+    }) %>% t
+
+phData <- MinMax(scale(avgData), -2, 2) # z-score
+rownames(phData) <- 1:nrow(phData)
+
+phres <- pheatmap(
+  phData, 
+  color = colorRampPalette(c("darkblue", "white", "red3"))(99), #配色
+  scale = "row",
+  cluster_rows = F, #不按行聚类
+  cluster_cols = T, #按列聚类
+  clustering_method = "complete",
+  show_rownames = F, #显示cluster名
+  annotation_row = data.frame(cluster = degs_top50$cluster), 
+  annotation_colors = list(cluster = cluster_colors)) #注释的配色就用前面设置的cluster的颜色
+```
+
+## dotplot
+
+原文：We selected GO terms representing the **function of each cell type** with P value < 0.05 among top 30 terms (Figure 1H).
+
+原图每个cluster各画了三个GO term。实际使用时，结合背景知识，把想展示的term写在`go_used`里。
+
+```{r dotplot, fig.width=5, fig.height=5}
+go_used <- list(
+  OO = c("meiotic cell cycle", "gamete generation", "sexual reproduction"),
+  NKT = c("regulation of immune response", "regulation of immune system process", "T cell activation"),
+  M = c("immune effector process", "leukocyte activation", "inflammatory response"),
+  GC = c("anti-Mullerian hormone signaling pathway", "reproductive structure development", "reproductive system development"),
+  EC = c("angiogenesis", "blood vessel development", "vasculature development"),
+  SMC = c("muscle system process", "muscle contraction", "smooth muscle contraction"),
+  SC = c("extracellular matrix organization", "blood vessel development", "response to hormone")
+)
+
+degs_n <- table(degs_sig$cluster)
+
+# 批量读入富集分析结果
+lapply(levels(sc$cluster_short), function(i){
+  # 这里用文章附件里的富集分析结果画图
+  tmp <- readxl::read_excel("1-s2.0-S0092867420300568-mmc1.xlsx", paste0("GO_", i))
+  # 实际使用时，读入上一步“富集分析”生成的`ouput_enrich_[cluster的名字].txt`文件。删掉下面这行前面的#，即可运行
+  #tmp <- read.table(paste0("output_enrich_", i, ".txt"), sep = "\t", header = T, check.names = F)
+  
+  cbind(tmp[match(go_used[[i]], tmp$Name),
+            c("Name", "p-value", "Hit Count in Query List", "Hit Count in Genome")],
+        cluster = i, n_deg = degs_n[[i]])
+}) %>% do.call(rbind, .) -> dotData
+head(dotData)
+
+# x轴最大值，用来设置合适的x轴label
+(xmax <- round(max(-log10(dotData$`p-value`))))
+# 画图
+dotplot <- ggplot(cbind(dotData, Order = nrow(dotData):1)) +
+  geom_point(mapping = aes(x = -log10(`p-value`), 
+                           y = Order, 
+                           size = `Hit Count in Query List`, 
+                           fill = `Hit Count in Query List`/n_deg),
+             shape = 21) + 
+  scale_fill_gradientn(colours = c("grey", "gold", "red")) + #自定义配色
+  scale_y_continuous(position = "right", 
+                     breaks = 1:nrow(dotData), 
+                     labels = Hmisc::capitalize(rev(dotData$Name))) +
+  scale_x_continuous(breaks = seq(0, xmax, 10),
+                   expand = expansion(mult = c(.15, .1))) + #两边留空
+
+  labs(x = "-log10(P-value)", y = NULL) +
+  guides(size = guide_legend(title = "Gene count"),
+         fill = guide_colorbar(title = "GeneRatio")) +
+  #theme_classic() #原文效果
+  theme_bw() + #白背景有四面边框
+  theme(panel.grid =element_blank()) #去除网格线
+
+dotplot
+```
+
+## combined
+
+You can go to Adobe Illustrator to polish the following figures
+
+```{r combined}
+gh <- phres$gtable
+gd <- ggplotGrob(dotplot)
+
+# vertical align
+gd$heights[1] <- gh$heights[unlist(gh$layout[gh$layout$name == "col_tree", c("t")])] - 2*gd$heights[1]
+gd$heights[7] <- gh$heights[4]
+
+cowplot::plot_grid(gh, gd, rel_widths = c(1, 1.8))
+ggsave("scHeatmap.pdf", width = 8, height = 6)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

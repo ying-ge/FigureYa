@@ -1,0 +1,233 @@
+---
+title: "FigureYa130SVM_step12"
+author: "小丫画图出品"
+date: "2019-9-15"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：罗丹de情人，齐德龙
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+筛选差异基因后，用cox regression、SVM-RFE和FW-SVM算法进一步筛选有预后意义的基因，组成基因甲基化位点或表达的signature。
+
+![](https://wol-prod-cdn.literatumonline.com/cms/attachment/1a5f5bbf-0abb-4122-badc-f9e572b713fb/jcmm14231-fig-0001-m.jpg)
+
+![](https://wol-prod-cdn.literatumonline.com/cms/attachment/1f9f469d-39e7-405e-9310-75e9e2b4e391/jcmm14231-fig-0002-m.jpg)
+
+出自<https://onlinelibrary.wiley.com/doi/full/10.1111/jcmm.14231>
+
+主要分四步来实现，其中前两步在R里实现，后两步在python里实现，运行完本文档FigureYa130coxSVM_step12.Rmd之后，运行FigureYa130coxSVM_step34.ipynb：
+
+- 第一步，正常人与癌症患者差异化比较
+- 第二步，寻找相关矩阵，并生成下游数据
+- 第三步，REF-SVM寻找合适的特征范围
+- 第四步，FW-SVM进一步喜欢特征数目
+
+## 应用场景
+
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+#' @ChAMP所依赖的包巨多，请耐心等待安装
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("ChAMP")
+BiocManager::install(c("minfi","ChAMPdata","Illumina450ProbeVariants.db","sva",
+                       "IlluminaHumanMethylation450kmanifest","limma","RPMM","DNAcopy",
+                       "preprocessCore","impute","marray","wateRmelon","goseq","plyr","GenomicRanges",
+                       "RefFreeEWAS","qvalue","isva","doParallel","bumphunter","quadprog",
+                       "shiny","shinythemes","plotly","RColorBrewer","DMRcate","dendextend",
+                       "IlluminaHumanMethylationEPICmanifest","FEM","matrixStats","missMethyl","combinat"))
+```
+
+加载包
+
+```{r}
+library(tidyverse)
+library(ChAMP)
+library(minfi)
+library(RColorBrewer)
+library(survival)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件下载
+
+从XENA<https://xenabrowser.net/datapages/>下载两类数据，以GDC TCGA Liver Cancer (LIHC) (14 datasets)为例：
+
+- 甲基化数据DNA methylation - Methylation450k，地址：<https://xenabrowser.net/datapages/?dataset=TCGA-LIHC.methylation450.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>，下载链接：<https://gdc.xenahubs.net/download/TCGA-LIHC.methylation450.tsv.gz>
+
+- 生存数据phenotype, survival data (n=463) GDC Hub，<https://xenabrowser.net/datapages/?dataset=TCGA-LIHC.survival.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>，下载链接：<https://gdc.xenahubs.net/download/TCGA-LIHC.survival.tsv.gz>
+
+```{r}
+# 读入甲基化数据
+nor_methy <- read_tsv("TCGA-LIHC.methylation450.tsv")
+nor_methy <- column_to_rownames(nor_methy, var = "Composite Element REF")
+nor_methy <- na.omit(nor_methy)
+
+#########################
+nor_methy[1:5,1:5]
+dim(nor_methy)
+##########################
+
+# 读入生存数据
+sur_data <- read.csv("TCGA-LIHC.survival.tsv",sep = "\t",header = T)
+head(sur_data)
+colnames(sur_data) <- c("sample", "OS_status", "ID", "OS_time")
+sur_data <- sur_data[!is.na(sur_data$OS_time),]
+sur_data <- sur_data[!is.na(sur_data$OS_status),]
+sur_data <- sur_data[,c("ID","OS_time","OS_status")]
+#去除急性进展患者对生存分析的影响
+sur_data <- sur_data[sur_data$OS_time>30,]
+dim(sur_data)
+###################################
+sur_data$OS_time <- sur_data$OS_time/30
+head(sur_data)
+####################################
+```
+
+## 第一步，正常人与癌症患者差异化比较
+
+```{r}
+# 根据TCGA的barcode构建癌和癌旁的分类信号
+sampleid <- colnames(nor_methy)
+pdata <- data.frame(ID = sampleid,tissue_type = substring(sampleid,14,16))
+head(pdata)
+summary(as.factor(pdata$tissue_type))
+pdata <- pdata[!pdata$tissue_type=="01B",]
+pdata <- pdata[!pdata$tissue_type=="02B",]
+pdata$group <- ifelse(pdata$tissue_type=="11A","normal","tumor")
+summary(as.factor(pdata$group))
+##########################
+nor_methy <- nor_methy[,colnames(nor_methy)%in%pdata$ID]
+dim(nor_methy)
+pdata <- pdata[match(colnames(nor_methy),pdata$ID),]
+data.frame(pdata$ID,colnames(nor_methy))
+##########################
+save(nor_methy,pdata,file = "input.RData")
+
+#查看数据标准化的结果
+##########################
+# visualise what the data looks like before and after normalisation
+densityPlot(as.matrix(nor_methy), sampGroups=pdata$group,main="Normalization", legend=FALSE)
+legend("top", legend = levels(factor(pdata$group)), 
+       text.col=brewer.pal(8,"Dark2"))
+#从结果来看UCSC这个标准化做的并不好
+#########################
+
+# 正常人与癌症患者差异化比较
+#' @find-Differential-Methylation-Probes
+myDMP <- champ.DMP(beta = nor_methy,pheno=pdata$group)
+head(myDMP[[1]])
+
+dmp <- myDMP[[1]]
+dmp <- dmp[dmp$adj.P.Val<0.05 & abs(dmp$deltaBeta)>0.2,]
+dim(dmp)
+###########################
+dmp <- unique(rownames(dmp))
+length(dmp)
+############################
+
+#提取肿瘤的差异化甲基化位点矩阵
+tumor_id <- as.character(pdata[pdata$group=="tumor","ID"]);tumor_id
+tumor_methy <- nor_methy[dmp,colnames(nor_methy)%in%tumor_id]
+dim(tumor_methy)
+
+#把前面的运行结果保存一下
+save(tumor_methy,file = "TCGA-LIHC-Tumor-dmp-matrix.RData")
+```
+
+## 第二步，寻找相关矩阵，并生成下游数据
+
+```{r}
+#读入第一步的运行结果
+(load("TCGA-LIHC-Tumor-dmp-matrix.RData")) 
+colnames(tumor_methy) <- substring(colnames(tumor_methy),1,12)
+tumor_methy <- as.data.frame(t(tumor_methy))
+tumor_methy[1:5,1:6]
+tumor_methy <- rownames_to_column(tumor_methy,var = "ID")
+tumor_methy$ID <- gsub(tumor_methy$ID,pattern = "\\.",replacement = "-")
+tumor_methy <- tumor_methy[!duplicated(tumor_methy$ID),]
+
+summary(tumor_methy$ID%in%sur_data$ID)
+################################
+sur_meth <- merge(sur_data,tumor_methy,by.x="ID",by.y="ID",all.x=F,all.y=F)
+```
+
+如果想要获得HR和可信区间，使用批量生存分析，运行时间较长-patience
+
+```{r}
+Coxoutput=data.frame()
+for(i in colnames(sur_meth[,4:ncol(sur_meth)])){
+  cox <- coxph(Surv(OS_time,OS_status) ~ sur_meth[,i], data = sur_meth)
+  coxSummary = summary(cox)
+  Coxoutput=rbind(Coxoutput,cbind(gene=i,HR=coxSummary$coefficients[,"exp(coef)"],
+                                  z=coxSummary$coefficients[,"z"],
+                                  pvalue=coxSummary$coefficients[,"Pr(>|z|)"],
+                                  lower=coxSummary$conf.int[,3],
+                                  upper=coxSummary$conf.int[,4]))
+}
+for(i in c(2:6)){
+  Coxoutput[,i] <- as.numeric(as.vector(Coxoutput[,i]))
+}
+Coxoutput <- arrange(Coxoutput,pvalue)  %>% #用pvalue筛选
+  filter(pvalue < 0.05)
+dim(Coxoutput)
+head(Coxoutput)
+################################
+
+sig_dmp <- as.character(Coxoutput$gene);sig_dmp[1:100]
+```
+
+进一步筛选tumor_methy-矩阵文件-用于向量机的进一步筛选
+
+```{r}
+rownames(tumor_methy) <- NULL
+tumor_methy <- column_to_rownames(tumor_methy,var = "ID")
+tumor_methy <- tumor_methy[rownames(tumor_methy)%in%sur_meth$ID,colnames(tumor_methy)%in%sig_dmp]
+tumor_methy <- rownames_to_column(tumor_methy,var = "ID")
+dim(tumor_methy)
+tumor_methy[1:5,1:5]
+```
+
+患者风险分析
+
+```{r}
+sur_data <- sur_data[sur_data$ID%in%sur_meth$ID,]
+sur_data <- within(sur_data, {
+  subtype <- NA
+  subtype[(OS_time <= 12) & (OS_status == 1)] <- "High_risk" 
+  subtype[(OS_time >= 60) ] <- "Low_risk"
+})
+
+sur_data$subtype[is.na(sur_data$subtype)] <- "Inter_risk"
+summary(as.factor(sur_data$subtype))
+
+tumor_subtype_methy <- merge(sur_data[,c("ID","subtype")],tumor_methy,by.x="ID",by.y="ID",all.x=F,all.y=F)
+tumor_subtype_methy[1:5,1:10]
+save(tumor_subtype_methy,file = "TCGA-LIHC-survival-relevant-DMP-matrix.RData")
+write.csv(tumor_subtype_methy,"TCGA-LIHC-survival-relevant-DMP-matrix.csv")
+```
+
+接下来将进入第三和第四步，请打开FigureYa130coxSVM_step34.ipynb文件，以第二步生成的TCGA-LIHC-survival-relevant-DMP-matrix.csv文件作为输入。
+
+```{r}
+sessionInfo()
+```

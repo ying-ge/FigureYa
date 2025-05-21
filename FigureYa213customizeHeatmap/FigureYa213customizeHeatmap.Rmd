@@ -1,0 +1,356 @@
+---
+title: "FigureYa213customizeHeatmap"
+author: "小丫画图出品"
+date: "2020-12-25"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+Figure6 的绘制方法以及Cmap score的计算，图里其他的内容如何获取可以无需讲解。
+
+![](example.png)
+
+出自<https://academic.oup.com/bib/advance-article/doi/10.1093/bib/bbaa164/5891146>
+
+Figure 6. Identification of most promising therapeutic agents for high PPS score patients according to the **evidence from multiple sources** (see also Table S15 available online at https://academic.oup.com/bib). **Six CTRP-derived agents** and **six PRISM-derived agents** were shown on the **left** and **right** of the diagram, respectively.
+
+FigureYa131CMap也用到了CMap，并对感兴趣的小分子进行MoA药物作用机制分析，可相互参考。
+
+# 应用场景
+
+例文采用了多个来源的数据相互佐证，来说明筛选出的化合物/药物的潜在价值。作者设计了这个图，巧妙地把证据一、二、三和四同时展示出来，同时还能看到overlap。
+
+- 证据一和二：上文用PRISM和CTRP发现了12个 candidate compounds identified showed a higher drug sensitivity in PPS score-high patients（可参考FigureYa212drugTarget）
+- 证据三：We first used the **CMap analysis** to find compounds of which gene expression patterns were oppositional to the HCC-specific expression patterns (i.e. gene expression increased in tumor tissues but decreased by treatment of certain compounds).
+- 证据四：Secondly, **fold-change differences of the expression levels (including mRNA- and protein-level) of candidates’ drug targets** between tumor and normal tissue were calculated, and a higher fold change value indicated a greater potential of candidate agent for HCC treatment. 
+- 证据五：Thirdly, a comprehensive **literature search** was performed in PubMed (https://www.ncbi.nlm.nih. gov/pubmed/) to find out the experimental and clinical evidence of candidate compounds in treating HCC. 
+
+下面将带你实现CMap analysis及画图。以左图CTRP vs. CMap为例，右图也是一样的。
+
+> 使用本代码或分析思路请引用：
+
+Chen Yang, Xiaowen Huang, Yan Li, Junfei Chen, Yuanyuan Lv, Shixue Dai, Prognosis and personalized treatment prediction in TP53-mutant hepatocellular carcinoma: an in silico strategy towards precision oncology, Briefings in Bioinformatics, bbaa164, https://doi.org/10.1093/bib/bbaa164
+
+# 环境设置
+
+画图用到了github最新版ComplexHeatmap里的pheatmap，两种方式都可以用上它，任选其一。
+
+方式一：安装github版的ComplexHeatmap（大鱼海棠亲测有效）
+
+```{r eval=FALSE}
+library(devtools)
+install_github("jokergoo/ComplexHeatmap") 
+# 如果github网速困难，可本地安装
+install.packages("ComplexHeatmap-master.tar.gz", repos = NULL, type = "source")
+```
+
+方式二：如果安装github版有困难，可以安装bioconductor版，然后加载最新的函数（小丫亲测有效）
+
+```{r eval=FALSE}
+#使用国内镜像安装包
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("ComplexHeatmap")
+```
+
+加载新ComplexHeatmap包里的pheatmap函数
+
+```{r}
+source("pheatmap_translate.R") #来自github版ComplexHeatmap
+```
+
+加载包
+
+```{r}
+library(devtools)
+library(ComplexHeatmap) # 用于绘制热图
+library(circlize) # 用于配色
+library(tidyverse) # 用于读取MAF文件
+library(limma) # 用于差异表达
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+如果你只是想画图，就直接跳到“开始画图”。
+
+文件较大，已上传至微云，请点击链接下载<https://share.weiyun.com/c9oY6n0T>
+
+LIHC.TPM.txt，基因表达矩阵，用于计算差异表达倍数。与FigureYa212drugTarget的相同。
+
+data_mutations_mskcc.txt，maf突变数据，用于提取亚型样本，此处以TP53突变为例。与FigureYa212drugTarget相同。
+
+```{r}
+# 1.读取肝癌TPM表达谱
+expr <- read.table("LIHC.TPM.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+normsam <- colnames(expr[,which(substr(colnames(expr),11,12) == "11")])
+tumosam <- colnames(expr[,which(substr(colnames(expr),11,12) == "01")])
+
+# 2.读取maf突变文件(与cBioPortal下载)并更新表达谱
+maf <- read_tsv("data_mutations_mskcc.txt", comment = "#")
+maf$Tumor_Sample_Barcode <- paste0("LIHC",substr(maf$Tumor_Sample_Barcode,8,15))
+tumosam <- intersect(tumosam,unique(maf$Tumor_Sample_Barcode)) # 取出交集的肿瘤样本
+maf <- maf[which(maf$Tumor_Sample_Barcode %in% tumosam),]
+expr <- expr[,c(tumosam,normsam)]
+
+# 3.提取TP53突变信息并创建样本注释
+tp53 <- c()
+for (i in tumosam) {
+  tmp <- maf[which(maf$Tumor_Sample_Barcode == i),]
+  if(is.element("TP53", tmp$Hugo_Symbol)) { # 如果存在TP53
+    tp53 <- c(tp53,1) # 记录1
+  } else {
+    tp53 <- c(tp53,0) # 否则记录0
+  }
+}
+names(tp53) <- tumosam
+tp53.mutsam <- names(tp53[which(tp53 == 1)]) # 取出有TP53突变的患者
+```
+
+# 差异表达分析(肿瘤vs正常)
+
+```{r}
+pd <- data.frame(Samples = c(tp53.mutsam,normsam),
+                 Group = rep(c("tumor","normal"),c(length(tp53.mutsam),length(normsam))),
+                 stringsAsFactors = FALSE)
+design <-model.matrix(~ -1 + factor(pd$Group, levels = c("tumor","normal")))
+colnames(design) <- c("tumor","normal")
+gset <- log2(expr[,pd$Samples] + 1)
+fit <- limma::lmFit(gset, design = design);
+contrastsMatrix <- limma::makeContrasts(tumor - normal, levels = c("tumor", "normal"))
+fit2 <- limma::contrasts.fit(fit, contrasts = contrastsMatrix)
+fit2 <- limma::eBayes(fit2, 0.01)
+resData <- limma::topTable(fit2, adjust = "fdr", sort.by = "B", number = 100000)
+resData <- as.data.frame(subset(resData, select=c("logFC","t","B","P.Value","adj.P.Val")))
+resData$id <- rownames(resData)
+colnames(resData) <- c("log2fc","t","B","pvalue","padj","id")
+resData$fc <- 2^resData$log2fc
+resData <- resData[order(resData$padj),c("id","fc","log2fc","pvalue","padj")]
+
+# 保存到文件
+write.table(resData, file = "output_degs.txt", row.names = FALSE, sep = "\t", quote = FALSE)
+```
+
+# CMap 分析
+
+## 生成CMap的输入文件
+
+根据原文补充材料的描述：300 genes with the most significant fold changes (150 up-regulated genes and 150 down-regulated genes) were submitted to the CMap website <https://clue.io/query>
+
+```{r}
+ngene <- 150
+degs <- na.omit(resData[order(resData$log2fc,decreasing = T),])
+updegs <- rownames(degs)[1:ngene]
+dndegs <- rownames(degs)[(nrow(degs)-ngene + 1):nrow(degs)]
+cmap.input <- data.frame(up = updegs,
+                         dn = dndegs,
+                         stringsAsFactors = F)
+write.table(cmap.input,"CMap_input.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+## CMap网站使用
+
+输入CMap_input.txt，经过以下方法获得CMap_export.txt文件，用于下一步画图。
+
+![](CMap_1.jpg)
+
+![](CMap_2.jpg)
+
+![](CMap_3.jpg)
+
+# 开始画图
+
+图分为左中右三部分，左侧区块相当于annotation，中间为基因变化倍数，右侧为CMap score。
+
+把annotation、log2FC、以及前面计算得到的CMap score填进去。
+
+这里直接把数值写入矩阵matrix，实际使用时可通过读入存储相应数值的文件来赋值。
+
+```{r}
+cmap.res <- read.delim("CMap_export.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+drug <- c("BI-2536","Leptomycin B","methotrexate","narciclasine","SR-II-138A","vincristine")
+selres <- cmap.res[which(cmap.res$Name %in% intersect(cmap.res$Name,drug)),]
+print(selres) 
+```
+
+下面根据这个结果构建matrix，用于绘制热图，分别准备：
+
+- 伪数据[用于映射颜色]，dt
+- 展示标签，lb
+- 标签对应颜色，cl
+
+```{r}
+## 左侧区块
+# 背景颜色
+dt1 <- matrix(c(0,1, # 1为深色，0为浅色
+                0,1,
+                1,1,
+                0,0,
+                0,0,
+                1,1),
+              ncol = 2,
+              byrow = T,
+              dimnames = list(c("BI-2536","Leptomycin B","Methotrexate","Narciclasine","SR-II-138A","Vincristine"),
+                              c("Clinical status","Experimental evidence")))
+
+# 文字标签
+lb1 <- matrix(c("Phase2","Present",
+                "Phase1","Present",
+                "Launched","Present",
+                "Preclinical","Absent",
+                "Preclinical","Absent",
+                "Launched","Present"),
+              ncol = 2,
+              byrow = T)
+
+# 文字颜色
+cl1 <- matrix(c("black","white",
+                "black","white",
+                "white","white",
+                "black","black",
+                "black","black",
+                "white","white"),
+              ncol = 2,
+              byrow = T)
+
+# 画图
+# 如果这里报错，请返回开头，看“环境设置”
+hm1 <- pheatmap(mat = dt1,
+                color = c("#EFFAE8","#BAE5BC"),
+                cluster_cols = F,
+                cluster_rows = F,
+                show_rownames = T,
+                show_colnames = T,
+                display_numbers = lb1,
+                number_color = cl1,
+                fontsize_number = 11,
+                border_color = "white",
+                cellwidth = 50,
+                cellheight = 50,
+                legend = F)
+
+
+## 中间区块
+# 背景颜色
+dt2 <- matrix(c(1,0,
+                1,0,
+                0,0,
+                1,0,
+                0,0,
+                1,0),
+              ncol = 2,
+              byrow = T,
+              dimnames = list(c("BI-2536","Leptomycin B","Methotrexate","Narciclasine","SR-II-138A","Vincristine"),
+                              c("Log2FC of mRNA expression","Log2FC of protein expression")))
+
+# 文字标签
+lb2 <- matrix(c("1.23","0.42",
+                "1.21","0.43",
+                "0.89","-0.15",
+                "1.07","0.24",
+                "0.59","0.06",
+                "1.54","-0.01"),
+              ncol = 2,
+              byrow = T)
+# 文字颜色
+cl2 <- matrix(c("white","black",
+                "white","black",
+                "black","black",
+                "white","black",
+                "black","black",
+                "white","black"),
+              ncol = 2,
+              byrow = T)
+# 画图
+hm2 <- pheatmap(mat = dt2,
+                color = c("#B7E4ED","#019AC9"),
+                cluster_cols = F,
+                cluster_rows = F,
+                show_rownames = T,
+                show_colnames = T,
+                display_numbers = lb2,
+                number_color = cl2,
+                fontsize_number = 11,
+                border_color = "white",
+                cellwidth = 50,
+                cellheight = 50,
+                legend = F)
+
+## 右侧区块
+# 背景颜色
+dt3 <- matrix(c(0, # 0为中间色
+                -1, # -1为最浅色
+                0,
+                1, # 1为深色
+                -1,
+                0),
+              ncol = 1,
+              byrow = T,
+              dimnames = list(c("BI-2536","Leptomycin B","Methotrexate","Narciclasine","SR-II-138A","Vincristine"),
+                              c("CMap score")))
+
+# 文字标签
+# 根据selres的结果填写
+# 因为有两个药物没有CMap结果，所以是NA
+lb3 <- matrix(c("-83.13",
+                "NA",
+                "-49.61",
+                "-91.23",
+                "NA",
+                "-34.30"),
+              ncol = 1,
+              byrow = T)
+
+# 文字颜色
+cl3 <- matrix(c("black",
+                "black",
+                "black",
+                "white",
+                "black",
+                "black"),
+              ncol = 1,
+              byrow = T)
+
+# 画图
+hm3 <- pheatmap(mat = dt3,
+                color = c("white","#FDCEB9","#F26E5F"),
+                cluster_cols = F,
+                cluster_rows = F,
+                show_rownames = T,
+                show_colnames = T,
+                display_numbers = lb3,
+                number_color = cl3,
+                fontsize_number = 11,
+                border_color = "white",
+                cellwidth = 50,
+                cellheight = 50,
+                legend = F)
+
+## 水平合并热图
+hm <- hm1 + hm2 + hm3
+draw(hm) 
+dev.copy2pdf(file = "heatmap.pdf",width = 8,height = 8)
+```
+作者表示整张图片均由热图拼接AI绘制，这里输出的pdf文件是矢量图，图片剩余细节以及图例请使用AI绘制。
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

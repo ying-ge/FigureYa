@@ -1,0 +1,235 @@
+---
+title: "FigureYa145target"
+author: "小丫画图出品"
+date: "2019-11-3"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：赵龙，中科院遗传所在读博士
+
+擅长：ChIP-seq，MNase-seq，ATAC-seq，HiC，ChIA-PET，GWAS分析，R语言。
+
+兴趣：单细胞RNA-seq，ATAC-seq，机器学习相关。
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+从形式上复现原图。
+
+有时没有现成的包能画出一模一样的图，我们可以通过计算图中每个元素的位置，然后画出想要的效果。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41467-019-09222-w>
+
+Fig. 2 Characteristics of glycosites identified with AI-ETD. f A glycoprotein-glycan network maps **which glycans (outer circle, 117 total) modify which proteins (inner bar, 771 total)**. Glycoproteins are **sorted by number of glycosites (scale to the right)**. Glycans are organized by classification, and **edges are colored by the glycan node from which they originate**, except for mannose-6-phosphate which has yellow edges. See Supplementary Fig. 11 and Supplementary Table 1 for glycan identifiers.
+
+A glycoprotein-glycan network diagram in Fig. 2f maps which glycans (outer nodes) were observed on identified glycoproteins (inner column, organized by number of glycosites). Several discernable patterns appear, perhaps most notably the prevalence of high mannose glycosylation. The network diagram also indicates that the majority of **fucosylated, paucimannose, and sialylated glycans occur on proteins with multiple glycosylation sites**, and it indicates which glycans contribute more to heterogeneity. Supplementary Figure 11 provides a larger version of this network diagram with glycan identities in Supplementary Table 1.
+
+**图的解析**
+
+这个图展示两层信息：糖蛋白上glycan的种类，糖蛋白上glycosites的数量（数量可替换成其他分类信息，例如上调/下调，或所在的通路等等）。
+
+- 外围弧线：classification，把glycans分为6种
+- 点：117个glycans，按照classification定义颜色和位置，并与外围6个classification的弧线对应
+- 中央矩形：看起来是矩形，其实每个矩形的纵坐标都是有意义的，其本质是771个糖蛋白，按照glycosites的数量排序，数量与右侧图例对应。
+- 连线：连接外围点跟中央矩形。线的两端分别对应糖蛋白的glycan和glycosites数量。颜色跟classification一致，其中一个glycan：mannose-6-phosphate的连线用黄色突出显示。
+
+原文方法描述是用igraph画的：The **protein-glycan network**, glycan co-occurrence networks, and glycosylation profiles for subcellular groups were created in R 3.2.2 using the **igraph** library70, and the arcplot were created with arcdiagram library。
+
+这里用ggplot2画图，先计算位置再画图。
+
+## 应用场景
+
+展示分类、分组跟元素之间的关系。例如：glycan-数量-glycoprotein，GO-TF-targe gene、表观修饰-上下调-gene、enhancer-motif-promoter等。
+
+以TF-GO-target gene互作为例，转录组找出几个GO 途径的基因可以放在外围的点，颜色代表不同GO term，点的大小代表基因表达水平或fold change。里面的矩形是我们共公共数据库找到的能够结合这些外围基因的转录因子。结果哪些转录因子激活基因，哪些抑制，就一目了然了。如果有HiC或ChIA-pet数据，hub 位点和靶基因的互作也是同理。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(ggplot2) #用于画图
+library(dplyr) #用于数据处理
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input_node.txt和easy_input_group.txt。从例文41467_2019_9222_MOESM5_ESM.xlsx文件整理而来。
+
+- easy_input_node.txt，glycan及其分类，用来画外围的点和弧线；
+- easy_input_group.txt，protein-glycan-数量的对应关系，用来画中央矩形和连线。每行一个protein，用`;`分隔多个glycon。
+
+```{r}
+Glycan <- read.table("easy_input_node.txt", sep = "\t", head=T)
+head(Glycan)
+dim(Glycan)
+
+protein <- read.table("easy_input_group.txt",head=T)
+head(protein)
+dim(protein)
+```
+
+## 计算图中各元素位置
+
+### 计算点（Glycan）的坐标
+
+一共有117个点，右侧（第一、四象限）59个，左侧（二、三象限）58个。
+
+先计算每个点与x轴的角度，再通过与x轴的角度和三角函数计算出每个点的横纵坐标。
+
+计算角度时，因为不是整个圆，上下各缺了一块，缺的角度为30度。所以第一个蛋白角度是75度，第59个蛋白是-75度，第60个蛋白是-107度，最后一个是-255度。
+
+计算坐标时，考虑到后面还要画中央矩形，因此以蛋白数量/2作为半径。
+
+```{r, fig.width=5, fig.height=5}
+Glycan$angle <- ifelse(Glycan$Node < 60,
+                       75-(150/58*(Glycan$Node-1)),
+                       75-(150/58*(Glycan$Node-1))-30)
+
+Glycan$G.x <- cos(Glycan$angle*pi/180.0)*(nrow(protein)/2)
+Glycan$G.y <- sin(Glycan$angle*pi/180.0)*(nrow(protein)/2)
+head(Glycan)
+```
+
+### 计算最外围的弧线
+
+外围的弧线内侧是圆半径的1.1倍，外侧是1.15倍
+
+```{r}
+# 取Gly.clu列
+curve <- Glycan[,3, drop=F]
+
+curve$x.start <- Glycan$G.x*1.1
+curve$x.end <- Glycan$G.x*1.15
+curve$y.start <- Glycan$G.y*1.1
+curve$y.end <- Glycan$G.y*1.15
+
+# 给弧线之间留个空隙，根据自己的数据调整数量吧
+curve <- curve[-c(9:10, #9是第一类Paucimannose的数量，以此类推
+                  45:46,73:74,107:108),]
+head(curve)
+```
+
+### 中央矩形
+
+根据glycosites数量分成5类，其中4和5一组，>5一组，与右侧图例对应。
+
+```{r}
+protein.pos <- protein[,1:2]
+protein.pos <- arrange(protein.pos, Count)
+
+protein.pos$P.x <- 0
+protein.pos$P.y <- seq(floor(nrow(protein)/2),-floor(nrow(protein)/2))
+
+protein.pos$cluster <- ifelse(protein.pos$Count < 4, protein.pos$Count, ifelse(protein.pos$Count < 6, "4", "5"))
+
+head(protein.pos)
+``` 
+
+### 连接线，即Glycan-protein
+
+```{r}
+connect <- protein[,c(1,3)]
+Gly.name <- strsplit(as.character(connect[,2]),split=";")
+connect.count <- sapply(Gly.name,length)
+connection <- data.frame(Protein=rep(connect$Protein,connect.count),Glycan=unlist(Gly.name))
+```
+
+### merge
+
+seg.clu主要是为了画最后一个Glycan那一点点黄色
+
+```{r}
+all <- merge(connection,Glycan,by="Glycan")
+all1 <- merge(all,protein.pos,by="Protein")
+all1$seg.clu <- ifelse(all1$Glycan=="HexNAc(2)Hex(6)Phospho(1)","zz",all1$Gly.clu)
+head(all1)
+```
+
+## 开始画图
+
+```{r}
+# 自定义颜色
+cols <- c("royalblue4","gray80","seagreen3","powderblue","steelblue","goldenrod1")
+fills <- c("#FFFFD4","#FEE391","#FEC44F","#FE9929","#D95F0E")
+# 查看颜色
+library(scales)
+show_col(cols)
+show_col(fills)
+
+# 画点
+p <- ggplot(all1) +
+  geom_point(aes(G.x,G.y,color=Gly.clu))
+p
+
+# 画连线
+p1 <- p + 
+  geom_segment(aes(x=G.x,y=G.y,xend=P.x,yend=P.y,color=seg.clu),alpha=0.1)
+p1
+
+# 画矩形
+p2 <- p1 + 
+  geom_rect(aes(xmin=-15,xmax=15,ymin=P.y,ymax=P.y+1,fill=cluster)) +
+  geom_rect(aes(xmin=500,xmax=530,ymin=P.y,ymax=P.y+1,fill=cluster))
+p2 
+
+# 画弧线
+p3 <- p2 + 
+  geom_segment(data=curve,aes(x=x.start,xend=x.end,y=y.start,yend=y.end,color=Gly.clu),size=5)
+p3
+
+# 清空背景和坐标轴
+p4 <- p3 +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+    )  
+p4
+
+# 用自定义颜色填充和画线
+p5 <- p4 +
+  scale_color_manual(values=cols) +
+  scale_fill_manual(values=fills)
+p5
+
+# 输出到文件
+pdf(file="target.pdf", height=5, width=5.5)
+ p5
+dev.off()
+```
+
+## 后期处理
+
+输出的PDF文件是矢量图，可以用PS或AI等矢量图编辑器打开，编辑图形和文字。
+
+其实本来文字和数字都是可以在R中加的，但是还需要计算位置，莫不如在PS里修改。这里有一个PS的中间文件可以参考`target.psd`和`target.tif`。
+
+在用到自己数据的时候，最好先把原数据跑一遍，理解每个数字的含义，和整体的思路，再去举一反三。这里涉及到一些数学的三角函数计算，和角度的计算，还是要理解每个数字的含义的。
+
+有任何问题欢迎在小丫画图的知识星球中提问。
+
+```{r}
+sessionInfo()
+```

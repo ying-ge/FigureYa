@@ -1,0 +1,192 @@
+---
+title: "FigureYa190batchLogistic"
+author: "小丫画图出品"
+date: "2020-8-17"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+逻辑回归，这篇文章应该是一个一个做的，我主要想要的是批量。
+
+![](example.png)
+
+出自<https://doi.org/10.1371/journal.pone.0201515>
+
+# 应用场景
+
+批量计算单变量和多变量逻辑回归。
+
+这个是逻辑回归，如果要cox回归，可参考FigureYa47HR2table。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("SimDesign")
+```
+
+加载包
+
+```{r}
+library(SimDesign) # 用于沉默逐步回归的信息
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.csv，每行一个sample，第一列就是sample ID，第二列为分组（响应变量），其后每列一个特征（自变量）。这里是基因的表达量，可以换其他临床信息。
+
+```{r}
+dat <- read.table("easy_input.txt",row.names = 1,sep = "\t",header = T,check.names = F,stringsAsFactors = F)
+dat[1:3, 1:3]
+table(dat$MetaStatus)
+
+# 注意，如果变量是基因，一定要把“-”替换成别的符号比如“_”。
+colnames(dat) <- gsub("-","_",colnames(dat))
+```
+
+# 循环运算单变量逻辑回归
+
+```{r}
+rname <- "MetaStatus" #设置响应变量y的变量名
+vname <- setdiff(colnames(dat), rname) # 设置自变量x的变量名
+
+# 初始化结果向量
+or <- p <- p.lab <- c() 
+p.cutoff <- 0.05 # 名义p值的阈值
+step.dir <- "forward" # 逐步回归的方向，可为backward，forward和both，例文为forward
+
+for (v in vname) {
+  f <- as.formula(paste0(rname,"~",v)) # 创建公式
+  t <- dat[,c(rname,v)]
+  
+  # 单变量逻辑回归
+  l <- glm(f, 
+           data = t, 
+           family = "binomial", 
+           control = list(maxit = 50), 
+           na.action = na.exclude)
+  
+  s <- format(round(exp(cbind("OR" = coef(l), confint.default(l, level = 0.95)))[2,],3),nsmall = 3) # 调整格式
+  s <- paste0(s[1]," (",s[2],"-",s[3],")")
+  or <- c(or,s) # odd ratio
+  p <- c(p,format(round(summary(l)$coefficients[2,4],3),nsmall = 3))
+  p.lab <- c(p.lab, # 名义p值的标签
+             ifelse(summary(l)$coefficients[2,4] < 0.001,
+                    "<0.001", format(round(summary(l)$coefficients[2,4],3),nsmall = 3)))
+}
+```
+
+# 多变量回归
+
+```{r}
+# 找出显著变量
+vname.sig <- vname[which(as.numeric(p) < p.cutoff)]
+
+if(length(vname.sig) == 0) {
+  cat("No significant variable found!\n") # 单变量结果没有显著变量
+} else if(length(vname.sig) == 1) {
+  cat("Only one significant variable found!\n") # 单变量结果只有一个显著变量，不进行多变量回归
+} else {
+  cat(paste0("A total of ",length(vname.sig)," significant variables found!\n"))
+  f <- as.formula(paste0(rname,"~",paste0(vname.sig,collapse = " + "))) # 创建多变量公式
+  t <- dat[,c(rname,vname.sig)]
+  l <- glm(f, 
+           data = t, 
+           family = "binomial", 
+           control = list(maxit = 50), 
+           na.action = na.exclude)
+  l.step <- quiet(step(l,direction = step.dir, k = qchisq(p.cutoff/2,1,lower.tail=FALSE))) # 向前支部回归
+  l.step.s <- as.data.frame(format(round(exp(cbind("OR" = coef(l.step), 
+                                     confint.default(l.step, level = 0.95))),3),nsmall = 3)) # 调整格式
+  l.step.s$p <- format(round(summary(l.step)$coefficients[,4],3),nsmall = 3)
+  l.step.s$p.lab <- ifelse(summary(l.step)$coefficients[,4] < 0.001,
+                       "<0.001",format(round(summary(l.step)$coefficients[,4],3),nsmall = 3))
+  
+  l.step.s <- l.step.s[setdiff(rownames(l.step.s),"(Intercept)"),] # 移除截距项
+}
+step.p <- ifelse(l.step.s$p < p.cutoff, l.step.s$p,"")
+step.or <- ifelse(step.p == "","NA",paste0(l.step.s$OR," (",l.step.s$`2.5 %`,"-",l.step.s$`97.5 %`,")"))
+
+# 找到在原本显著变量里的位置
+step.p.lab <- rep("", length(vname)); names(step.p.lab) <- vname; step.p.lab[vname.sig] <- step.p
+step.or.lab <- rep("NA", length(vname)); names(step.or.lab) <- vname; step.or.lab[vname.sig] <- step.or
+```
+
+# 输出表格文件
+
+## 生成简易表格
+
+```{r}
+outTab <- cbind.data.frame(vname, or, p.lab, step.or.lab, step.p.lab)
+colnames(outTab) <- c("","Univariate analysis\nOR (95% CI)","\nP value","Multivariate analysis\nOR (95% CI)","\nP value")
+rownames(outTab) <- NULL
+write.table(outTab,"batch logistic results.txt",sep = "\t",row.names = F,quote = F)
+```
+
+## 输出CSV格式
+
+```{r}
+table_subtitle <- c(NA,"OR (95% CI)","P value","OR (95% CI)","P value")
+comtable <- rbind(table_subtitle,outTab,stringsAsFactors = F)
+colnames(comtable) <- c("","Univariate analysis","","Multivariate analysis","")
+comtable[is.na(comtable)] <- "" #表格里面不打印抬头的NA，但保留“NA”字符串
+str(comtable)
+write.csv(comtable,"Table.csv", quote = F, row.names = F)
+```
+
+## 输出WORD格式
+
+```{r}
+table_subtitle <- c(NA,"OR (95% CI)","P value","OR (95% CI)","P value")
+comtable <- rbind(table_subtitle,outTab,stringsAsFactors = F)
+colnames(comtable)<-c(NA,"Univariate analysis",NA,"Multivariate analysis",NA)
+comtable[is.na(comtable)] <- "" #表格里面不打印抬头的NA，但保留“NA”字符串
+
+#保存到word文档
+title_name<-'Table *. Univariate and multivariate logistic regression'
+table1 <- comtable
+mynote <- "Note: ..."
+
+if(!require(officer)) (install.packages('officer'))
+library(officer)
+library(dplyr)
+my_doc <- read_docx()  #初始化一个docx
+my_doc %>%
+  ##添加段落标题名称
+  body_add_par(value = title_name, style = "table title") %>%
+  
+  #添加表格
+  body_add_table(value = table1, style = "Light List Accent 2" ) %>% 
+  
+  #添加Note
+  body_add_par(value = mynote) %>% 
+  
+  #打印到word文档
+  print(target = "Table.docx")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

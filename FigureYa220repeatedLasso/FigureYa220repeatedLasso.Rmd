@@ -1,0 +1,313 @@
+---
+title: "FigureYa220repeatedLasso"
+author: "小丫画图出品"
+date: "2021-2-20"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+FigureYa182RFSurv和FigureYa198SignatureComb都是根据基因的重要性筛选的。直接根据随机森林的准确度或cox模型的frequency筛选，又是另一种不同的展示方式。
+
+![](example.png)
+
+出自<https://translational-medicine.biomedcentral.com/articles/10.1186/s12967-019-1824-4>
+
+Fig. 2 a Generation of the ten gene groups after 1000 iteration. The gene model with 30 immune related genes was selected to construct the signature as its highest frequencies of 211 compared to other nine gene models. b The c‐index of both training and testing sets. The c‐index for TCGA dataset, GSE30219, GSE31210, GSE3141, and GSE81089 were 0.723, 0.657, 0.7061, 0.641, and 0.619 respectively
+
+# 应用场景
+
+这里用的cox模型的10折交叉验证
+
+Using Cox proportional hazards model (iteration = 1000) with an lasso penalty to find the best gene model.
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("survcomp")
+```
+
+加载包
+
+```{r}
+library(survival)
+library(glmnet)
+library(pbapply)
+library(survcomp)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+display.progress = function (index, totalN, breakN=20) {
+  
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+} 
+```
+
+# 输入文件
+
+表达谱文件较大，已上传至微云<https://share.weiyun.com/0esnGlCh>
+
+- InnateDB_genes.csv，免疫基因集。数据来自<https://www.innatedb.com/redirect.do?go=resourcesGeneLists> Immunogenetic Related Information Source (IRIS)
+
+- 训练集
+  - easy_input_expr.txt，表达谱
+  - easy_input_surv.txt，生存数据
+  
+- 测试集，GEO数据的下载及数据预处理请参考FigureYa203ComBat，其余测试集如法炮制
+  - easy_validation_expr.txt，表达谱
+  - easy_validation_surv.txt，生存数据
+
+```{r}
+## 加载训练集表达谱和生存数据
+expr <- read.table("easy_input_expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+surv <- read.table("easy_input_surv.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+pct = 0.1
+
+# 1. 根据情况对表达谱做对数转换
+expr <- t(log2(expr + 1))
+
+# 2. 取方差大于1的基因
+expr <- expr[,apply(expr, 2, sd) > 0]
+
+# 3. 取表达量为0的样本数目小于总样本数pct%的样本，这里pct默认为0.1，即10%
+expr <- expr[,apply(expr, 2, function(x) sum(x == 0) < pct * nrow(expr))]
+
+# 4. 防止基因名出错
+colnames(expr) <- make.names(colnames(expr))
+
+
+
+## 加载免疫基因集
+immune.gene <- read.csv("InnateDB_genes.csv",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+
+# 取出基因和样本
+comgene <- unique(intersect(colnames(expr),immune.gene$name))
+comsam <- intersect(rownames(surv),rownames(expr))
+
+expr.surv <- cbind.data.frame(surv[comsam,c("OS","OS.time")],
+                              as.data.frame(expr[comsam,comgene]))
+expr.surv <- expr.surv[which(expr.surv$OS.time > 0),]
+```
+
+# 用训练集筛基因
+
+单变量cox模型筛选基因，KM估计筛选基因，二者取交集。
+
+```{r}
+# 单变量cox模型筛选基因
+Coxoutput <- NULL
+for(i in 3:ncol(expr.surv)){
+  display.progress(index = i,totalN = ncol(expr.surv),breakN = 20)
+  g <- colnames(expr.surv)[i]
+  cox <- coxph(Surv(OS.time,OS) ~ expr.surv[,i], data = expr.surv)
+  coxSummary = summary(cox)
+  Coxoutput=rbind(Coxoutput,data.frame(gene=g,
+                                       HR=as.numeric(coxSummary$coefficients[,"exp(coef)"])[1],
+                                       z=as.numeric(coxSummary$coefficients[,"z"])[1],
+                                       pvalue=as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1],
+                                       lower=as.numeric(coxSummary$conf.int[,3][1]),
+                                       upper=as.numeric(coxSummary$conf.int[,4][1]),stringsAsFactors = F))
+}
+cox.res <- Coxoutput[which(Coxoutput$pvalue < 0.05),"gene"] # 取出FDR<0.05的基因为候选基因
+
+# KM估计筛选基因
+kmoutput <- NULL
+for(i in 3:ncol(expr.surv)){
+  display.progress(index = i,totalN = ncol(expr.surv),breakN = 20)
+  g <- colnames(expr.surv)[i]
+  tmp <- expr.surv[,c("OS.time","OS",g)]
+  tmp$group <- ifelse(tmp[,3] > median(tmp[,3]),"High","Low")
+  fitd=survdiff(Surv(OS.time, OS)~ group, data=tmp, na.action=na.exclude)
+  p.val <- 1-pchisq(fitd$chisq, length(fitd$n)-1)
+  
+  kmoutput=rbind(kmoutput,data.frame(gene=g,
+                                      pvalue=p.val,
+                                      stringsAsFactors = F))
+}
+km.res <- kmoutput[which(kmoutput$pvalue < 0.05),"gene"]
+
+# 取出交集基因
+candidate.gene <- intersect(cox.res,km.res)
+
+# 运行1000次multivariate cox model with lasso penalty
+iter.times <- 1000 # 设置迭代次数，速度非常慢请耐心，例文是1000次
+surv.obj <- Surv(expr.surv$OS.time, expr.surv$OS)
+lasso_fea_list <- list()
+
+list.of.seed <- 1:iter.times
+lasso_fea_list <- pblapply(list.of.seed, function(x){ # 大概运行2天
+  set.seed(list.of.seed[x])
+  cvfit = cv.glmnet(x = as.matrix(expr.surv[,candidate.gene]), 
+                    y = surv.obj, 
+                    nfolds = 10, # 10-fold交叉验证选取最优lambda
+                    alpha = 1, # alpha = 1 意味着 lasso
+                    family = "cox", # 依赖cox模型
+                    maxit = 1000) 
+  
+  # 取出最优lambda
+  fea <- rownames(coef(cvfit, s = 'lambda.min'))[coef(cvfit, s = 'lambda.min')[,1]!= 0]
+  if(is.element("(Intercept)", fea)) {
+    lasso_fea <- sort(fea[-1]) # 去掉截距项并排序
+  } else {
+    lasso_fea <- sort(fea)
+  }
+  return(lasso_fea)
+})
+save(lasso_fea_list,file = "lasso_fea_list.rda") # 保存该结果
+
+# 输出每次运行的基因集合
+lasso_res <- NULL
+for(i in 1:iter.times) {
+  lasso_res <- rbind.data.frame(lasso_res,
+                                data.frame(iteration = i,
+                                           n.gene = length(lasso_fea_list[[i]]),
+                                           genelist = paste0(lasso_fea_list[[i]], collapse = " | "),
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+
+# 检查相同基因数目的集合成分是否一致
+## 注意原文没有提到该做法，但的确存在相同基因数目的模型基因成分不完全一致的情况，已致邮给通讯作者未回复
+## 这里可以看到32个基因的模型存在两种基因组分，虽不影响35基因被最终选中，但应考虑为不同模型
+uniquelist <- unique(lasso_res$genelist)
+uniquelab <- LETTERS[1:length(uniquelist)]
+lasso_res$uniquelab <- NA
+for (i in 1:length(uniquelist)) {
+  lasso_res[which(lasso_res$genelist == uniquelist[i]),"uniquelab"] <- uniquelab[i]
+}
+lasso_res$label <- paste(lasso_res$n.gene,"genes",lasso_res$uniquelab,sep = "_") # 最终模型标签
+```
+
+# 训练集 - 计算risk score和C指数
+
+```{r}
+sel.iter <- lasso_res[which(lasso_res$label == "35_genes_A"),"iteration"][1] # 选中模型为35_genes_A的某一次迭代种子（随便算哪个，基因集合都是一样的）
+set.seed(sel.iter) # 设置当前种子以复现该基因集
+cvfit = cv.glmnet(x = as.matrix(expr.surv[,candidate.gene]), 
+                  y = surv.obj, 
+                  nfolds = 10, # 10-fold交叉验证选取最优lambda
+                  alpha = 1, # alpha = 1 意味着 lasso
+                  family = "cox", # 依赖cox模型
+                  maxit = 1000) 
+myCoefs <- coef(cvfit, s="lambda.min")
+fea <- rownames(coef(cvfit, s = 'lambda.min'))[coef(cvfit, s = 'lambda.min')[,1]!= 0]
+if(is.element("(Intercept)", fea)) {
+  lasso_fea <- fea[-1] # 去掉截距项并排序
+  lasso_coef <- myCoefs@x; names(lasso_coef) <- lasso_fea
+} else {
+  lasso_fea <- fea
+  lasso_coef <- myCoefs@x; names(lasso_coef) <- lasso_fea
+}
+tmp <- as.matrix(expr.surv[,lasso_fea])
+risk.score <- apply(tmp,1,function(x) {x %*% as.numeric(lasso_coef)}) # 表达加权系数求和计算riskscore
+cindex.tcga <- concordance.index(risk.score,
+                                 surv.time = expr.surv$OS.time,
+                                 surv.event = expr.surv$OS,
+                                 method = "noether")
+```
+
+# 测试集 - 计算riskscore和C指数
+
+```{r}
+## 加载测试集表达谱和生存数据
+# 表达谱预处理
+gse31210.expr <- read.delim("easy_validation_expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse31210.expr[1:6,1:3] # 注意到行名里存在多种匹配，取///符号前的基因名（可以在EXCEL里检查一下，但不要用EXCEL进行任何操作，千万不要保存，否则可能出现月份）
+gse31210.expr$Gene <- sapply(strsplit(rownames(gse31210.expr)," /// ",fixed = T),"[",1)
+gse31210.expr <- apply(gse31210.expr[,setdiff(colnames(gse31210.expr), "Gene")], 2, function(x) tapply(x, INDEX=factor(gse31210.expr$Gene), FUN=median, na.rm=TRUE))
+gse31210.expr <- as.data.frame(round(gse31210.expr,2))
+
+# 生存数据预处理
+gse31210.surv <- read.delim("easy_validation_surv.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse31210.surv <- gse31210.surv[which(gse31210.surv$`1:DEATH` %in% c("alive","dead")),] # 剔除无结局样本
+
+comsam <- intersect(rownames(gse31210.surv),colnames(gse31210.expr)) # 取出共享样本
+gse31210.expr <- gse31210.expr[,comsam]
+gse31210.surv <- gse31210.surv[comsam,]
+
+gse31210.expr.surv <- cbind.data.frame(data.frame("OS" = ifelse(gse31210.surv$`1:DEATH` == "dead", 1, 0),
+                                                  "OS.time" = gse31210.surv$`1:DAYS BEFORE DEATH/CENSOR`,
+                                                  stringsAsFactors = F),
+                                       t(log2(as.matrix(gse31210.expr[lasso_fea,]) + 1))) # 表达谱对数化
+
+## 计算riskscore和C指数
+tmp <- t(log2(as.matrix(gse31210.expr[lasso_fea,]) + 1))
+risk.score.gse <- apply(tmp,1,function(x) {x %*% as.numeric(lasso_coef)}) # 表达加权系数求和计算riskscore
+cindex.gse <- concordance.index(risk.score.gse,
+                                surv.time = gse31210.expr.surv$OS.time,
+                                surv.event = gse31210.expr.surv$OS,
+                                method = "noether")
+
+```
+
+# 开始画图
+
+```{r}
+par(mfrow = c(1,2)) # 创建画图并分割成左右两块
+## 图A
+par(bty="o", mgp = c(1.9,.33,0), mar=c(5.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25)
+plotdata <- sort(table(lasso_res$label))
+a <- barplot(plotdata,
+        ylab = "Frequency",
+        col = "#00CDCD",
+        main = "Frequency of models",
+        border = NA,
+        xaxt = "n",
+        ylim = c(0,max(plotdata) + 70))
+axis(side = 1, at = a, names(plotdata), las = 2) # 添加x轴标签
+text(a, as.numeric(plotdata) + 30, as.numeric(plotdata), xpd = T) # 添加基因数目
+par(new = T, bty="o", mgp = c(1.9,.33,0), mar=c(5.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25) # 补全黑色边框
+plot(NULL, NULL,
+     col = "white",
+     xlim = range(a), ylim = range(plotdata),
+     xlab = "", ylab = "",
+     xaxt = "n", yaxt = "n")
+
+## 图B
+par(bty="o", mgp = c(1.9,.33,0), mar=c(5.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25)
+cindex <- c(cindex.gse$c.index, cindex.tcga$c.index)
+b <- barplot(cindex,
+        border = NA,
+        ylim = c(0,1),
+        col = "#00CDCD",
+        main = "c-index",
+        ylab = "c-index",
+        xaxt = "n")
+axis(side = 1, at = b, labels = c("GSE31210","TCGA"), las = 2) # 添加x轴标签
+par(new = T, bty="o", mgp = c(1.9,.33,0), mar=c(5.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25) # 补全黑色边框
+plot(NULL, NULL,
+     col = "white",
+     xlim = range(b), ylim = c(0,1),
+     xlab = "", ylab = "",
+     xaxt = "n", yaxt = "n")
+dev.copy2pdf(file = "frequency and cindex of model.pdf", width = 8, height = 4.5) # 保存图片
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

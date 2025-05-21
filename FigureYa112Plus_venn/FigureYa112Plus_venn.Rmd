@@ -1,0 +1,224 @@
+---
+title: "FigureYa112Plus_venn"
+author: "小丫画图出品"
+date: "2019-12-19"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+vennyhttp://bioinfogp.cnb.csic.es/tools/venny/，新出来个选项，颜色填充by%。
+
+缺点：只能填充灰色，只能保存成png。
+
+我想要彩色，我想要pdf矢量图。
+
+众筹FigureYa112venn时还没有R包能直接实现这样按百分比填充颜色的效果，于是FigureYa112venn的作者李誉辉综合了VennDiagram和colorfulVennPlot等R包，实现了想要的效果。
+
+后来高春辉写了R包ggVennDiagram，方便好用，下面就展示一下用这个R包画venn图的用法。
+
+输入基因列表，画出按百分比填充颜色的venn图，并输出各个区域的基因名。
+
+![](example.jpeg)
+
+出自<http://bioinfogp.cnb.csic.es/tools/venny/>
+
+# 应用场景
+
+展示重叠关系，例如多个分组之间共有的、特异的差异表达基因。
+
+适用于2、3或4个list的overlap，超过4个用upsetR更合适。
+
+# 环境设置
+
+安装包
+
+```{r, eval=FALSE}
+devtools::install_github("gaospecial/ggVennDiagram")
+install.packages("export")
+```
+
+加载包
+
+```{r}
+library(stringr)
+library(ggplot2)
+library(ggVennDiagram)
+library(export)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+# 读取文件并筛选差异表达基因，保留统计数值
+read_cut <- function(file){
+  df <- read.table(file, header = T)
+  DEG <- df[df$FDR <= adjcutoff, ]
+}
+
+# 读取文件并筛选差异表达基因，只保留基因名
+read_cut_ID <- function(file){
+  df <- read.table(file, header = T)
+  DEG <- df[df$FDR <= adjcutoff, ]$id
+}
+
+# 读取文件并筛选差异表达基因，把上调和下调分开，只保留基因名
+read_cut_updown <- function(file){
+  df <- read.table(file, header = T)
+  DEG <- df[df$FDR <= adjcutoff, ]
+  return(list(up = DEG[DEG$log2FC > 0,]$id, 
+              down = DEG[DEG$log2FC < 0,]$id))
+}
+```
+
+# 输入文件
+
+SKCM_\*_test_result.\*.txt，差异表达结果，可以包含全部基因，这里用FDR筛选显著差异基因。
+
+> 怎样获得差异表达结果？
+
+- 用[FigureYa59Plus_GEO2DEG](https://www.yuque.com/figureya/figureyaplus/figureya59p)获得芯片的差异表达分析结果文件`easy_input_limma.csv`
+
+- 用FigureYa118MulticlassDESeq2、FigureYa119Multiclasslimma和FigureYa120MulticlassedgeR获得RNA-seq的差异表达分析结果。
+
+这里就以FigureYa118MulticlassDESeq2和FigureYa120MulticlassedgeR的输出文件作为输入，画出venn图展示不同对比的重叠情况。
+
+## 文件信息的整理
+
+可参考`easy_input_info.txt`文件的格式，自己在Excel里写这个文件，至少要有第一列文件名和最后一列condition。
+
+```{r}
+# 读取输入文件
+fnames <- Sys.glob("SKCM*.txt")
+
+# 整理文件信息
+finfo <- data.frame(file = fnames, 
+                 group = str_split_fixed(fnames, "\\.",3)[,2],
+                 method = str_split_fixed(fnames, "_",3)[,2])
+finfo$condition <- paste(finfo$group, finfo$method, sep = "_")
+head(finfo)
+
+# 输出到文件
+write.table(finfo, "easy_input_info.txt", row.names = F,quote = F, sep = "\t")
+```
+
+## 差异表达基因筛选
+
+```{r}
+# 读入文件信息
+finfo <- read.table("easy_input_info.txt", header = T)
+
+# 读入差异表达分析的结果，筛选显著差异基因
+adjcutoff <- 0.05 #根据自己的数据修改阈值
+
+# 读取文件并筛选差异表达基因
+fdataset <- lapply(fnames, read_cut)
+names(fdataset) <- finfo$condition
+
+# 输出到Excel文件，每种对比结果占一个sheet，稍微修改一下格式就可以作为文章的Supplementary File了
+openxlsx::write.xlsx(fdataset, file = paste0("DEG_adj", adjcutoff, ".xlsx"), row.names = F)
+```
+
+# 开始画图
+
+## 两个圈
+
+对比两个文件
+
+以SKCM_deseq2_test_result.immune_vs_Others.txt和SKCM_edgeR_test_result.immune_vs_Others.txt为例，展示在两种方法中都被筛到的差异基因。
+
+```{r, fig.width=4, fig.height=4}
+# 读取带有immune_vs_Others的文件，筛选差异基因
+list_ID <- lapply(finfo[finfo$group == "immune_vs_Others",]$file, read_cut_ID)
+names(list_ID) <- finfo[finfo$group == "immune_vs_Others",]$method
+
+# 画venn图
+p <- ggVennDiagram(list_ID, label_alpha=0) + 
+  scale_fill_gradient(low="white", high = "lightblue")
+p
+
+# 保存成pdf文件
+ggsave("venn_2.pdf", width = 4, height = 4)
+# 保存到ppt里
+graph2ppt(p, file="venn_2.pptx",width = 4,height = 4)
+# 以上两种文件都是矢量图，可以在illustrator或ppt里打开修改文字和图形。
+
+# 把各区域的基因输出到文件
+openxlsx::write.xlsx(get_region_items(list_ID), "venn_2.xlsx")
+```
+
+## 四个圈
+
+对比四个文件
+
+以SKCM_deseq2_test_result.immune_vs_Others.txt和SKCM_edgeR_test_result.immune_vs_Others.txt为例，把上调和下调拆开，展示在两种方法中都被筛到的差异基因。
+
+```{r, fig.width=6, fig.height=6}
+file1 <- "SKCM_deseq2_test_result.immune_vs_Others.txt"
+file2 <- "SKCM_edgeR_test_result.immune_vs_Others.txt"
+list_ID <- list(deseq2_up = read_cut_updown(file1)$up,
+                deseq2_down = read_cut_updown(file1)$down,
+                edgeR_up = read_cut_updown(file2)$up,
+                edgeR_up = read_cut_updown(file2)$down
+)
+
+# 画venn图
+p <- ggVennDiagram(list_ID, label_alpha=0) + 
+  scale_fill_gradient(low="white", high = "lightblue")
+p
+
+# 保存成pdf文件
+ggsave("venn_4.pdf", width = 6, height = 6)
+
+# 保存到ppt里
+graph2ppt(p, file="venn_4.pptx",width = 6,height = 6)
+
+# 把各区域的基因输出到文件
+openxlsx::write.xlsx(get_region_items(list_ID), "venn_4.xlsx")
+```
+
+## 三个圈
+
+对比三个文件
+
+以DESeq2获得的三种差异表达基因为例，展示其overlap
+
+```{r, fig.width=6, fig.height=6}
+# 读取带有deseq2的文件，筛选差异基因
+list_ID <- lapply(finfo[finfo$method == "deseq2", ]$file, read_cut_ID)
+names(list_ID) <- str_remove(finfo[finfo$method == "deseq2",]$group, "_vs_Others")
+
+# 画venn图，这次换个配色
+p <- ggVennDiagram(list_ID, label_alpha=0) + 
+  scale_fill_gradient(low="yellow", high = "brown")
+p
+
+# 保存成pdf文件
+ggsave(paste0("venn_3.pdf"), width = 6, height = 6)
+
+# 保存到ppt里
+graph2ppt(p, file="venn_3.pptx",width = 6,height = 6)
+
+# 把各区域的基因输出到文件
+openxlsx::write.xlsx(get_region_items(list_ID), "venn_3.xlsx")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

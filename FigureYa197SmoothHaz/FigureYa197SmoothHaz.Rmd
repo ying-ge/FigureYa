@@ -1,0 +1,282 @@
+---
+title: "FigureYa197SmoothHaz"
+author: "小丫画图出品"
+date: "2020-9-25"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：触手可及
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+复现平滑化的风险函数曲线（B）
+
+![](example.png)
+
+出自<https://pubmed.ncbi.nlm.nih.gov/32386405/>
+
+Figure 2: (A) Recurrence-free survival curves according to the presence of MIP component. (B) Smoothed hazard estimates for the presence of MIP component.
+
+图B在例文中多次出现。
+
+# 应用场景
+
+该图本质上就是一种核密度图。关于核密度图的基础知识可参考底部“附”。
+
+例文应用风险曲线探索手术切除的肺腺癌微乳头这种组织学亚型术后不同时间内的复发风险。
+
+我们用TCGA最新的pancancer临床信息做为输入数据，你可以顺利画出自己感兴趣的癌症的核密度图，展示某一特征随时间的变化。
+
+这种图在更多文章中的应用：
+
+- [Science. 2020;eabd2161.](https://pubmed.ncbi.nlm.nih.gov/32703910/)
+- [Nature. 2012;486(7403):395-399. Fig.4C](https://pubmed.ncbi.nlm.nih.gov/22495314/); 
+- [Oncotarget. 2018;9(87):35742-35751.](https://pubmed.ncbi.nlm.nih.gov/30515266/)
+- [JAMA Oncol. 2018;4(3):309-315.](https://pubmed.ncbi.nlm.nih.gov/29270608/)
+- 本次复现的图参考[Neuro Oncol. 2015 Jul;17(7):999-1006.](https://pubmed.ncbi.nlm.nih.gov/25688120/)
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("muhaz")
+install.packages("export")
+
+#下载export，https://cran.r-project.org/src/contrib/Archive/export/
+#安装依赖的包
+install.packages(c("rvg", "flextable", "rgl", "stargazer"))
+#本地安装export
+install.packages("export_0.2.2.tar.gz", repos = NULL, type = "source")
+```
+
+加载包
+
+```{r}
+library(survival)
+library(survminer)# 生存分析
+library(openxlsx) # 读取数据
+library(muhaz)    # 风险评估
+library(dplyr)    # 数据清洗
+library(ggplot2)  # 绘图
+library(cowplot)  # 拼图  
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件的获得
+
+如果你的数据已整理成`easy_input.csv`的格式，就跳过这步，直接进入“构建muhaz对象”。
+
+input.xlsx，是TCGA最新的pancancer临床数据，出自[Cell. 2018;173(2):400-416.e11.](https://pubmed.ncbi.nlm.nih.gov/29625055/)的[补充材料](https://ars.els-cdn.com/content/image/1-s2.0-S0092867418302290-mmc1.xlsx)
+
+后面将以性别gender作为分组举例子，实际分析时，把gender替换为你感兴趣的特征对应在panclin里的列名。或者把你经过其他分析获得的分类信息作为一列添加进去。
+
+```{r}
+# 加载TCGA pancancer临床数据
+panclin <- read.xlsx(xlsxFile = "input.xlsx",sheet = 1)
+dim(panclin)
+panclin[1,] # 查看有哪些列
+
+# 选取感兴趣的癌症
+#panclin <- panclin[panclin$type %in% "ACC", ]
+
+# 按例图的72个月调整生存数据
+clin <- panclin %>%
+  # 选取想要的列
+  select(.,DFI, DFI.time, 
+         gender) %>% # 后面将以性别作为分组，选取gender列，可以替换为其他感兴趣的列名
+  
+  # 删除没有生存结局和时间的case
+  filter(!(is.na(.$DFI) | is.na(.$DFI.time))) %>%
+  
+  mutate(time_month = round(DFI.time/30,digits = 1)) %>%
+  mutate(survevent = ifelse(DFI == 1 & time_month <= 72, 1, 0), 
+         survmonth = ifelse(time_month <=  72, time_month, 72)) 
+dim(clin)
+
+# 保存到文件，便于套用
+write.csv(clin, "easy_input.csv", quote = F, row.names = F)
+```
+
+# 输入文件
+
+easy_input.csv，包含生存信息，和一列分组信息（此处为gender）。
+
+```{r}
+clin <- read.csv("easy_input.csv")
+head(clin)
+```
+
+# 构建muhaz对象
+
+## muhaz函数的参数设置
+
+- times，生存时间向量
+- delta，生存结局向量
+- subset，如果不指定，表示将使用所有观察值
+- min.time，max.time，设置分析时间区间段
+- bw.pilot
+  - 带宽bw值对应MISE（平均积分平方误差，mean intergrated squared error）最小化的bw值
+  - 指定核密度估计的bw值，[默认根据Mueller and Wang (1994)的方法](https://pubmed.ncbi.nlm.nih.gov/8086616/)
+  - 计算公式bw.pilot = (max.time - min.time)/(8 * nz^0.2)，其中nz删失的观察数 
+- bw.grid，对应MISE最小是的值，默认为以[0.2 * bw.pilot,20 * bw.pilot]为区间的21切分的bandwidth grid
+- bw.smooth，用于设置平滑局部的带宽参数，如果bw.method="global"，该参数无效，默认为5 * bw.pilot
+- bw.method，算法设置，算法包括"global","local"(默认值)，"knn"，使用首字母即可
+- b.cor，边界效应校正类型，"b"="both"(表示校正双边的边界效应 )，"n"="none"(默认值)，"l"="left"，"r"="right"
+- n.min.grid,n.est.grid=101，前者默认51，后者默认101
+- kern="epanechnikov"        设置核函数，使用首字母即可，默认epanechnikov
+
+## 构建muhaz对象
+
+```{r}
+smoothhazp <- clin %>% 
+  group_by(gender) %>% #根据自己的需要修改分组列名
+  do(haz = muhaz(times = .$survmonth,delta = .$survevent,
+                 min.time = min(.$survmonth[.$survevent==1]),
+                 max.time = max(.$survmonth[.$survevent==1]),
+                 bw.grid = 7,bw.method = "g",b.cor = "b")) %>%
+  do(data.frame(Hazard = .$haz$haz.est, 
+                Months = .$haz$est.grid, 
+                Subgroup = .$gender))
+```
+
+## 验证分析结果
+
+```{r}
+# 检验一下
+maxHaz <- smoothhazp %>% group_by(Subgroup) %>%
+    summarise(stratMax=max(Hazard))
+print(maxHaz)
+
+# 估算HR
+maxHaz$stratMax[2]/maxHaz$stratMax[1] 
+```
+
+## 构建cox回归模型，对比一下
+
+两者算出来的HR近乎相等。
+
+```{r}
+res.cox <- coxph(Surv(survmonth, survevent) ~ gender, data =  clin)
+summary(res.cox)
+```
+
+# 开始画图
+
+muhaz包自带plot.muhaz，这里我选择ggplot2来画图，分三步进行：
+
+## 1. 先画风险曲线
+
+```{r, fig.width=3, fig.height=3}
+# 设置字体
+# 施普林格·自然杂志社图片文字要求8号Helvetica or Arial，（https://www.nature.com/documents/aj-artworkguidelines.pdf）
+# install.packages("extrafont")
+# install.packages("extrafontdb")
+library(extrafont)
+library(extrafontdb)
+# font_import() # 导入字体，这个过程需要几分钟
+# loadfonts(device = "win") #加载字体
+# windowsFonts(Arial = windowsFont('Arial'))        
+
+# 自定义颜色
+orange <- "#EB292A"
+blue <- "#2271B4"
+
+p1 <- ggplot(smoothhazp, aes(x=Months, y=Hazard, colour= factor(Subgroup,labels = c("Male","Female")))) +
+  geom_line() + ggtitle("Kernel-smoothing hazard function plot")+
+  #scale_color_brewer(palette = "Set1") + #用色板配色
+  scale_color_manual(values = c(blue, orange)) + #自己设置颜色代码
+
+  theme_classic() +                                                      # 设置主题
+  theme(plot.title = element_text(hjust=-0.1,size=8,vjust=0.2,face = "bold"), # 调整标题位置
+        axis.text = element_text(size=8,#family='Arial'
+                                 ,colour="black"),  # 坐标轴文字
+        axis.title = element_text(size=8,#family='Arial'
+                                  ,colour="black"), # 坐标轴标题
+        legend.title = element_blank(),                                  # 删除图例标题
+        legend.position = c(0.8,0.9)) +
+  scale_x_continuous(name = "",breaks = seq(0,72,12)) #设置x轴刻度，与risk table一致
+
+p1
+```
+
+这样就画出了例文那样的图。
+
+下面是作者给出的升级版：加上风险表
+
+## 2. 画风险表
+
+这里我们使用survminer包的ggsurvplot构建风险表
+
+```{r, fig.height=2}
+fit <- survfit(Surv(survmonth, survevent) ~ gender, data = clin)
+
+ggsurv <- ggsurvplot(fit, data = clin, risk.table = TRUE, 
+                     legend.title = "",                 # 设置图例标题
+                     legend.labs = c("Male", "Female"), # 指定图例分组标签
+                     palette = c(blue, orange),         #自定义颜色
+
+                     xlab = "Months",fontsize=2.5,      # 调节风险表字体大小
+                     xlim = c(0,72), break.x.by = 12,
+                     # 设置risk table xy轴及标签格式
+                     tables.theme = theme_survminer(base_size = 8,
+                                                    #base_family = "Arial",
+                                                    font.main = c(8, "plain", "black"),
+                                                    font.x = c(8, "plain", "black"),
+                                                    font.y = c(8, "plain", "black"),
+                                                    font.tickslab = c(8, "plain", "black")))
+
+p2 <- ggsurv$table + 
+  theme(legend.position = "none") + labs(title = "") # 删除风险表的title
+p2
+```
+
+## 3. 组图
+
+```{r}
+# 组图
+plot_grid(p1,p2,ncol=1,
+          rel_heights = c(1,0.4),align = 'v')
+
+# 保存为pdf文件，是矢量图，可以用Illustrator等工具继续编辑
+pdf("smoothHaz.pdf", width = 3, height = 4)
+plot_grid(p1,p2,ncol=1,
+          rel_heights = c(1,0.4),align = 'v')
+dev.off()
+
+# 或者保存为tiff
+#ggsave(filename = "smoothHaz.tiff",width = 8,height = 8,units = 'cm',dpi = 300,compression='lzw')
+
+# 或者导入ppt继续编辑
+#export::graph2ppt(file = "smoothHaz.pptx",width = 3,height = 4)
+```
+
+# 附
+
+[核密度估计](https://en.wikipedia.org/wiki/Kernel_density_estimation)：一种非参数估计方法,根据已知的抽样数据推算总体概率分布的过程。
+
+[核Kernel](https://en.wikipedia.org/wiki/Kernel_density_estimation)，表示核函数，常见的核函数如高斯函数（正态分布）。
+
+muhaz包muhaz函数内的一个参数kern，其根据作者的用户手册提供设置选项，包括如下几种
+
+![](function.png){height=50% width=50%}
+
+上图摘自[基迪奥生物](https://mp.weixin.qq.com/s/Kkc7kNUaUl0nU0Y8EQoMbA)
+
+[带宽bandwidth](https://en.wikipedia.org/wiki/Kernel_density_estimation)是一个自由参数，可以调节核密度估计曲线的平滑度，核的带宽越大曲线越平滑
+
+```{r}
+sessionInfo()
+```

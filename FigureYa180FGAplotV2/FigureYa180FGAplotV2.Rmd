@@ -1,0 +1,384 @@
+---
+title: "FigureYa180FGAplotV2"
+author: "小丫画图出品"
+date: "2020-6-27"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小白仁
+
+小丫编辑校验
+
+LiYin更新
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+cBioPortal上的Fraction Genome Altered的算法
+<https://groups.google.com/forum/#!topic/cbioportal/4DvUVuRgrTw>
+
+![](example.png)
+
+出自<https://www.cbioportal.org/study/summary?id=kirc_tcga_pan_can_atlas_2018>
+
+另外一篇文章用了Fraction Genome Altered的概念，但算法跟cBioPortal但不同。
+
+![](example.jpg)
+
+出自<https://www.nature.com/articles/oncsis201214>
+
+Figure 1. Fraction (%) of the FGL, FGG and FGA among ccRCC case subgroups. P-values between subgroups were as follows: males vs females (P=0.002), age (<50, vs ⩾50 years, P=0.06), any family history of cancer (P=0.02), stage (P<0.00001), grade (P<0.0001), ever vs never smoking (P=0.05), VHL wild-type cases vs those with VHL promoter hypermethylation (P=0.03), VHL wild-type cases vs those with VHL sequence alterations (P=0.17). REF, referent group.
+
+cBioPortal提供的Fraction Genome Altered算的是总体的，没有区分gain和lost，想用cBioPortal的算法分别计算fraction of genome gained (FGG) 和fraction of the genome lost (FGL)，并使用临床信息比较各个分组间的差异。输入TCGA的CNV数据，计算FGA、FGG、FGL，复现文章的图。
+
+# 应用场景
+
+自己的测序数据，用cBioPortal的算法计算Fraction Genome Altered (FGA)。
+
+或者使用TCGA的数据，计算不同临床分组的FGA、FGG和FGL，并进行差异检验。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages(c("stringr", "magrittr", "ggplot2","patchwork","Rmisc","Cairo"))
+```
+
+加载包
+
+```{r}
+library(ggplot2)
+library(magrittr)
+library(patchwork)
+library(Rmisc)
+library(Cairo)
+library(stringr)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数计算mean、se和p值
+
+```{r}
+cal_ms <- function(x,y){
+  table1=data.frame()
+  for (i in y) {
+    name=summarySE(x,measurevar=c(colnames(x)[ncol(x)]), groupvars=c(colnames(x)[i]))[[1]]
+    mean=summarySE(x, measurevar=c(colnames(x)[ncol(x)]), groupvars=c(colnames(x)[i]))[[3]] #mean
+    se=summarySE(x, measurevar=c(colnames(x)[ncol(x)]), groupvars=c(colnames(x)[i]))[[5]] #se
+    
+    table=data.frame(group=rep(colnames(x)[i],length(mean)),subgroup=name,mean=mean,se=se)
+    table1=rbind(table1,table)
+    
+  }
+  table1$subgroup=factor(table1$subgroup,levels=unique(table1$subgroup))
+  table1$group=factor(table1$group,levels=unique(table1$group))
+  return(table1)
+}#计算mean和se,排序
+cal_p=function(x,y){
+  table2=data.frame()
+  for (i in y) {
+    m<-aov(x[,ncol(x)]~as.factor(x[,i]))
+    summary(m)
+    table=cbind(rep(colnames(x)[i],nrow((TukeyHSD(m))[[1]])),(TukeyHSD(m))[[1]])
+    table2=rbind(table2,table) 
+  }
+  return(table2)
+}#计算p值
+signif=function(table1,table2){
+  signif1=c()
+  for (i in 1:length(table(table2[,1]))) {
+    signif1=c(signif1,"Ref",table2[table2[,1]==levels(table1[,1])[i],5][1:length(table1[table1[,1]==names(table(table2[,1])[i]),"subgroup"])-1])
+  }#提取p值
+  for (i in 1:length(signif1)) {
+    if (!is.na(as.numeric(signif1[i]))) {
+      signif1[i]=ifelse(signif1[i]>0.05,"",ifelse(signif1[i]<=0.0001,"****",ifelse(signif1[i]<=0.001,"***",ifelse(signif1[i]<=0.01,"**",ifelse(signif1[i]<=0.05,'*')))))
+    }
+  }#转换标记
+  return(signif1)
+}#准备显著性标记的数据
+mar=function(tableGL){
+  mar=round(max(tableGL[,"mean"]+tableGL[,"se"]),1)+0.05
+  return(mar)
+}#ggplot坐标长度
+```
+
+# 输入文件
+
+从Xena获取TCGA_KIRC的cnv数据、clinical数据。
+数据来源：<https://xenabrowser.net/datapages/?cohort=TCGA%20Kidney%20Clear%20Cell%20Carcinoma%20(KIRC)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+```{r}
+# 加载Xena上TCGA_KIRC的nocnv数据
+Segment <- read.delim("SNP6_nocnv_genomicSegment.gz") 
+# 加载Xena上TCGA_KIRC的临床数据
+KIRC <- read.delim("KIRC_clinicalMatrix")
+```
+
+再导入cBioPortal上FGA的数据，用于验证算法的结果。
+数据来源：<https://www.cbioportal.org/study/summary?id=kirc_tcga_pan_can_atlas_2018>
+
+```{r}
+# 单独导入VHL突变数据(来自cBioPortal)
+VHL <- read.delim("PATIENT_DATA_oncoprint.tsv", header=FALSE, stringsAsFactors=FALSE) 
+# 导入cBioPortal上KIRC的数据
+cBio <- read.delim("kirc_tcga_pan_can_atlas_2018_clinical_data.tsv", stringsAsFactors=FALSE)
+head(Segment) #注意最后一列的value值的单位是log2(copy number/2)
+```
+
+# 计算Fraction Genome Altered (FGA)
+
+先贴上计算公式便于理解：
+
+![](formula.png)
+
+因此，Segment中的value值即是log2R。如果是自己的测序数据则要注意是否是log2R，还是copy number（见文末的注意事项）。
+
+## 数据清洗 
+
+```{r}
+Segment$bases=Segment$end-Segment$start
+Segment$sample%<>%str_sub(end=-4)
+VHL=t(VHL)
+colnames(VHL)=VHL[2,]
+VHL=VHL[-1:-2,]
+VHL=cbind(VHL,'VHL'=c(rep('Mut',175),rep('Wild',nrow(VHL)-175)))
+VHL=as.data.frame(VHL)
+VHL=VHL[,c(1,8)]
+colnames(VHL)[1]='Patient'
+clinical=KIRC[,c(1,19,38,64,55)]
+clinical$sampleID%<>%str_sub(end=-4)
+clinical%<>%unique.data.frame()
+colnames(clinical)=c('Patient','Age','Gender','Stage','Grade')
+clinical$Age=ifelse(clinical$Age>=65,'Older','Younger')
+clinical=clinical[!clinical$Stage=='[Discrepancy]',]
+clinical=clinical[!(clinical$Grade==''|clinical$Grade=='GX'),]
+mer=merge(clinical,VHL,all=FALSE)
+```
+
+## 计算FGA、FGG和FGL
+
+```{r}
+data=data.frame()
+
+for (i in 1:length(table(Segment$sample))) {
+  tmp=Segment[Segment$sample==names(table(Segment$sample))[i],]
+  if (length(tmp[abs(tmp$value)>0.2,"bases"][6])==0) {
+    FGA=0
+  } else {
+    FGA=sum(tmp[abs(tmp$value)>0.2,"bases"])/sum(tmp[,"bases"])
+  }
+  
+  if (length(tmp[tmp$value>0.2,"bases"][6])==0) {
+    FGG=0
+  } else {
+    FGG=sum(tmp[tmp$value>0.2,"bases"])/sum(tmp[,"bases"])
+  }
+  
+  if (length(tmp[tmp$value<(-0.2),"bases"][6])==0) {
+    FGL=0
+  } else {
+    FGL=sum(tmp[tmp$value<(-0.2),"bases"])/sum(tmp[,"bases"])
+  }
+  
+  tmp=data.frame(Patient=names(table(Segment$sample))[i],FGA=FGA,FGG=FGG,FGL=FGL)
+  data=rbind(data,tmp)
+}
+```
+
+## 合并数据、导出数据
+
+```{r}
+All=merge(mer,data,all=FALSE)
+save(All,file='all_data.Rdata')
+write.csv(All,file = 'KIRC_FGA.csv',row.names = F)
+```
+
+# 对比cBioPortal上的FGA数据
+
+```{r}
+cBio_FGA=cBio[,c(2,22)]
+colnames(cBio_FGA)=c('Patient','FGA_cBio')
+cBio_FGA=cBio_FGA[!is.na(cBio_FGA$FGA_cBio),]
+COMPARE=merge(cBio_FGA,All[,c(1,7)],all=FALSE)
+COMPARE$FGA%<>%round(4)
+table(COMPARE$FGA==COMPARE$FGA_cBio)
+
+# 查看不一致的样本
+head(COMPARE[!COMPARE$FGA==COMPARE$FGA_cBio,])
+```
+
+结论：大部分数据是一致的，个别样本不同考虑是采用的cnv文件的不同（见文末的注意事项）。
+
+# 复现文献的Figure
+
+计算mean和se和p值并画图，这里用的检验方法是AONVA，并使用TukeyHSD进行组间比较（结果只取reference组和其他组的显著性以便于显示）。
+
+```{r warning=FALSE}
+table1=cal_ms(All[,c(1:6,7)],2:6) #(保持最后一列是目标变量)
+table2=cal_p(All[,c(1:6,7)],2:6)#(保持最后一列是目标变量)
+signif1=signif(table1,table2)
+table3=cal_ms(All[,c(1:6,9)],2:6) #FGL
+table4=cal_p(All[,c(1:6,9)],2:6)  #FGL
+signif2=signif(table3,table4) #FGL
+table5=cal_ms(All[,c(1:6,8)],2:6) #FGG
+table6=cal_p(All[,c(1:6,8)],2:6)  #FGG
+signif3=signif(table5,table6) #FGG
+tableGL=rbind(cbind(table3,class=rep('FGL',nrow(table3))),cbind(table5,class=rep('FGG',nrow(table5)))) #合并FGL、FGG
+
+#画图
+s=10 #统一字体大小
+orinpl <- ggplot(tableGL, aes(x = subgroup, 
+                       y = mean,fill=class))+
+  geom_bar(stat = 'identity',position="stack",width = 0.3) +
+  scale_x_discrete(name="")+
+  theme_classic()+
+  theme(axis.line.y =element_line(size=0.8),
+        axis.text.y =element_text(face='bold',size=s),
+        axis.title.y = element_text(face='bold',size=s+2,vjust = 3),
+        axis.ticks.y =element_line(size=0.2),
+        axis.text.x = element_text(angle=90,hjust =1,vjust = 0.3,face='bold',size=s),
+        legend.position = c(0.85,0.95),
+        legend.key.height =  unit(0.1, "inch"),
+        legend.key.width  =  unit(0.22, "inch"),
+        legend.text = element_text(face='bold',size=s),
+        legend.background = element_blank(),
+        panel.grid.major.y = element_line(size=0.5,colour = 'grey80'),
+        plot.margin = unit(c(1.2, 2, 0.3, 1), "lines"),
+        legend.title=element_blank())+
+
+  scale_fill_manual(values  = c("#db5049","#2082be"),breaks=c("FGG","FGL"),
+                    labels=c("Fraction Genome Gained","Fraction Genome Lost"))+
+  scale_y_continuous(limits = c(0,0.4),breaks =seq(0,0.8,0.1),
+                     labels=seq(0,0.8,0.1)*100,expand = c(0,0),
+                     name  = "Percent Genome Altered")+
+  facet_grid(cols = vars(group),scales = "free_x",space = "free_x",switch = "x")+theme(
+    strip.text.x = element_text(size = s, face = "bold",vjust = 0),
+    strip.background = element_blank(),
+    strip.placement = "outside")
+orinpl
+
+#ggsave(file='FGA.png',orinpl,height = 6,width=9,units = c("in"),dpi = 1200)
+ggsave(file='FGA.pdf',orinpl,height = 6,width=9,units = c("in"))
+```
+
+# 自定义进阶版FGA图
+
+文献中的Figure 1 没有标注p值和se，所以画个自定义进阶版的FGA图。
+
+```{r, fig.width=12, fig.height=6}
+gap=0.05 #图纵坐标间隔
+
+# 左侧部分(FGA)
+if (T) {
+p1=ggplot(table1, aes(x = subgroup, 
+                      y = -mean,fill=rep("0",nrow(table1))))+
+  geom_bar(stat = 'identity') +
+  geom_errorbar(aes(ymax = -mean -se, ymin = -mean+se),position = position_dodge(0.9), width = 0.15)+
+  scale_x_discrete(name="",position = "top")+
+  geom_text(aes(y = -mean-se-0.007, label = signif1),position = position_dodge(0.9), size = ifelse(signif1=='Ref',1.8,3), fontface = "bold",angle=90)+
+  theme_bw()+
+  theme(axis.line.y =element_line(size=0.8),
+        axis.ticks.y =element_line(size=0.2),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(vjust = -2),
+        plot.margin = unit(c(0.3, -1.7, 0.3, 0.3), "lines"),
+        legend.title=element_blank())+
+  coord_flip()+
+  scale_fill_manual(values  = c("#FFD034"),breaks=c("0"),labels=c("Copy number-altered genome"))+
+  scale_y_continuous(limits = c(-mar(table1),0),
+                     breaks =seq(-0.5,0,gap),labels=abs(seq(-0.5,0,gap)),expand = c(0.01,0),
+                     name  = "FGA (Fraction of Genome Altered)",position = "left")
+
+p3=p1 + 
+  facet_grid(rows = vars(group),scales = "free_y",space = "free_y")+
+  theme(strip.text.y = element_text(size = 10, angle= -90,vjust =1))
+}#画图
+#p3
+
+# 右侧部分(FGG/FGL)
+if (T) {
+
+p2 <- ggplot(tableGL, aes(x = subgroup, 
+                      y = ifelse(class=='FGG',-mean,mean),fill=class))+
+  geom_bar(stat = 'identity') +
+  geom_errorbar(data=tableGL[tableGL$class=='FGL',],aes(ymax = mean+se, ymin =mean-se),position = position_dodge(0.9), width = 0.15)+
+  geom_errorbar(data=tableGL[tableGL$class=='FGG',],aes(ymax = -mean-se, ymin =-mean+se),position = position_dodge(0.9), width = 0.15)+
+  geom_text(data=tableGL[tableGL$class=='FGG',],aes(y = -mean -se-0.01, label = signif2),position = position_dodge(0.9), size = ifelse(signif2=='Ref',1.8,3), fontface = "bold",angle=90)+
+  geom_text(data=tableGL[tableGL$class=='FGL',],aes(y = mean+se+0.01, label = signif3),position = position_dodge(0.9), size = ifelse(signif3=='Ref',1.8,3), fontface = "bold",angle=-90)+
+  scale_x_discrete(name="")+
+  theme_bw()+
+  theme(axis.line.y =element_line(size=0.8),
+        axis.ticks.y =element_line(size=0.2),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(vjust = -2),
+        plot.margin = unit(c(0.3, 0.3, 0.3, -1), "lines"),
+        legend.title=element_blank())+
+  coord_flip()+
+  scale_fill_manual(values  = c("#f17d80","#79BEDB"),breaks=c("FGG","FGL"),
+                    labels=c("Copy number-Gained genome","Copy number-lost genome"))+
+  scale_y_continuous(limits = c(-mar(tableGL[tableGL$class=='FGG',]),mar(tableGL[tableGL$class=='FGL',])),breaks =seq(-0.5,0.5,gap),
+                     labels=abs(seq(-0.5,0.5,gap)),expand = c(0.01,0),
+                     name  = "FGG or FGL (Fraction of Genome Gained or lost)")
+
+
+p4 <- p2+ 
+  facet_grid(rows = vars(group),scales = "free_y",space = "free_y",switch = "y")+
+  theme(strip.text.y = element_text(size = 10, angle= -90,vjust = 1))
+
+}
+#p4
+
+# 中间部分
+pp=ggplot()+
+geom_text(data = tableGL, 
+          aes(label = subgroup, x=subgroup), y = 0.5,
+          size = 0.8*11/.pt, # match font size to theme
+          hjust = 0.5, vjust = 0.5)+
+theme_minimal()+
+  theme(axis.line.y =element_blank(),
+        axis.ticks.y =element_blank(),
+        axis.text.y =element_blank(),
+        axis.title.y =element_blank(),
+        axis.title.x =element_blank(),
+        plot.margin = unit(c(0.3, 0, 0.3, 0), "lines")
+        )+
+  coord_flip()+
+  scale_y_reverse()
+ppa=pp+
+  facet_grid(rows = vars(group),scales = "free_y",space = "free_y",switch = "y")+theme(strip.text.y = element_text(size = 0, angle= 45,vjust = 200))
+
+#输出
+pal <- p3 + ppa + p4 + 
+  plot_layout(widths = c(7,1,7),guides = 'collect')& theme(legend.position = 'bottom')
+pal
+
+#ggsave(file='FGA.png',pal,height = 6,width=12,units = c("in"),dpi = 1200)
+ggsave(file='FGA_plus.pdf',pal,height = 6,width=12,units = c("in"))
+```
+
+# 注意事项
+
+FGA的计算是依赖于cnv数据，即CNV calling生成的segmentation file。所以不同的CNV calling流程和不同的参数设置会产生不同的cnv数据（具体可以看egmentation file中的Start、End、Num_Probes、Segment_Mean），这也是为何上述计算结果有部分患者的FGA与cbioportal的不同。
+
+另外，想使用TCGA的cnv数据自己计算的话需要注意只有xena上的TCGA（不是GDC）和GDC官网上的**SNP_N_GenomeWideSNP_6_D01_680066.nocnv_grch38.seg.v2.txt**才能和cbioportal上的一致（C11b版本的不同）。
+
+GDC官网下载的segmentation file里的Segment_Mean也是公式中的log2R（官网说明:<https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/CNV_Pipeline/>）。
+
+如果自己的测序数据则要注意，如果是copy number还需要按照上述公式进行转换。
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

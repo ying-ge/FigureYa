@@ -1,0 +1,195 @@
+---
+title: "FigureYa125FishertestV2"
+author: "小丫画图出品"
+date: "2020-9-16"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+更新：小白仁
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+两个指标（miRNA和FAP蛋白）按照高低分为四组，计算两个指标的相关性和p value，用热图展示。
+
+![](example.png)
+
+出自<http://cancerres.aacrjournals.org/content/78/7/1751>
+
+Figure 4. E–F, Comparison of the miR-508 ISH scores and the CALD1 and FAP IHC scores in colorectal cancer tissues. The correlations are shown in European cohort (n ¼ 128; E) and Renji cohort 2 (n ¼ 100; Fisher exact test; F).
+
+# 应用场景
+
+本质上就是把连续型因素分类后，研究两种因素间的相关性，用列联表热图展示，同时做Fisher's exact test。
+
+可用于计算和展示miRNA跟靶基因，或转录因子跟靶基因之间的相关关系。
+
+在“小丫画图”微信公众号回复“相关性”，查看更多相关性展示方式。
+
+# 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.txt，两个连续型变量在每个样本里的观测值。每行一个样本，两列分别是两个观测值，此处是miRNA ISH scores和FAP IHC scores。
+
+```{r}
+simdata <- read.table("easy_input.txt",header = T)
+head(simdata)
+
+# 用连续型变量计算的相关系数和p value，后面把它也标在图的title里。
+r.cor <- cor(simdata$miR.508, simdata$FAP)
+r.cor
+p.cor <- cor.test(simdata$miR.508, simdata$FAP)$p.value
+p.cor
+```
+
+附：这里的输入数据是模拟出来的，生成方法如下：
+
+```r
+### 自定义函数模拟数据 ###
+# 相关性模拟函数参考https://stackoverflow.com/questions/13291308/generate-numbers-with-specific-correlation
+simcor <- function (n, xmean, xsd, ymean, ysd, correlation) {
+  x <- rnorm(n)
+  y <- rnorm(n)
+  z <- correlation * scale(x)[,1] + sqrt(1 - correlation^2) * 
+    scale(resid(lm(y ~ x)))[,1]
+  xresult <- xmean + xsd * scale(x)[,1]
+  yresult <- ymean + ysd * z
+  data.frame(x=xresult,y=yresult)
+}
+
+# 模拟数据
+r <- simcor(n = 100, xmean = 12, ymean = 30, xsd = 3, ysd = 4, correlation = -0.8) # 模拟负相关的
+simdata <- data.frame("miR.508" = r$x, "FAP" = r$y, stringsAsFactors = F, check.names = F)
+write.table(simdata,"easy_input.txt",sep = "\t",row.names = F,quote = F)
+```
+
+# 连续变量分类
+
+例文把两个因素都分为四组：Positive，Moderate，Weak，Negative。
+
+因此，我们根据四分位数将数据分割为四种类型：
+
+```{r}
+# 根据例文设置的字符串排序
+# 像例文那样分成四类
+simdata$miR.508_classify <- factor(cut(simdata$miR.508, quantile(simdata$miR.508), 
+                                       labels = c("Negative", "Weak", "Moderate", "Positive")),
+                                   levels = c("Positive", "Moderate", "Weak", "Negative")) 
+
+# 还可以分成两类，像这样写
+#simdata$miR.508_classify <- factor(cut(simdata$miR.508, c(0, median(simdata$miR.508),max(simdata$miR.508)), 
+#                                       labels = c("Negative", "Positive")), 
+#                                   levels = c("Positive", "Negative"))
+
+# 分为四类，并根据例文设置的字符串排序
+simdata$FAP2_classify <- factor(cut(simdata$FAP, quantile(simdata$FAP), 
+                             labels = c("Negative", "Weak", "Moderate", "Positive")), 
+                         levels = c("Negative", "Weak", "Moderate", "Positive")) 
+
+# 将列联表转换为矩阵
+tab_classify <- as.data.frame.array(table(simdata$miR.508_classify,simdata$FAP2_classify)) 
+tab_classify
+
+# 给分好类的变量做Fisher's exact test
+p.fisher <- fisher.test(tab_classify, workspace = 1e9)$p.value # 分类较多时fisher'S exact test会需要更大的工作空间以及较长的时耗，一般设为1e9
+p.fisher
+```
+
+**注意：**由于不同字符串的排序不同，或者是最终列联表的横纵坐标编号不同，请一定在绘制完成后仔细核对原始数据和计数矩阵，谨防映射关系出错。
+
+# 开始画图
+
+下面用base plot一笔一笔画图：
+
+```{r}
+### 设置颜色 ###
+blue   <- "#204F8D"
+lblue  <- "#498EB9"
+dwhite <- "#B6D1E8"
+white  <- "#E6EAF7"
+
+pdf("ContigencyTable.pdf",width = 5,height = 5)
+
+par(bty="n", mgp = c(2,0.5,0), mar = c(5.1,6.1,4.1,2.1),tcl=-.25, font.main=3)
+par(xpd=NA)
+# 生成一个空白图
+plot(c(0,ncol(tab_classify)),c(0,nrow(tab_classify)), # 产生左下和左上两个点，张开画布
+     col = "white", # 点设置为白色
+     xlab = "",xaxt = "n", # 不显示x坐标轴
+     ylab = "",yaxt = "n") # 不显示y坐标轴)
+title(paste("Correlation between FAP and miR-508\nrho = ", round(r.cor,2), "; ", "P.cor = ", format(p.cor, digits = 3, scientific = T),
+            "\nP.fisher = ", format(p.fisher, digits = 3, scientific = T)), adj = 0, line = 0) # 科学计数法保留3位,左对齐title
+
+# 画纵坐标
+axis(2, at = 0.5:(nrow(tab_classify)-0.5), labels = FALSE) # 生成y坐标轴刻度，并位于每个间隔的中心位置
+text(y = 0.5:(nrow(tab_classify)-0.5), # 生成坐标轴标签
+     par("usr")[1], 
+     labels = rownames(tab_classify)[nrow(tab_classify):1], # 注意这里根据例文原图设置为倒置的坐标
+     srt = 0, pos = 2, xpd = TRUE)
+mtext("Expression of miR-508", side=2, line = 4.5) # 生成坐标轴名
+
+# 画横坐标
+axis(1, at = 0.5:(ncol(tab_classify)-0.5), labels = FALSE) # 生成x坐标轴刻度，并位于每个间隔的中心位置
+text(x = 0.5:(ncol(tab_classify)-0.5), # 生成坐标轴标签
+     par("usr")[1] - 0.2, # 微调横坐标标签与坐标轴的相对位置，防止重合
+     labels = colnames(tab_classify), 
+     srt = 45, pos = 1, xpd = TRUE)
+mtext("FAP", side=1, line = 3.5) # 生成坐标轴名
+
+# 产生线性变化的颜色
+input_matrix <- as.matrix(tab_classify) 
+mat.max = max(input_matrix) # 输入矩阵的最大计数值
+unq.value <- unique(sort(as.vector(input_matrix))) # 得出所有独特的计数值
+rbPal <- colorRampPalette(c(white,dwhite,lblue,blue)) # 产生颜色区间函数
+col.vec <- rbPal(max(unq.value) + 1) # 产生计数值个数+1个颜色（+1目的是防止计数有0值出现）
+col.mat <- matrix(NA,byrow = T,ncol = ncol(input_matrix),nrow = nrow(input_matrix)) # 生成空的颜色矩阵
+
+# 根据计数矩阵填充颜色矩阵
+for (i in 1:nrow(col.mat)) {
+  for (j in 1:ncol(col.mat)) {
+    col.mat[i,j] <- col.vec[input_matrix[i,j] + 1]
+  }
+}
+# 通过矩形块产生热图
+x_size <- ncol(input_matrix)
+y_size <- nrow(input_matrix)
+
+my_xleft = rep(c(0:(x_size-1)),each = y_size) # 产生各个矩形的左x点
+my_xright = my_xleft + 1 # 产生各个矩形的右x点
+my_ybottom = rep(c((y_size-1):0),y_size) # 产生各个矩形的下y点
+my_ytop = my_ybottom + 1 # 产生各个矩形的上y点
+rect(xleft = my_xleft,
+     ybottom = my_ybottom,
+     xright = my_xright,
+     ytop = my_ytop,
+     col=col.mat, # 填充颜色
+     border = F) # 取消矩形的边界
+
+text(my_xleft + 0.5,my_ybottom + 0.5,input_matrix, cex = 1.3) # 填充计数值
+
+invisible(dev.off())
+```
+
+![](ContigencyTable.pdf)
+
+```{r}
+sessionInfo()
+```

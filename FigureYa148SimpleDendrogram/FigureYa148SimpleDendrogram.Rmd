@@ -1,0 +1,180 @@
+---
+title: "FigureYa148SimpleDendrogram"
+author: "小丫画图出品"
+date: "2019-11-17"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+绘制带有注释信息的dendrogram。
+
+![](example.png)
+
+FIGURE 4 | Validation of LNM signature via supervised clustering. (A) Dendrogram created by supervised hierarchical clustering using the GEO cohort significantly distinguished LN metastasis status (p = 0.048) and a dendrogram created for the MSKCC cohort in (B) identified two clusters with a tendency whereby LNM signature was associated with (C) OS (p = 0.075) and (D) PFS (p = 0.098). Cluster C2 was regarded as reference when calculating HR.
+
+出自<https://www.frontiersin.org/articles/10.3389/fonc.2019.00488/full>
+
+在“小丫画图”微店<https://k.weidian.com/zZMGvb0p>的"分类"里点开“1篇4分”查看这篇文章里的其他图。
+
+思路可参考这篇：<https://mp.weixin.qq.com/s/ul0XPjBDuqMfWRwHi9-TgQ>
+
+**图的解读**
+
+用两套数据对上文找出的淋巴结转移signature（marker  genes）做验证：GEO数据（A）已知是否有淋巴结转移，MSKCC（B）已知生存期。用signature做分类，同时把已知信息画在图上，让分类效果一目了然。
+
+## 应用场景
+
+用TCGA数据找到的signature，再用其他数据集做验证。可以用这个图展示预测效果。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages(c("dendsort", "squash"))
+```
+
+加载包
+
+```{r}
+library(ClassDiscovery) 
+library(dendsort)
+library(squash)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 参数设置
+
+```{r}
+jco <- c("#2874C5","#EABF00")
+cherry <- "#700353"
+lightgrey <- "#dcddde"
+```
+
+## A图
+
+### 输入文件
+
+easy_input_set1.txt，带有淋巴结转移信息的GEO数据表达数据。是否淋巴结转移的信息在sample ID里。
+
+```{r}
+vad1.expr <- read.table("easy_input_set1.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1) # 样本信息在列名中
+vad1.expr[1:2,]
+```
+
+### 聚类和画图
+
+```{r}
+indata <- vad1.expr
+hcs <- hclust(distanceMatrix(as.matrix(indata), "pearson"), "ward.D") # 样本层次聚类
+c.clust <- cutree(hcs,k=2) # 切割树为2类
+c.clust <- data.frame(clust=as.numeric(c.clust),
+                      group=rep(c("+","-"),times=5)) # 生成聚类信息并添加样本信息
+my.dend <- dendsort(hcs) # 利用dendsort来排序树，稍微好看一点
+
+# 生成匹配dendrogram的注释文件，并根据信息修改颜色
+my.mat <- data.frame(Clust=paste0("C",as.character(c.clust$clust)),"MetaStatus"=rep(c("LN+","LN-"),times=5))
+my.mat$Clust <- ifelse(my.mat$Clust == "C1",jco[2],jco[1]) # 聚类结果的颜色
+my.mat$MetaStatus <- ifelse(my.mat$MetaStatus == "LN+",jco[2],jco[1]) # 样本淋巴结转移状态的颜色
+
+pdf("dendrogram for validation 1.pdf",height = 6,width = 7)
+dendromat(my.dend, my.mat,
+          las = 2,labRow = NA)
+legend(x=0.4,y=0.9, # 位置（需要微调）
+       legend = c("MetaStatus","LN+","LN-"), # 图例名，第一个为title
+       fill = c(NA,jco[2:1]), # 颜色，第一个为title所以不需要颜色
+       cex=1, border=NA, y.intersp=.8, x.intersp=0.2, # 细节参数，包括大小，横向纵向间距
+       bty = "n") # 不绘制图例框
+legend(x=0.4,y=0.72, 
+       legend = c("Clust","C1","C2"), 
+       fill = c(NA,jco[2:1]),
+       cex=1, border=NA, y.intersp=.8, x.intersp=0.2,
+       bty = "n")
+invisible(dev.off())
+```
+
+![](dendrogram for validation 1.pdf)
+
+## B图
+
+### 输入文件
+
+easy_input_set2.txt，MSKCC队列的表达矩阵
+
+easy_input_set2_suv.txt，MSKCC队列的生存信息
+
+```{r}
+# 表达数据
+vad2.expr <- read.table("easy_input_set2.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+vad2.expr[1:2,1:4]
+
+# 生存信息
+vad2.sinfo <- read.table("easy_input_set2_suv.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+vad2.sinfo[1:2,]
+
+# 两个文件一致性检测
+if(!identical(colnames(vad2.expr),rownames(vad2.sinfo))) {
+  cat("Expression matrix mismatched sample information. Please check!\n")
+}
+```
+
+### 聚类和画图
+
+```{r}
+indata <- vad2.expr
+hcs <- hclust(distanceMatrix(as.matrix(indata), "pearson"), "ward.D") # 样本层次聚类
+c.clust <- cutree(hcs,k=2) # 切割树为2类
+
+# 生成聚类信息并添加样本信息
+annCol_val <- data.frame(Clust=paste0("C",as.character(c.clust)), # 
+                         OS=vad2.sinfo$OS_STATUS,
+                         PFS=vad2.sinfo$DFS_STATUS,
+                         row.names = names(c.clust),
+                         stringsAsFactors = F)
+
+annCol_val[is.na(annCol_val$OS),"OS"]="N/A" # 没有OS设置为N/A
+annColors_val <- list() # 生成注释文件对应的颜色
+annColors_val[["Clust"]] <- c("C1"=jco[1],"C2"=jco[2])
+annColors_val[["OS"]] <- c("LIVING"=lightgrey,"DECEASED"=cherry,"N/A"="white")
+annColors_val[["PFS"]] <- c("DiseaseFree"=lightgrey,"Recurred/Progressed"=cherry)
+
+my.dend <- dendsort(hcs) # 利用dendsort来排序树，稍微好看一点
+my.mat <- annCol_val
+
+# 根据注释信息修改颜色
+my.mat$Clust <- ifelse(my.mat$Clust == "C1",jco[2],jco[1])
+my.mat$OS <- ifelse(my.mat$OS == "LIVING",lightgrey,ifelse(my.mat$OS == "DECEASED",cherry,"white"))
+my.mat$PFS <- ifelse(my.mat$PFS == "DiseaseFree",lightgrey,cherry)
+
+pdf("dendrogram for validation 2.pdf",height = 6,width = 7)
+dendromat(my.dend, my.mat,
+          las = 2,labRow = NA)
+legend(x=0.4,y=0.9, legend = c("PFS","DiseaseFree","Recurred/Progressed"), fill = c(NA,lightgrey,cherry),cex=1, border=NA, y.intersp=.8, x.intersp=0.2,bty = "n")
+legend(x=0.4,y=0.72, legend = c("OS","LIVING","DECEASED","N/A"), fill = c(NA,lightgrey,cherry,"white"),cex=1, border=NA, y.intersp=.8, x.intersp=0.2,bty = "n")
+legend(x=0.4,y=0.54, legend = c("Clust","C1","C2"), fill = c(NA,jco[2:1]),cex=1, border=NA, y.intersp=.8, x.intersp=0.2,bty = "n")
+invisible(dev.off())
+```
+
+![](dendrogram for validation 2.pdf)
+
+```{r}
+sessionInfo()
+```

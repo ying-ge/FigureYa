@@ -1,0 +1,230 @@
+---
+title: "FigureYa207Randomization"
+author: "小丫画图出品"
+date: "2020-11-20"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+我想众筹文章Figure 1B的计算方法，用Randomization test来检测多个差异基因的分布情况，属于差异基因的横向分析，从不同的角度来认识差异基因。
+
+![](example.png)
+
+出自<https://www.aging-us.com/article/102766/text>
+
+Figure 1. Abnormally expressed genes in CCA (named CHOL in TCGA) and their expression patterns across diverse cancer types. (B) For screened abnormal genes, distributions of associated functional genes (mainly including essential gene, CGC, oncogene, etc) are presented. **Compared with random result in the equal number of normally expressed genes**, fewer abnormal genes are identified as functional genes.
+
+**Randomization test**
+
+To determine the significance of a detected frequency of special gene classification, we performed a **randomization test by randomly selecting normally expressed genes** with equal numbers. This procedure was repeated 1,000 times (the significance was estimated based on the proportion of times), and was used to estimate **whether the average correlation values observed were higher than the real average correlation**.
+
+# 应用场景
+
+Randomization test来检验差异表达基因的模式是否是随机出现的。
+
+灵活运用，不仅限于差异表达基因的检验，任何感兴趣的基因集都可以作为检验的对象。
+
+> 注意：以下为Hazard与大鱼海棠的个人见解：
+
+FigureYa156enrichSimulation的富集检验零假设为两者分布是否一致，当p>0.05时，小概率事件发生了，因而接受原假设，认为分布没有统计学差异，故没有富集；
+
+这里的随机化检验，使用的方法和富集检验如出一辙，均为重抽样计算概率分布密度，但其零假设的关键是基因分类标签的可交换性，或者说是否是DEG与基因的分类标签是无关的（参考：<https://www.uvm.edu/~statdhtx/StatPages/Randomization%20Tests/null_hypotheses.html>）
+
+对于本众筹的原文，实际上作者也可以采用富集检验，来证明DEG是与CGC是弱关联（低富集），但是这里使用随机化检验，证明DEG的基因名的与CGC的标签无关。
+
+甚至我们觉得，随机化检验可以没有零假设，只考虑计算的概率，如本众筹中计算得到，在1000次随机抽样中，DEG有95.6%的概率出现在正常表达的基因中，也就是说只有4.4%的概率出现在异常表达的基因中。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("TCGAbiolinks")
+```
+
+加载包
+
+```{r}
+library(TCGAbiolinks)
+library(DESeq2)
+library(shape)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件的获得
+
+如果你的数据已经处理成easy_input_diff.csv和easy_input_func_genes.txt，就可以跳过这步，直接进入“输入文件”。
+
+## 用TCGAbiolinks下载表达数据和样本信息。
+
+```{r}
+## 下载TCGA-CHOL原始count数据，还可以下载FPKM，可参考FigureYa34count2FPKM
+expquery <- GDCquery(project = "TCGA-CHOL", 
+                     data.category = "Transcriptome Profiling",
+                     data.type = "Gene Expression Quantification",
+                     workflow.type = "HTSeq - Counts"
+)
+GDCdownload(expquery,directory = "GDCdata")
+expquery2 <- GDCprepare(expquery,directory = "GDCdata",summarizedExperiment = T)
+expMatrix <- TCGAanalyze_Preprocessing(expquery2)
+colnames(expMatrix) <- substr(colnames(expMatrix), start = 1,stop = 15)
+normsamples <- colnames(expMatrix)[which(substr(colnames(expMatrix),14,15) == "11")] # 取正常样本
+tumorsamples <- colnames(expMatrix)[which(substr(colnames(expMatrix),14,15) == "01")] # 取肿瘤样本
+
+# 表达数据处理
+expMatrix <- expMatrix[,c(tumorsamples,normsamples)]
+expMatrix <- as.data.frame(expMatrix[rowSums(expMatrix) > 0,]) # 去除0表达
+expMatrix[1:3,1:3]
+
+# 样本信息
+saminfo <- data.frame("Type" = rep(c("tumor","normal"),c(length(tumorsamples),length(normsamples))),
+                      "SampleID" = c(tumorsamples,normsamples),
+                      stringsAsFactors = FALSE)
+
+# TCGA的表达矩阵用的是ensembl ID，需要转换为gene symbol
+# 读取注释匹配文件，用于把表达矩阵中的ID转换为gene symbol
+Ginfo <- read.table("overlapTable27.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+head(Ginfo)
+comgene <- intersect(rownames(expMatrix),rownames(Ginfo)) 
+count <- as.data.frame(expMatrix)[comgene,]; Ginfo <- Ginfo[comgene,]
+count$gene <- Ginfo$genename; count <- count[!duplicated(count$gene),]; Ginfo <- Ginfo[rownames(count),]; rownames(count) <- count$gene; count <- count[,-ncol(count)] # 去重复
+count[1:3,1:3]
+# 把处理好的表达矩阵保存到文件，可用于更多后续分析
+write.csv(count, "TCGA_CHOL_Count.txt", quote=F, row.names=T, col.names = NA)
+```
+
+## 差异表达分析
+
+这里用DESeq2，还可以用limma、edgeR等方法，可参考FigureYa118MulticlassDESeq2、FigureYa119Multiclasslimma、FigureYa120MulticlassedgeR。
+
+芯片数据从下载到差异分析可参考[FigureYa59Plus_GEO2DEG](https://www.yuque.com/figureya/figureyaplus/figureya59p)
+
+```{r}
+# 差异表达分析
+dds <- DESeqDataSetFromMatrix(countData = count,
+                              colData = saminfo,
+                              design = as.formula("~ Type"))
+dds$Type <- relevel(dds$Type,ref = "normal")
+dds <- DESeq(dds)
+resData <- as.data.frame(results(dds, contrast = c("Type","tumor","normal")))
+resData$id <- rownames(resData)
+resData <- resData[,c("id","baseMean","log2FoldChange","lfcSE","stat","pvalue","padj")]
+# 输出差异分析结果
+write.csv(resData, file = "easy_input_diff.csv", row.names = FALSE, quote = FALSE)
+```
+
+## 功能基因集functional genes
+
+例文把差异表达基因分别跟5种functional genes取交集，并检验差异表达基因的模式是否是随机出现的。
+
+这里以CGC为例，即Cancer Gene Census，`Census_allSun Oct  4 05_23_42 2020.csv`，若使用请先注册：<https://cancer.sanger.ac.uk/census#cl_search>。
+
+其他4种functional genes的计算方法是一样的。
+
+```{r}
+## 读取CGC
+cgc <- read.csv("Census_allSun Oct  4 05_23_42 2020.csv",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+head(cgc)
+nrow(cgc)
+# 其实只需要第一列Gene Symbol，保存到文件，便于套用
+write.table(cgc$`Gene Symbol`, "easy_input_func_genes.txt", quote = F, row.names = F, col.names = "GeneSymbol")
+```
+
+# 输入文件
+
+easy_input_diff.csv，差异分析结果。这里用到log2FoldChange和padj两列，用于筛选差异基因。也可以直接提供候选基因集degs和背景negs。这里的degs用的是差异表达基因，还可以是任何你想要检验的基因集。
+
+easy_input_func_genes.txt，function genes。实际使用时可以替换为你感兴趣的基因集，例如已知的参与某个调控过程的基因集。
+
+```{r}
+# 加载差异分析结果
+resData <- read.csv("easy_input_diff.csv", header = T)
+head(resData)
+
+# 加载function genes
+cgc <- read.table("easy_input_func_genes.txt", header = T)
+head(cgc)
+```
+
+# Randomization test
+
+```{r}
+# 提取差异表达基因和正常表达基因(用原文的cutoff)
+logfccutoff <- 1.5
+padjcutoff <- 0.05
+# 差异表达基因
+degs <- resData[which(abs(resData$log2FoldChange) > logfccutoff & resData$padj < padjcutoff),] 
+# 正常表达基因 (个人觉得正常表达的基因需要同时满足log2FC较小且检验不显著)
+negs <- resData[which(abs(resData$log2FoldChange) <= logfccutoff & resData$padj > padjcutoff),]
+
+(num.degs <- nrow(degs)) # 每次需要取出的基因数目，与差异表达基因数目相等 
+reps <- 1000 # 随机抽样次数，原文是1000
+rt <- numeric(reps) # 构建空表用于存储结果，后面画图会用到
+
+set.seed(132) # 设置种子使得结果可重复
+for (i in 1:reps) { # 循环1000次
+  temp <- sample(negs$id, num.degs) # 每次从正常表达的基因名中抽取与差异表达基因数目相等的基因个数，即每次抽8212个
+  rt[i] <- length(intersect(temp,cgc$GeneSymbol)) # 记录这8212个正常表达的基因中有多少是CGC基因
+}
+
+# 差异表达基因跟CGC的交集
+(n.cgc <- length(intersect(degs$id, cgc$GeneSymbol)))
+# 142个差异表达基因是CGC（例文有119个）
+
+# p值为在随机抽样中，抽出的基因中CGC基因数目大于在差异表达基因中CGC数目的概率
+(p.value <- sum(rt > n.cgc) / reps)
+```
+
+> 结论：这里算出的p值为0.956，表明相较于差异表达背景集，CGC基因在1000次抽样中有95.6%的概率出现在正常表达的基因中。
+
+# 开始画图
+
+用base plot画图，从plot开始到结束，整段运行。
+
+```{r}
+# 绘密度图
+par(bty="o", mgp = c(1.9,.33,0), mar=c(3.1,3.1,2.1,2.1)+.1, las=1, tcl=-.25, xpd = T)
+den <- density(rt) # 计算密度
+
+plot(den$x,den$y, # 绘制基础密度曲线
+     type = "l",
+     xlab = "Number of functional genes",
+     ylab = "Density",
+     main = "",
+     lwd = 2)
+lines(x = range(den$x), y = c(0,0),lwd = 2) # 添加水平线
+Arrows(x0 = n.cgc, x1 = n.cgc, # 添加差异表达基因中CGC基因数目的箭头标记
+       y0 = max(den$y)/2, y1 = 0,
+       col = "red",
+       arr.lwd = 1,
+       lwd = 2,
+       arr.type = "triangle")
+text(130, 0.005, "CGC", pos = 4,col = "#4F91F1", cex = 1.3) # 添加CGC标记
+text(n.cgc,  max(den$y)/2, paste0("Observed\n(",n.cgc,")"), pos = 4,col = "red", cex = 1.3) # 添加CGC数目标记
+legend("topleft", legend = paste0("p = ",p.value), bty = "n") # 添加p值标记
+dev.copy2pdf(file = "Randomization_density.pdf",width = 5, height = 4.5) # 存储图像
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,135 @@
+---
+title: "RNA Velocity"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, warning = FALSE, message = FALSE)
+```
+
+> RNA velocity. 
+We ran velocyto.py (14) annotator for each mapped BAM fle using the default parameters
+for 10x Genomics technology and gencode vM12 gtf fle for intron-exon annotation. The resulting loom object
+for each sample was loaded and processed in R using the velocyto.R (v. 0.17) package. We used the embedding
+from Monocle DDRTree representation for cell-cell distance calculation and fnal velocity plots. The estimation of RNA velocity was done with the grouping of 10 cells; the other parameters were set to default
+
+```{r}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+```{r}
+library(monocle, lib.loc = newpath)
+library(velocyto.R, lib.loc = newpath)
+```
+
+导入第六部分的结果
+
+```{r}
+monocle_cds <- readRDS("tmp/s6-fib_monocle.rds")
+```
+
+读取velocyto.py的结果
+
+```{r}
+ldat <- list(
+  old1 = read.loom.matrices("../data/loom/old1.loom"),
+  old2 = read.loom.matrices("../data/loom/old2.loom"),
+  old3 = read.loom.matrices("../data/loom/old3.loom"),
+  young1 = read.loom.matrices("../data/loom/young1.loom"),
+  young2 = read.loom.matrices("../data/loom/young2.loom"),
+  young3 = read.loom.matrices("../data/loom/young3.loom")
+)
+```
+
+合并数据
+```{r}
+matrix.name <- names(ldat$old1)
+ldat <- lapply(matrix.name, function(x){
+  dat.list <- lapply(ldat, function(y){
+    y[[x]]
+  })
+  dat.merged <- do.call(cbind, dat.list)
+  dat.merged
+})
+names(ldat) <- matrix.name
+```
+
+
+重新对细胞命名
+```{r}
+cells.id <- colnames(monocle_cds)
+cells.id[1:5]
+ldat$spliced[1:5, 1:5]
+ldat <- lapply(ldat, function(x) {
+  colnames(x) <- sub("x", "", sub(":", "_", colnames(x)))
+  x
+})
+ldat$spliced[1:5, 1:5]
+```
+
+保留fibroblasts
+```{r}
+ldat <- lapply(ldat, function(x) {
+  x[, cells.id]
+})
+lapply(ldat, dim)
+```
+
+保留表达量高于一定阈值的基因
+```{r}
+emat <- ldat$spliced # exonic read (spliced) expression matrix
+nmat <- ldat$unspliced # intronic read (unspliced) expression matrix
+```
+
+根据最小最大细胞类均值对基因进行过滤
+min.max.cluster.average：不同细胞类型中，基因均值最大值大于该阈值，则该基因保留
+```{r, eval=TRUE}
+cell_cluster <- as.character(pData(monocle_cds)$Cluster)
+names(cell_cluster) <- cells.id
+emat <- filter.genes.by.cluster.expression(emat, cell_cluster, min.max.cluster.average = .1)
+nmat <- filter.genes.by.cluster.expression(nmat, cell_cluster, min.max.cluster.average = .1)
+length(intersect(rownames(emat), rownames(nmat)))
+```
+
+RNA Velocity分析
+```{r}
+### 参数设置
+fit.quantile = 0.05 # 官方教程设定为 0.05
+deltaT = 1 # default: 1
+kCells = 10 # default: 10
+### RNA velocity分析
+rvel.qf <- gene.relative.velocity.estimates(emat, nmat, deltaT = deltaT, kCells = kCells, fit.quantile = fit.quantile)
+```
+
+RNA Velocity可视化
+```{r, fig.width=8, fig.height=6}
+colors <- c("#F8766D", "#C49A00", "#53B400", "#00C094", "#00B6EB", "#A58AFF", "#FB61D7")
+names(colors) <- 1:7
+
+### 参数设定
+emb = t(reducedDimS(monocle_cds)) # DDRTree坐标
+vel = rvel.qf # velocity estimates (步骤3的结果)
+n = 100 # 最邻近细胞的数量
+scale = "sqrt" # scale方法
+# 散点的颜色（用以区分不同的细胞状态）
+cell.colors = plyr::mapvalues(cell_cluster, names(colors), colors)
+cell.alpha = 0.2 # 散点颜色的透明度
+cell.cex = 1 # 散点的尺寸
+arrow.scale = 1 # 箭头的长度
+arrow.lwd = 1.5 # 箭头的粗细
+grid.n = 50 # grids的数量
+
+### plot
+show.velocity.on.embedding.cor(emb, vel, n, scale=scale, 
+                               cell.colors = ac(cell.colors, alpha = cell.alpha),
+                               cex = cell.cex, arrow.scale = arrow.scale, 
+                               show.grid.flow = TRUE, min.grid.cell.mass = 1,
+                               grid.n = grid.n, arrow.lwd = arrow.lwd)
+```
+
+> the longer the arrow in the plot, the higher the transcriptional activity as seen in the extremities of states h, j, and l plot containing mostly old cells.
+
+箭头越长的地方，转录活性越强，且转录活性强的地方大部分是old fibroblast.

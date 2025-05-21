@@ -1,0 +1,115 @@
+---
+title: "Run CCA"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r, eval=TRUE}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+加载包
+```{r, eval=TRUE}
+library(Seurat, lib.loc = newpath)
+packageVersion("Seurat")
+```
+
+> For some specifc analyses below, we partly applied more restricted values. Gene expression (in UMI) was log normalized and scaled. Variable genes for each of the 6 samples were detected by the Seurat “FindVariableGenes” function using default options. Clustering was done using only variable genes. To obtain a global set of variable genes, we combined the set of variable genes from all 6 samples using the union of the top 1000 variable genes in each one.
+
+导入第一部分的结果
+```{r}
+if (!exists("expr_mm")) {
+  expr_mm <- readRDS("tmp/s1-expr_mm.rds")
+}
+summary(expr_mm$cells$sample_id)
+```
+
+```{r, include=FALSE, eval=TRUE}
+seu.CCA <- readRDS("tmp/s2-seu_CCA.rds")
+```
+
+创建Seurat对象
+```{r}
+seu <- CreateSeuratObject(expr_mm$mtx, meta.data = expr_mm$cells)
+```
+
+提取每个样本的Seurat对象，共有6个样本
+```{r}
+sample_ids <- c(paste0("old", 1:3), paste0("young", 1:3))
+seu.list <- lapply(sample_ids, function(x) 
+  SubsetData(seu, cells.use = rownames(subset(seu@meta.data, sample_id == x)))
+  )
+names(seu.list) <- sample_ids
+```
+
+对每个样本都进行Normalization、Scale并计算high variable genes
+```{r}
+for(i in seq_along(sample_ids)) {
+  seu.list[[i]] <- NormalizeData(seu.list[[i]])
+  seu.list[[i]] <- ScaleData(seu.list[[i]])
+  seu.list[[i]] <- FindVariableGenes(seu.list[[i]], do.plot = FALSE)
+}
+```
+
+对每个样本top 1000 high variable genes取并集
+```{r}
+hvg.list <- lapply(seu.list, function(x) rownames(head(x@hvg.info, n=1000)))
+hvg.genes <- unique(do.call(c, hvg.list))
+```
+
+run CCA on each sample
+```{r}
+seu.CCA <- RunMultiCCA(seu.list, genes.use = hvg.genes, num.ccs = 20)
+```
+
+清理内存
+```{r}
+## 删除中间变量
+rm(list = c("seu", "seu.list"))
+## 清理内存
+gc()
+```
+
+查看CCA降维图
+```{r, fig.width=6, fig.height=5, eval=TRUE}
+DimPlot(seu.CCA, reduction.use = "cca", group.by = "sample_id", pt.size = 0.5)
+```
+
+violin plot for CCA1 scores and CCA2 scores across different sample
+```{r, fig.width=7, fig.height=3, eval=TRUE}
+VlnPlot(seu.CCA, features.plot = c("CC1", "CC2"), group.by = "sample_id", point.size.use = .01)
+```
+
+check important genes (gene with high loading) in 20 canonical components
+```{r, fig.width=7, fig.height=10, eval=TRUE}
+DimHeatmap(object = seu.CCA, reduction.type = "cca", cells.use = 500, dim.use = 1:20, do.balanced = TRUE)
+```
+
+我们应该选择多少个CC用于下游分析？<br>
+根据文章中的叙述：<br>
+
+>  For the overall data set, we selected the frst 20 dimensions that explained more variability than expected by chance using a permutation-based test as implemented in Seurat. For further clustering of cells within primary clusters (subclustering), we selected variable numbers of CCAs for dimensionality reduction using either a permutation-based test or heuristic methods implemented in Seurat.
+
+作者申称用了Seurat中内置的置换检验来决定选择多少个CCs用于下游分析。实际上Seurat中没有直接对CCA做置换检验的函数。只有一个JackStraw()函数可以对PCA做置换检验。而且通常分析结果对CCs的个数应该是健壮的，我们也没有必要利用置换检验来决定用多少个CCs（计算量太大不划算）。
+
+> Then we aligned the subspaces across all selected variables on this CCA.
+
+```{r}
+seu.CCA <- AlignSubspace(seu.CCA, reduction.type = "cca", grouping.var = "sample_id", dims.align = 1:20)
+```
+
+```{r, fig.width=7, fig.height=3, eval=TRUE}
+VlnPlot(seu.CCA, features.plot = c("ACC1", "ACC2"), group.by = "sample_id", point.size.use = .01)
+```
+
+保存结果
+```{r}
+saveRDS(seu.CCA, "tmp/s2-seu_CCA.rds")
+```
+

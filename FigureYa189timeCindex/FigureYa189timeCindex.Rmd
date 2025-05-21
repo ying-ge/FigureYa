@@ -1,0 +1,170 @@
+---
+title: "FigureYa189timeCindex"
+author: "小丫画图出品"
+date: "2020-8-2"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+FigureYa85timeAUC是时间依赖的auc曲线，我想要时间依赖的c-index，没法用之前的包画。
+
+![](example.png)
+
+出自<https://doi.org/10.1007/s12035-018-1416-y>
+
+Fig. 5 Performance evaluation of the 8 lncRNA-based risk score. 
+d Concordance index showing measure of concordance of predictor with survival of patients in TCGA
+
+UVA8 outperforms all existing lncRNA-based survival models at different times after diagnosis (Fig. 5d). As expected, prognostic signatures that were specific to GBMs (Zhang6_2013 and Zhou6_2017) show poor concordance index when used to predict survival of lower grade glioma patients.
+
+# 应用场景
+
+时间依赖性C-index，评价不同模型的一致性指数。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("pec")
+install.packages("riskRegression")
+```
+
+加载包
+
+```{r}
+library(survival)
+library(pec)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.csv，包括由多变量Cox + LASSO惩罚得到的riskscore，以及两个临床变量（age、stage），还有time-to-event数据。跟FigureYa187RMS的easy_input.csv是同一个文件。
+
+```{r}
+dat <- read.csv("easy_input.csv", row.names = 1,header = T,check.names = F,stringsAsFactors = F)
+dat <- as.data.frame(na.omit(dat)) # 移除数据空值
+dat$OS.time <- dat$OS.time/365 # 将时间转化为以年为单位
+head(dat)
+```
+
+# 构建模型用于time-dependent c-index的比较
+
+这里利用cox比例风险构建几种预后模型。可以替换成其他模型。
+
+```{r}
+cox1 <- coxph(Surv(OS.time,OS)~Riskscore,data = dat,x=TRUE,y=TRUE) # 第一个模型仅考虑风险得分
+cox2 <- coxph(Surv(OS.time,OS)~Age,data = dat,x=TRUE,y=TRUE) # 第二个模型仅考虑年龄
+cox3 <- coxph(Surv(OS.time,OS)~Stage,data = dat,x=TRUE,y=TRUE) # 第三个模型仅考虑分期
+cox4 <- coxph(Surv(OS.time,OS)~Age + Stage,data = dat,x=TRUE,y=TRUE) # 第四个模型综合考虑年龄和分期
+cox5 <- coxph(Surv(OS.time,OS)~Riskscore + Age,data = dat,x=TRUE,y=TRUE) # 第五个模型综合考虑得分和年龄
+cox6 <- coxph(Surv(OS.time,OS)~Riskscore + Age + Stage,data = dat,x=TRUE,y=TRUE) # 第六个模型综合考虑所有变量
+
+# 创建公式（也可直接在算法里使用"."代表全部变量）
+# lhs = "Surv(OS.time, OS)"
+# rhs = paste(setdiff(colnames(dat),c("OS","OS.time")),collapse = "+")
+# form = as.formula(paste(lhs, "~", rhs))
+
+# 设置种子以便结果可重复
+set.seed(123456) 
+
+# 每一次cindex评估的时间点，越密集曲线越平滑，这里按每0.5年为一步长
+eval.time <- seq(1,floor(max(dat$OS.time)),0.5) 
+
+# 创建算法需要的对象，命名可以按照自己习惯的方式，或者后期AI调整也很方便
+obj <- list("cox1"=cox1,
+            "cox2"=cox2,
+            "cox3"=cox3,
+            "cox4"=cox4,
+            "cox5"=cox5,
+            "cox6"=cox6)
+
+timeC <- pec::cindex(object = obj,
+                      #formula=form,
+                      formula=Surv(OS.time,OS)~.,
+                      data=dat,
+                      eval.times=eval.time, 
+                      splitMethod = "BootCv") # 使用bootstrap cross validation法计算（注意设置种子）
+
+# 提出time-dependent Cindex结果
+timeC.mat <- do.call(cbind,timeC$BootCvCindex) 
+# 输出每个变量的Cindex的值
+write.csv(timeC.mat, "output_cindex.csv", quote = F, row.names = eval.time)
+```
+
+# 开始画图
+
+```{r}
+# 获取cindex的最小值作为y轴的下界
+ymin <- min(timeC.mat) 
+
+# 如果想用调色板，下面这行代码比较方便
+mycol <- RColorBrewer::brewer.pal(n = ncol(timeC.mat), name = 'Set2')
+# 如果想自定义颜色，要自己设置足够多的颜色，如例文颜色
+mycol <- c("#DFDFDF", "#999999", "#FDD7C2", "#ED7F54", "#C04658", "#050505")
+
+pdf("time-dependent Cindex.pdf",width = 6,height = 5.5)
+par(bty="l", #如果想要例文那样坐标轴分开的，就把l改为n
+    mgp = c(1.9,.33,0), mar=c(4.1,4.1,2.1,2.1)+.1, las=1, tcl=-.25) # 基础画板设置
+
+# 循环绘制折线
+for (i in 1:ncol(timeC.mat)) { 
+  if(i == 1){ # 当绘制第一根cindex折线时plot完整画布
+    plot(eval.time,timeC.mat[,i],
+         type="l",
+         col = mycol[i],
+         lwd = 2,
+         ylim = c(ymin,1),xlim = range(dat$OS.time),
+         xaxt = "n",
+         xlab="Time (Years)",ylab = "Concordance index")
+    axis(side = 1,
+         at = seq(0,max(eval.time),1),
+         labels = seq(0,max(eval.time),1))
+  } else { # 随后添加折线
+    lines(eval.time,timeC.mat[,i],
+          col = mycol[i],
+          lwd = 2)
+  }
+}
+# 例文在0.5处画了阈值线，因为0.5为“猜测”线
+# if(ymin < 0.5) {abline(h = 0.5,lty = 4,col = "grey50",lwd = 2)} # 如果cindex矩阵中最小值小于0.5，则绘制y=0.5处的虚线为阈值
+
+# 个人建议以0.6为阈值，因为cindex认为有效的最低阈值为0.6
+if(ymin < 0.6) {abline(h = 0.6,lty = 4,col = "grey50",lwd = 2)} # 如果cindex矩阵中最小值小于0.5，则绘制y=0.5处的虚线为阈值
+
+# 绘制图例
+legend("topright", # 图例位于右上角 
+       legend = colnames(timeC.mat),
+       col = mycol,
+       lty = 1,
+       lwd = 2,
+       y.intersp = 1, x.intersp = 0.5, # 各行图例的间距细节
+       bty = "o") # 图例保留边框
+invisible(dev.off()) # 关闭图像句柄
+```
+
+![](time-dependent Cindex.pdf)
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

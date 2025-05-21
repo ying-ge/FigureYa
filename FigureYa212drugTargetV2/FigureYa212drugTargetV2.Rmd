@@ -1,0 +1,590 @@
+---
+title: "FigureYa212drugTargetV2"
+author: "小丫画图出品"
+date: "2021-1-3"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+需求一：这篇文章的Figure5F，G图，同时要包括按照文中的方法对非肿瘤组织进行纯化。
+
+需求二：根据PRISM和CTRP2.0药物敏感性AUC值数据、以及CCLE表达谱数据，预测TCGA亚组潜在性治疗药物。
+我们之前众筹的FigureYa105GDSC也用到了pRRophetic。不同于FigureYa105GDSC，这个数据是药物敏感性AUC值，以及药物的范围更加广泛。里面提到一个算法ISOpureR，通过解卷积消除肿瘤样本中掺杂的正常样本，提纯肿瘤表达矩阵，感觉也还不错。
+
+![](example.png)
+
+出自<https://academic.oup.com/bib/advance-article/doi/10.1093/bib/bbaa164/5891146>
+
+Figure 5. Identification of candidate agents with higher drug sensitivity in high-PPS score patients. 
+(A) A venn diagram for summarizing included compounds from CTRP and PRISM datasets (see also Table S12). 
+(B) Volcano plot of differential expression between bulk HCC samples and hepatoma cell lines (Wilcoxon rank-sum test: adjust P < 0.05, and log2FC > 1). Stroma markers are highlighted in deep colour (see also Table S13).
+(C) Volcano plot of differential expression between purified HCC samples and hepatoma cell lines (Wilcoxon rank-sum test: adjust P < 0.05, and log2FC > 1). Stroma markers are highlighted in deep color (see also Table S13).
+(D) Comparison of estimated sorafenib’s sensitivity (logAUC) between PI3K-MTOR altered and unaltered groups. 
+(E) Schematic outlining the **strategy to identify agents** with **higher drug sensitivity in high PPS score patients**. 
+(F) The results of Spearman’s correlation analysis and differential drug response analysis of six **CTRP-derived compounds**. 
+(G) The results of Spearman’s correlation analysis and differential drug response analysis of six **PRISM-derived compounds**. 
+Note that lower values on the y-axis of boxplots imply greater drug sensitivity.
+
+**涉及到的几个概念：**
+
+- PPS：prognosis-associated signature (PPS), which had superior ability to predict **survival in TP53-mutant patients** compared with previously established population-based signatures. Further, three therapeutic targets (CANT1, CBFB and PKM) and two agents (irinotecan and YM-155) were identified for those high-risk patients, holding the potential to improve current population-based therapeutic strategies in HCC.
+
+- 两个药物敏感性数据库：
+  - The [CTRP2.0](https://portals.broadinstitute.org/ctrp.v2.1/) contains the sensitivity data for **481 compounds over 835 CCLs**
+  - the [PRISM](https://www.theprismlab.org) contains the sensitivity data for **1448 compounds over 482 CCLs**. 
+  - Both two datasets provide the **area under the dose–response curve (area under the curve—AUC)** values as a **measure of drug sensitivity**, and lower AUC values indicate **increased sensitivity to treatment**.
+
+- CCLE和KNN：
+  - Expression profile data and somatic mutation data of human cancer cell lines (CCLs) were obtained from the Broad Institute-**Cancer Cell Line Encyclopedia (CCLE)** project (https://portals.broadinstitute.org/ccle/)
+  - **K-nearest neighbor (k-NN)** imputation was applied to impute the missing AUC values. Before imputation, compounds with more than 20% of missing data were excluded. 
+  - Because the CCLs in both datasets were obtained from the CCLE project, molecular data in **CCLE were thus used for subsequent CTRP and PRISM analyses.**
+
+# 应用场景
+
+筛选对癌症亚组可能有效的化合物/药物，例文用了多种方式相互佐证。
+
+- 用PRISM和CTRP 发现了12个 candidate compounds identified showed a higher drug sensitivity in PPS score-high patients
+- **above analyses alone could not support** the conclusion that these compounds had therapeutic effect in HCC. Therefore, **multiple- perspective analyses** were subsequently conducted to investigate the therapeutic potential of these compounds in HCC. 
+  - We first used the **CMap analysis** to find compounds of which gene expression patterns were oppositional to the HCC-specific expression patterns (i.e. gene expression increased in tumor tissues but decreased by treatment of certain compounds).
+  - Secondly, **fold-change differences of the expression levels (including mRNA- and protein-level) of candidates’ drug targets** between tumor and normal tissue were calculated, and a higher fold change value indicated a greater potential of candidate agent for HCC treatment. 
+  - Thirdly, a comprehensive **literature search** was performed in PubMed (https://www.ncbi.nlm.nih. gov/pubmed/) to find out the experimental and clinical evidence of candidate compounds in treating HCC. 
+
+其中CMap analysis及多种证据的结果展示可参考FigureYa213customizeHeatmap
+
+下面带你实现前两种方法：利用细胞系表达谱（CCLE）及药敏结果（PRISM和CTRP），预测癌症样本的药敏结果。
+
+> 使用本代码或分析思路请引用例文：
+
+Chen Yang, Xiaowen Huang, Yan Li, Junfei Chen, Yuanyuan Lv, Shixue Dai, Prognosis and personalized treatment prediction in TP53-mutant hepatocellular carcinoma: an in silico strategy towards precision oncology, Briefings in Bioinformatics, bbaa164, https://doi.org/10.1093/bib/bbaa164
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("pRRophetic_0.5.tar.gz", repos = NULL, type = "source")
+```
+
+加载包
+
+```{r}
+library(tidyverse) # 用于读取MAF文件
+library(ISOpureR) # 用于纯化表达谱
+library(impute) # 用于KNN填补药敏数据
+library(pRRophetic) # 用于药敏预测
+library(SimDesign) # 用于禁止药敏预测过程输出的信息
+library(ggplot2) # 绘图
+library(cowplot) # 合并图像
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数显示进度
+
+```{r}
+display.progress = function (index, totalN, breakN=20) {
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}  
+```
+
+# 输入文件
+
+文件较大，已上传至微云，请点击链接下载<https://share.weiyun.com/c9oY6n0T>
+
+LIHC.TPM.txt，基因表达矩阵。计算PPS得分和药敏预测，都基于这个表达矩阵。实际应用时把这个表达矩阵替换成你自己的数据。
+
+data_mutations_mskcc.txt，maf突变数据，用于提取癌症亚型，例文提取的是TP53-mutant patients。
+
+以下文件通用，使用时请引用原文。
+
+- 17gene.txt，用于计算PPS得分。17-gene set in the model with the largest C-index value was considered as PPS。出自原文Table S3，
+- CTRP_AUC_raw.txt，用于制作CTRP AUC矩阵，原始数据来自Correlating chemical sensitivity and basal gene expression reveals mechanism of action，2016 Nature Chemical Biology，Supplementary Data Set 1 2 
+- CTRP_ccl_anno.txt，CTRP_cpd_anno.txt，分别出自Supplementary Data Set 1，Supplementary Data Set 2
+- PRISM_AUC.txt，数据来自https://depmap.org/portal/download/ Drug sensitivity AUC (PRISM Repurposing Secondary Screen) 19Q4
+- CCLE_RNAseq_rsem_genes_tpm_20180929.txt，细胞系表达谱，作为药敏预测时的训练集。出自<https://portals.broadinstitute.org/ccle/data>.
+
+```{r}
+# 1.读取肝癌TPM表达谱
+expr <- read.table("LIHC.TPM.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+normsam <- colnames(expr[,which(substr(colnames(expr),11,12) == "11")])
+tumosam <- colnames(expr[,which(substr(colnames(expr),11,12) == "01")])
+
+# 2.读取maf突变文件(于cBioPortal下载)
+maf <- read_tsv("data_mutations_mskcc.txt", comment = "#")
+maf$Tumor_Sample_Barcode <- paste0("LIHC",substr(maf$Tumor_Sample_Barcode,8,15))
+
+# 提取既有表达数据又有突变数据的肿瘤样本
+tumosam <- intersect(tumosam,unique(maf$Tumor_Sample_Barcode)) 
+maf <- maf[which(maf$Tumor_Sample_Barcode %in% tumosam),]
+expr <- expr[,c(tumosam,normsam)]
+
+# 3.提取TP53突变信息，并创建样本注释
+tp53 <- c()
+for (i in tumosam) {
+  tmp <- maf[which(maf$Tumor_Sample_Barcode == i),]
+  if(is.element("TP53", tmp$Hugo_Symbol)) { # 如果存在TP53
+    tp53 <- c(tp53,1) # 记录1
+  } else {
+    tp53 <- c(tp53,0) # 否则记录0
+  }
+}
+names(tp53) <- tumosam
+
+# 取出有TP53突变的患者
+tp53.mutsam <- names(tp53[which(tp53 == 1)]) 
+```
+
+# 计算PPS得分
+
+前文筛选了17-gene set in the model with the largest C-index value was considered as PPS，方法见原文“Development of 17 gene-based PPS in TP53-mutant HCCs”部分。我们直接拿来用，记得引用文章哦～
+
+```{r}
+# 1.读取17-gene signature，计算PPS得分(原文Table S3)
+signature <- read.table("17gene.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+dim(signature)
+
+# 计算pps，用到TP53突变患者的17个基因的表达矩阵
+pps <- as.numeric(apply(t(log2(expr[rownames(signature),tp53.mutsam] + 1)), 1, function(x) {x %*% signature$Coefficient}))
+
+# 2.标准化，把pps处理到0-1之间
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+npps <- range01(pps)
+
+# 3.创建样本信息
+Sinfo <- data.frame(PPS = npps,
+                    TP53 = tp53[tp53.mutsam],
+                    row.names = tp53.mutsam,
+                    stringsAsFactors = F)
+head(Sinfo)
+
+# 把pps保存到文件
+write.csv(Sinfo, "output_PPS.csv", quote = F)
+```
+
+# 用ISOpureR纯化肿瘤样本表达谱 (not run)
+
+计算纯化后的表达谱，用于与药敏数据的关联分析（该分析需使用原始表达谱，不能进行对数转化）
+
+运行时间大概在一周，所以这里不运行，以原始表达谱代替下游分析
+
+> 如果想运行就把`runpure <- F`改为`runpure <- T`
+
+```{r}
+normexpr <- as.matrix(expr[,normsam])
+tumoexpr <- as.matrix(expr[,tp53.mutsam])
+
+runpure <- F # 如果想运行就把这个改为T
+if(runpure) {
+  set.seed(123)
+  # Run ISOpureR Step 1 - Cancer Profile Estimation
+  ISOpureS1model <- ISOpure.step1.CPE(tumoexpr, normexpr)
+  # For reproducible results, set the random seed
+  set.seed(456);
+  # Run ISOpureR Step 2 - Patient Profile Estimation
+  ISOpureS2model <- ISOpure.step2.PPE(tumoexpr,normexpr,ISOpureS1model)
+  pure.tumoexpr <- ISOpureS2model$cc_cancerprofiles
+}
+
+if(!runpure) {
+  pure.tumoexpr <- tumoexpr
+}
+```
+
+# 药敏数据制作及预处理
+
+```{r}
+# 1.制作CTRP AUC矩阵，保存到CTRP_AUC.txt文件
+auc <- read.table("CTRP_AUC_raw.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T) # Supplementary Data Set 3
+auc$comb <- paste(auc$master_cpd_id,auc$master_ccl_id,sep = "-")
+auc <- apply(auc[,"area_under_curve",drop = F], 2, function(x) tapply(x, INDEX=factor(auc$comb), FUN=max, na.rm=TRUE)) # 重复项取最大AUC
+auc <- as.data.frame(auc)
+auc$master_cpd_id <- sapply(strsplit(rownames(auc),"-",fixed = T),"[",1)
+auc$master_ccl_id <- sapply(strsplit(rownames(auc),"-",fixed = T),"[",2)
+auc <- reshape(auc, 
+               direction = "wide",
+               timevar = "master_cpd_id",
+               idvar = "master_ccl_id")
+colnames(auc) <- gsub("area_under_curve.","",colnames(auc),fixed = T)
+ctrp.ccl.anno <- read.table("CTRP_ccl_anno.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T) # Supplementary Data Set 1
+ctrp.cpd.anno <- read.delim("CTRP_cpd_anno.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T) # Supplementary Data Set 2
+# 保存到文件
+write.table(auc,"CTRP_AUC.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+
+# 2.加载药敏AUC矩阵并进行数据处理
+ctrp.auc <- read.table("CTRP_AUC.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+prism.auc <- read.delim("PRISM_AUC.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T) # 数据来自https://depmap.org/portal/download/ Drug sensitivity AUC (PRISM Repurposing Secondary Screen) 19Q4
+prism.ccl.anno <- prism.auc[,1:5] # 前5列为细胞系注释信息
+prism.auc <- prism.auc[,-c(1:5)]
+
+## a. 移除缺失值大于20%的药物
+ctrp.auc <- ctrp.auc[,apply(ctrp.auc,2,function(x) sum(is.na(x))) < 0.2*nrow(ctrp.auc)]
+prism.auc <- prism.auc[,apply(prism.auc,2,function(x) sum(is.na(x))) < 0.2*nrow(prism.auc)]
+
+## b. 移除CTRP数据里源自haematopoietic_and_lymphoid_tissue的细胞系
+rmccl <- paste0("CCL",na.omit(ctrp.ccl.anno[which(ctrp.ccl.anno$ccle_primary_site == "haematopoietic_and_lymphoid_tissue"),"master_ccl_id"]))
+rownames(ctrp.auc) <- paste0("CCL",rownames(ctrp.auc))
+ctrp.auc <- ctrp.auc[setdiff(rownames(ctrp.auc),rmccl),]
+
+## c. KNN填补缺失值
+ctrp.auc.knn <- impute.knn(as.matrix(ctrp.auc))$data
+prism.auc.knn <- impute.knn(as.matrix(prism.auc))$data
+
+## d. 数据量级修正（与作者沟通得知）
+ctrp.auc.knn <- ctrp.auc.knn/ceiling(max(ctrp.auc.knn)) # 参考Expression Levels of Therapeutic Targets as Indicators of Sensitivity to Targeted Therapeutics (2019, Molecular Cancer Therapeutics)
+prism.auc.knn <- prism.auc.knn/ceiling(max(prism.auc.knn))
+```
+
+# 药敏预测
+
+```{r}
+# 加载CCLE细胞系的表达谱，作为训练集
+ccl.expr <- read.table("CCLE_RNAseq_rsem_genes_tpm_20180929.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T) 
+
+# 加载基因注释文件，用于基因ID转换
+Ginfo <- read.table("overlapTable27.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T) # 参考FigureYa34count2FPKMv2制作的基因注释文件
+
+# 把基因的ensembl ID转换为gene symbol
+ccl.expr <- ccl.expr[,-1]; rownames(ccl.expr) <- sapply(strsplit(rownames(ccl.expr),".",fixed = T),"[",1)
+comgene <- intersect(rownames(ccl.expr),rownames(Ginfo))
+ccl.expr <- ccl.expr[comgene,]
+ccl.expr$gene <- Ginfo[comgene,"genename"]; ccl.expr <- ccl.expr[!duplicated(ccl.expr$gene),]; rownames(ccl.expr) <- ccl.expr$gene; ccl.expr <- ccl.expr[,-ncol(ccl.expr)]
+```
+
+下面用pRRophetic包里的calcPhenotype函数，分别基于CTRP和PRISM，估计每个样本的drug response。
+
+## CTRP
+
+数据准备
+
+```{r}
+keepgene <- apply(ccl.expr, 1, mad) > 0.5 # 保留表达值有效的基因
+trainExpr <- log2(ccl.expr[keepgene,] + 1)
+colnames(trainExpr) <- sapply(strsplit(colnames(trainExpr),"_",fixed = T),"[",1) # 重置细胞系名
+trainPtype <- as.data.frame(ctrp.auc.knn)
+ccl.name <- ccl.miss <- c() # 替换细胞系名
+for (i in rownames(trainPtype)) {
+  if(!is.element(gsub("CCL","",i),ctrp.ccl.anno$master_ccl_id)) {
+    cat(i,"\n")
+    ccl.miss <- c(ccl.miss, i) # 没有匹配到的细胞系
+    ccl.name <- c(ccl.name, i) # 插入未匹配的细胞系
+  } else {
+    ccl.name <- c(ccl.name,  ctrp.ccl.anno[which(ctrp.ccl.anno$master_ccl_id == gsub("CCL","",i)),"ccl_name"]) # 插入匹配的细胞系
+  }
+}
+
+cpd.name <- cpd.miss <- c() # 替换药物名
+for (i in colnames(trainPtype)) {
+  if(!is.element(i,ctrp.cpd.anno$master_cpd_id)) {
+    cat(i,"\n")
+    cpd.miss <- c(cpd.miss, i) # 没有匹配到的药物
+    cpd.name <- c(cpd.name, i) # 插入未匹配的药物
+  } else {
+    cpd.name <- c(cpd.name,  ctrp.cpd.anno[which(ctrp.cpd.anno$master_cpd_id == i),"cpd_name"]) # 插入匹配的药物
+  }
+}
+
+rownames(trainPtype) <- ccl.name
+trainPtype <- trainPtype[setdiff(rownames(trainPtype),ccl.miss),] # 去除未匹配的细胞系
+colnames(trainPtype) <- cpd.name
+trainPtype <- trainPtype[,setdiff(colnames(trainPtype),cpd.miss)] # 去除未匹配的药物
+comccl <- intersect(rownames(trainPtype),colnames(trainExpr)) # 提取有表达且有药敏的细胞系
+trainExpr <- trainExpr[,comccl]
+trainPtype <- trainPtype[comccl,]
+
+# 测试集
+keepgene <- apply(pure.tumoexpr, 1, mad) > 0.5 # 纯化的测试集取表达稳定的基因
+testExpr <- log2(pure.tumoexpr[keepgene,] + 1) # 表达谱对数化
+# 取训练集和测试集共有的基因
+comgene <- intersect(rownames(trainExpr),rownames(testExpr)) 
+trainExpr <- as.matrix(trainExpr[comgene,])
+testExpr <- testExpr[comgene,]
+```
+
+岭回归预测药物敏感性
+
+```{r}
+outTab <- NULL
+# 循环很慢，请耐心
+for (i in 1:ncol(trainPtype)) { 
+  display.progress(index = i,totalN = ncol(trainPtype))
+  d <- colnames(trainPtype)[i]
+  tmp <- log2(as.vector(trainPtype[,d]) + 0.00001) # 由于CTRP的AUC可能有0值，因此加一个较小的数值防止报错
+  
+  # 岭回归预测药物敏感性
+  ptypeOut <- quiet(calcPhenotype(trainingExprData = trainExpr,
+                                  trainingPtype = tmp,
+                                  testExprData = testExpr,
+                                  powerTransformPhenotype = F,
+                                  selection = 1))
+  ptypeOut <- 2^ptypeOut - 0.00001 # 反对数
+  outTab <- rbind.data.frame(outTab,ptypeOut)
+}
+dimnames(outTab) <- list(colnames(trainPtype),colnames(testExpr))
+ctrp.pred.auc <- outTab
+```
+
+## PRISM
+
+数据准备
+
+```{r}
+keepgene <- apply(ccl.expr, 1, mad) > 0.5
+trainExpr <- log2(ccl.expr[keepgene,] + 1)
+colnames(trainExpr) <- sapply(strsplit(colnames(trainExpr),"_",fixed = T),"[",1)
+trainPtype <- as.data.frame(prism.auc.knn)
+rownames(trainPtype) <- prism.ccl.anno[rownames(trainPtype),"cell_line_display_name"]
+#colnames(trainPtype) <- sapply(strsplit(colnames(trainPtype)," (",fixed = T), "[",1)
+comccl <- intersect(rownames(trainPtype),colnames(trainExpr))
+trainExpr <- trainExpr[,comccl]
+trainPtype <- trainPtype[comccl,]
+
+# 测试集
+keepgene <- apply(pure.tumoexpr, 1, mad) > 0.5
+testExpr <- log2(pure.tumoexpr[keepgene,] + 1)
+comgene <- intersect(rownames(trainExpr),rownames(testExpr))
+trainExpr <- as.matrix(trainExpr[comgene,])
+testExpr <- testExpr[comgene,]
+```
+
+岭回归预测药物敏感性
+
+```{r}
+outTab <- NULL
+# 循环很慢，请耐心
+for (i in 1:ncol(trainPtype)) { 
+  display.progress(index = i,totalN = ncol(trainPtype))
+  d <- colnames(trainPtype)[i]
+  tmp <- log2(as.vector(trainPtype[,d]) + 0.00001) # 由于PRISM的AUC可能有0值，因此加一个较小的数值防止报错
+  ptypeOut <- quiet(calcPhenotype(trainingExprData = trainExpr,
+                                  trainingPtype = tmp,
+                                  testExprData = testExpr,
+                                  powerTransformPhenotype = F,
+                                  selection = 1))
+  ptypeOut <- 2^ptypeOut - 0.00001 # 反对数
+  outTab <- rbind.data.frame(outTab,ptypeOut)
+}
+dimnames(outTab) <- list(colnames(trainPtype),colnames(testExpr))
+prism.pred.auc <- outTab
+```
+
+# 确定潜在药物靶标
+
+```{r}
+top.pps <- Sinfo[Sinfo$PPS >= quantile(Sinfo$PPS,probs = seq(0,1,0.1))[10],] # 定义上十分位的样本
+bot.pps <- Sinfo[Sinfo$PPS <= quantile(Sinfo$PPS,probs = seq(0,1,0.1))[2],] # 定义下十分位的样本
+```
+
+## 1.差异药敏分析
+
+```{r}
+ctrp.log2fc <- c()
+for (i in 1:nrow(ctrp.pred.auc)) {
+  display.progress(index = i,totalN = nrow(ctrp.pred.auc))
+  d <- rownames(ctrp.pred.auc)[i]
+  a <- mean(as.numeric(ctrp.pred.auc[d,rownames(top.pps)])) # 上十分位数的AUC均值
+  b <- mean(as.numeric(ctrp.pred.auc[d,rownames(bot.pps)])) # 下十分位数的AUC均值
+  fc <- b/a
+  log2fc <- log2(fc); names(log2fc) <- d
+  ctrp.log2fc <- c(ctrp.log2fc,log2fc)
+}
+candidate.ctrp <- ctrp.log2fc[ctrp.log2fc > 0.2] # 这里我调整了阈值，控制结果数目
+
+prism.log2fc <- c()
+for (i in 1:nrow(prism.pred.auc)) {
+  display.progress(index = i,totalN = nrow(prism.pred.auc))
+  d <- rownames(prism.pred.auc)[i]
+  a <- mean(as.numeric(prism.pred.auc[d,rownames(top.pps)])) # 上十分位数的AUC均值
+  b <- mean(as.numeric(prism.pred.auc[d,rownames(bot.pps)])) # 下十分位数的AUC均值
+  fc <- b/a
+  log2fc <- log2(fc); names(log2fc) <- d
+  prism.log2fc <- c(prism.log2fc,log2fc)
+}
+candidate.prism <- prism.log2fc[prism.log2fc > 0.2] # 这里我调整了阈值，控制结果数目
+```
+
+## 2.Spearman相关性分析，用于绘制左图
+
+```{r}
+ctrp.cor <- ctrp.cor.p <- c()
+for (i in 1:nrow(ctrp.pred.auc)) {
+  display.progress(index = i,totalN = nrow(ctrp.pred.auc))
+  d <- rownames(ctrp.pred.auc)[i]
+  a <- as.numeric(ctrp.pred.auc[d,rownames(Sinfo)]) 
+  b <- as.numeric(Sinfo$PPS)
+  r <- cor.test(a,b,method = "spearman")$estimate; names(r) <- d
+  p <- cor.test(a,b,method = "spearman")$p.value; names(p) <- d
+  ctrp.cor <- c(ctrp.cor,r)
+  ctrp.cor.p <- c(ctrp.cor.p,p)
+}
+candidate.ctrp2 <- ctrp.cor[ctrp.cor < -0.4]  # 这里我调整了阈值，控制结果数目
+ctrp.candidate <- intersect(names(candidate.ctrp),names(candidate.ctrp2))
+
+prism.cor <- prism.cor.p <- c()
+for (i in 1:nrow(prism.pred.auc)) {
+  display.progress(index = i,totalN = nrow(prism.pred.auc))
+  d <- rownames(prism.pred.auc)[i]
+  a <- as.numeric(prism.pred.auc[d,rownames(Sinfo)]) 
+  b <- as.numeric(Sinfo$PPS)
+  r <- cor.test(a,b,method = "spearman")$estimate; names(r) <- d
+  p <- cor.test(a,b,method = "spearman")$p.value; names(p) <- d
+  prism.cor <- c(prism.cor,r)
+  prism.cor.p <- c(prism.cor.p,p)
+}
+candidate.prism2 <- prism.cor[prism.cor < -0.35]  
+prism.candidate <- intersect(names(candidate.prism),names(candidate.prism2))
+```
+
+# 开始画图
+
+## 1. 左侧相关性图
+
+```{r}
+# 设置颜色
+darkblue <- "#0772B9"
+lightblue <- "#48C8EF"
+
+cor.data <- data.frame(drug = ctrp.candidate,
+                       r = ctrp.cor[ctrp.candidate],
+                       p = -log10(ctrp.cor.p[ctrp.candidate]))
+p1 <- ggplot(data = cor.data,aes(r,forcats::fct_reorder(drug,r,.desc = T))) +
+  geom_segment(aes(xend=0,yend=drug),linetype = 2) +
+  geom_point(aes(size=p),col = darkblue) +
+  scale_size_continuous(range =c(2,8)) +
+  scale_x_reverse(breaks = c(0, -0.3, -0.5),
+                  expand = expansion(mult = c(0.01,.1))) + #左右留空
+  theme_classic() +
+  labs(x = "Correlation coefficient", y = "", size = bquote("-log"[10]~"("~italic(P)~"-value)")) + 
+  theme(legend.position = "bottom", 
+        axis.line.y = element_blank())
+
+cor.data <- data.frame(drug = prism.candidate,
+                       r = prism.cor[prism.candidate],
+                       p = -log10(prism.cor.p[prism.candidate]))
+cor.data$drug <- sapply(strsplit(cor.data$drug," (",fixed = T), "[",1)
+
+p2 <- ggplot(data = cor.data,aes(r,forcats::fct_reorder(drug,r,.desc = T))) +
+  geom_segment(aes(xend=0,yend=drug),linetype = 2) +
+  geom_point(aes(size=p),col = darkblue) +
+  scale_size_continuous(range =c(2,8)) +
+  scale_x_reverse(breaks = c(0, -0.3, -0.5),
+                  expand = expansion(mult = c(0.01,.1))) + #左右留空
+  theme_classic() +
+  labs(x = "Correlation coefficient", y = "", size = bquote("-log"[10]~"("~italic(P)~"-value)")) + 
+  theme(legend.position = "bottom", 
+        axis.line.y = element_blank())
+```
+
+## 2.右侧箱型图
+
+```{r, fig.width=8, fig.height=8}
+ctrp.boxdata <- NULL
+for (d in ctrp.candidate) {
+  a <- as.numeric(ctrp.pred.auc[d,rownames(top.pps)]) 
+  b <- as.numeric(ctrp.pred.auc[d,rownames(bot.pps)])
+  p <- wilcox.test(a,b)$p.value
+  s <- as.character(cut(p,c(0,0.001,0.01,0.05,1),labels = c("***","**","*","")))
+  ctrp.boxdata <- rbind.data.frame(ctrp.boxdata,
+                                   data.frame(drug = d,
+                                              auc = c(a,b),
+                                              p = p,
+                                              s = s,
+                                              group = rep(c("High PPS","Low PPS"),c(nrow(top.pps),nrow(bot.pps))),
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+}
+p3 <- ggplot(ctrp.boxdata, aes(drug, auc, fill=group)) + 
+  geom_boxplot(aes(col = group),outlier.shape = NA) + 
+  # geom_text(aes(drug, y=min(auc) * 1.1, 
+  #               label=paste("p=",formatC(p,format = "e",digits = 1))),
+  #           data=ctrp.boxdata, 
+  #           inherit.aes=F) + 
+  geom_text(aes(drug, y=max(auc)), 
+                label=ctrp.boxdata$s,
+            data=ctrp.boxdata, 
+            inherit.aes=F) + 
+  scale_fill_manual(values = c(darkblue, lightblue)) + 
+  scale_color_manual(values = c(darkblue, lightblue)) + 
+  xlab(NULL) + ylab("Estimated AUC value") + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5,vjust = 0.5,size = 10),
+        legend.position = "bottom",
+        legend.title = element_blank()) 
+dat <- ggplot_build(p3)$data[[1]]
+
+p3 <- p3 + geom_segment(data=dat, aes(x=xmin, xend=xmax, y=middle, yend=middle), color="white", inherit.aes = F)
+
+prism.boxdata <- NULL
+for (d in prism.candidate) {
+  a <- as.numeric(prism.pred.auc[d,rownames(top.pps)]) 
+  b <- as.numeric(prism.pred.auc[d,rownames(bot.pps)])
+  p <- wilcox.test(a,b)$p.value
+  s <- as.character(cut(p,c(0,0.001,0.01,0.05,1),labels = c("***","**","*","")))
+  prism.boxdata <- rbind.data.frame(prism.boxdata,
+                                   data.frame(drug = d,
+                                              auc = c(a,b),
+                                              p = p,
+                                              s = s,
+                                              group = rep(c("High PPS","Low PPS"),c(nrow(top.pps),nrow(bot.pps))),
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+}
+prism.boxdata$drug <- sapply(strsplit(prism.boxdata$drug," (",fixed = T), "[",1)
+
+p4 <- ggplot(prism.boxdata, aes(drug, auc, fill=group)) + 
+  geom_boxplot(aes(col = group),outlier.shape = NA) + 
+  # geom_text(aes(drug, y=min(auc) * 1.1, 
+  #               label=paste("p=",formatC(p,format = "e",digits = 1))),
+  #           data=prism.boxdata, 
+  #           inherit.aes=F) + 
+  geom_text(aes(drug, y=max(auc)), 
+            label=prism.boxdata$s,
+            data=prism.boxdata, 
+            inherit.aes=F) + 
+  scale_fill_manual(values = c(darkblue, lightblue)) + 
+  scale_color_manual(values = c(darkblue, lightblue)) + 
+  xlab(NULL) + ylab("Estimated AUC value") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5,vjust = 0.5,size = 10),
+      legend.position = "bottom",
+      legend.title = element_blank())
+dat <- ggplot_build(p4)$data[[1]]
+
+p4 <- p4 + geom_segment(data=dat, aes(x=xmin, xend=xmax, y=middle, yend=middle), color="white", inherit.aes = F)
+```
+
+## 3. 合并图像
+
+```{r, fig.width=8, fig.height=8}
+plot_grid(p1, p3, p2, p4, labels=c("A", "", "B", ""), 
+          ncol=2, 
+          rel_widths = c(2, 2)) #左右两列的宽度比例
+ggsave(filename = "drug target.pdf",width = 8,height = 8)
+
+# 保存镜像
+#save.image("drug.RData")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
