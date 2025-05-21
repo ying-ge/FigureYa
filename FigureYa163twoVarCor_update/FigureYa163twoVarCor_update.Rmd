@@ -1,0 +1,260 @@
+---
+title: "FigureYa163twoVarCor_update"
+author: "小丫画图出品"
+date: "2020-7-5"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室；生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+**需求一：**绘制多组数据在两个变量上的相关性散点图。
+
+![](example.png)
+
+Fig. 1 Correlations between DNAm age and chronological age and other molecular characteristics of DNAm age groups. a DNAm age of 200 mixed normal cervical samples predicts chronological age with a decent correlation coefficient, whereas such correlation was much weaker in 252 tumour samples from TCGA. 
+
+**图的解读**
+
+不同于普通相关性散点图，这里添加了更丰富的信息，类似的有FigureYa143survCor：
+
+- 用点的大小展示横纵坐标的差异，类似于FigureYa59vocano用点的大小体现差异倍数和pvalue；
+- 用了两种颜色，使得两组数据可以画一起，还可用更多颜色展示更多组。
+
+**需求二：**审稿人要求我比较两个相关性大小有没有统计学差异，我想知道老师这篇文章里Fisher's r-to-z transformation是怎么计算的？
+
+![](method.jpg)
+
+出自<https://clinicalepigeneticsjournal.biomedcentral.com/articles/10.1186/s13148-020-0822-y>
+
+# 应用场景
+
+展示两个基因/性状之间的相关性，2组/3组/多组都可以画一起。
+
+- 这里用颜色区分每个分组，如果太多怕区分不开，可参考FigureYa125Fishertest、FigureYa76corrgram或FigureYa97correlationV3，再多的话可以用FigureYa73batchCorrelation做批量相关性分析和画图。可进入“微店——分类——相关性”，查看更多相关性的展示方式。
+
+- 这里要求两组数据的横纵坐标一致，如果你的两组数据横纵坐标不一致，可参考FigureYa62twoAxis和FigureYa96R2的画法
+
+# 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数，用于比较不同组相关性是否有统计学差异
+
+```{r}
+test2cor = function(x1, x2, y1, y2, method = "pearson") {
+  
+  # x1：第一组相关性分析的变量1
+  # x2：第一组相关性分析的变量2
+  # y1：第二组相关性分析的变量1
+  # y2：第二组相关性分析的变量2
+  # method：相关性分析方法，默认为皮尔斯相关性
+  
+  # 统计定义： Fisher’s r-to-z transformation was used to calculate a value of z that was applied to assess the significance of the difference between two correlation coefficients. 
+
+  cor1 = cor.test(x1, x2, method = method)
+  cor2 = cor.test(y1, y2, method = method)
+  
+  r1 = cor1$estimate
+  r2 = cor2$estimate
+  n1 = sum(complete.cases(x1, x2))
+  n2 = sum(complete.cases(y1, y2))
+  fisher = ((0.5*log((1+r1)/(1-r1)))-(0.5*log((1+r2)/(1-r2))))/((1/(n1-3))+(1/(n2-3)))^0.5
+  
+  p.value = (2*(1-pnorm(abs(fisher))))
+  
+  result= list(
+    "cor1" = list(
+      "estimate" = as.numeric(cor1$estimate),
+      "p.value" = cor1$p.value,
+      "n" = n1
+    ),
+    "cor2" = list(
+      "estimate" = as.numeric(cor2$estimate),
+      "p.value" = cor2$p.value,
+      "n" = n2
+    ),
+    "p.value.twosided" = as.numeric(p.value), # 双侧检验p值
+    "p.value.onesided" = as.numeric(p.value) / 2 # 单侧检验p值，根据相关性大小自行判断是“greater”还是“less”
+  )
+  cat(paste(sep="",
+            "cor1: r=", format(result$cor1$estimate, digits=3), ", p=", format(result$cor1$p.value, digits=3), ", n=", result$cor1$n, "\n",
+            "cor2: r=", format(result$cor2$estimate, digits=3), ", p=", format(result$cor2$p.value, digits=3), ", n=", result$cor2$n, "\n",
+            "diffence: p(one-sided)=", format(result$p.value.onesided, digits=3), ", p(two-sided)=", format(result$p.value.twosided, digits=3), "\n"
+  ))
+  return(result);
+}
+```
+
+# 输入文件
+
+easy_input.csv，第一列和第二列是连续变量，分别对应图上的横纵坐标，第三列是分组。
+
+```{r}
+cor.data <- read.csv("easy_input.csv", row.names = NULL, check.names = F, header = T, stringsAsFactors = F)
+head(cor.data)
+dim(cor.data)
+table(cor.data$class)
+```
+
+# 分别计算不同组的相关性
+
+```{r}
+# 第一组
+t.cor <- cor.test(cor.data[which(cor.data$class == "T"), "age"], cor.data[which(cor.data$class == "T"), "dnamage"])
+t.cor
+
+# 第二组
+n.cor <- cor.test(cor.data[which(cor.data$class == "N"), "age"], cor.data[which(cor.data$class == "N"), "dnamage"])
+n.cor
+```
+
+# 比较不同组相关性是否有统计学差异
+
+直接在屏幕上打印两次相关性的差异显著性
+
+```{r}
+cor.diff <- test2cor(x1 = cor.data[which(cor.data$class == "T"), "age"], 
+                     x2 = cor.data[which(cor.data$class == "T"),"dnamage"],
+                     y1 = cor.data[which(cor.data$class == "N"), "age"], 
+                     y2 = cor.data[which(cor.data$class == "N"), "dnamage"])
+```
+
+# 开始画图
+
+先计算画图时需要的额外变量
+
+```{r}
+# 计算散点图里点的大小，根据自己的数据来调整公式
+cor.data$diff <- abs(cor.data$dnamage - cor.data$age) # 计算甲基化加速年龄
+cor.data$size <- log10(cor.data$diff + 1) # 根据加速程度计算散点大小
+
+# 计算图例里点的大小
+cor.data$range <- cut(cor.data$size, breaks = quantile(cor.data$size), include.lowest = T) # 分配散点大小区间
+cor.data$range2 <- as.numeric(gsub("]", "", sapply(strsplit(as.character(cor.data$range),","), "[",2), fixed = T)) # 取区间的后半部分，用于绘制图例
+head(cor.data)
+
+# 计算图例里需要绘制多少圆圈
+num <- length(unique(cor.data$range2)) 
+num
+
+# 计算坐标轴的范围
+ylim <- range(cor.data$dnamage) # y轴范围
+xlim <- range(cor.data$age) # x轴范围
+```
+
+画图
+
+```{r}
+pdf("TwoVarCor.pdf", width = 7, height = 6.5)
+par(bty="o", mgp = c(2,0.5,0), mar = c(4.1,4.1,2.1,4.1), tcl=-.25, font.main=3) # 画布基本设置
+par(xpd=F) # 禁止显示超过画布的部分
+plot(NULL, NULL, ylim = ylim, xlim = xlim, # 先绘制一个空的画布，仅有边框和坐标名
+     xlab = "Chronological age ", ylab = "DNA methylation age",col="white",
+     main = "")
+rect(par("usr")[1], # 给画布设置背景色，掩盖边框
+     par("usr")[3],
+     par("usr")[2],
+     par("usr")[4],
+     col = "#EAE9E9",
+     border = F)
+grid(col = "white", lty = 1, lwd = 1.5) # 添加网格
+
+## 画散点和回归线
+# 在画布中添加一组（肿瘤组）的散点
+tmp1 <- cor.data[which(cor.data$class == "T"),]
+reg1 <- lm(dnamage~age, data=tmp1) # 计算回归线
+points(tmp1$age, tmp1$dnamage,
+       pch = 19,
+       col = ggplot2::alpha("#E51718",0.8), # 重叠散点透明化
+       cex = tmp1$size)
+abline(reg1, lwd = 2, col = "#E51718") # 添加回归线
+
+# 在画布中添加另一组（正常组）的散点
+tmp2 <- cor.data[which(cor.data$class == "N"),]
+reg2 <- lm(dnamage~age, data=tmp2)
+points(tmp2$age, tmp2$dnamage,
+       pch = 19,
+       col = ggplot2::alpha("#1D2D60",0.8),
+       cex = tmp2$size)
+abline(reg2, lwd = 2, col = "#1D2D60")
+
+# 如果有更多组，就按照以上格式依次添加。
+
+## 画顶部和右侧地毯线
+# 添加边际地毯线显示数据分布情况
+rug(cor.data$age, col="black", lwd=1, side=3)
+rug(cor.data$dnamage, col="black", lwd=1, side=4)
+
+## 添加相关性结果
+# 本人不太会用expression和paste的组合，所以是直接写进去的
+# 手动把"~rho~" = 后面的数值修改为t.cor和n.cor的数值
+text(20,150, # 根据自己的数据调整位置
+     adj = 0,expression("Tumour: N = 252; "~rho~" = 0.30; "~italic(P)~" < 0.001"), col = c("#E51718"), cex=1)
+text(20,140, # 根据自己的数据调整位置
+     adj = 0,expression("Normal: N = 200; "~rho~" = 0.82; "~italic(P)~" < 0.001"), col = c("#1D2D60"), cex=1)
+
+# 允许绘制超过画布的部分（用于添加图例）
+par(xpd = T)
+
+## 画图例
+# 做散点的圆圈
+points(x = rep(par("usr")[2] + 2.2, num), 
+       y = seq(80,60, # 根据自己的数据调整位置
+               length.out = num),
+       pch = 19,
+       bty = "n",
+       cex = sort(unique(cor.data$range2)),
+       col = "black")
+
+# 做散点图例的文字
+text(x = rep(par("usr")[2] + 3.8, num + 1), y = c(95, seq(80,60,length.out = num)),
+     labels = c("Absolute\nVertical\nShift",
+                round(10^(sort(unique(cor.data$range2))) - 1,0)), # 还原对数转化
+     adj = 0,cex = 0.8)
+
+# 做分组的圆圈（肿瘤和正常）
+points(x = rep(par("usr")[2] + 2.2, 2), y = c(130, 120),
+       pch = 19,
+       bty = "n",
+       cex = 1.8,
+       col = c("#E51718","#1D2D60"))
+
+# 做分组图图例的文字
+text(x = rep(par("usr")[2] + 3.8, num + 1), y = c(130, 120),
+     labels = c("Tumour","Normal"),
+     adj = 0,cex = 0.8)
+
+# 添加画布的边框
+par(new = T, bty="o")
+plot(-1, -1,
+     col = "white",
+     xlim = xlim, ylim = ylim,
+     xlab = "", ylab = "",
+     xaxt = "n", yaxt = "n")
+invisible(dev.off())
+# 最终图可在AI里稍加修饰
+```
+
+![](TwoVarCor.pdf)
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

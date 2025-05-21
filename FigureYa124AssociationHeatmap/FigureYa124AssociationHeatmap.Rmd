@@ -1,0 +1,165 @@
+---
+title: "FigureYa124AssociationHeatmap"
+author: "小丫画图出品"
+date: "2019-8-3"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+将感兴趣变量和亚型（分组）之间的独立性用“热图”方式展现出来。
+
+![](example.png)
+
+出自<https://www.cell.com/cell/fulltext/S0092-8674(17)30815-2>
+
+Figure S1. (B) Comparing tumor size, positive or negative serosal invasion, and AJCC stage between F. nucleatum high-expression and low-expression tumors of Cohort 2. The heatmap illustrates the association of different clinical characters with F. nucleatum high- and low-expression tumors. Statistical significance was performed by Chi-square test.
+
+## 应用场景
+
+已知分组的样本，想同时展示每个样本多个层面的特征，并标出两组间差异显著性P value。
+
+其实个人感觉，这样的“关系”图可以作为热图的Annotation bar，绘制起来简单方便，没有必要单独画出来。不过这张图还是蛮精美的，所以我还是采用base plot来和大家玩一玩这一张“热图”。
+
+**注意：**本人能力有限没有办法在这份代码的基础上尽可能多地考虑其他情况（输入数据类型），因此如果输入数据结构发生较大变化，代码本身需要做比较大的改动，代码的注释应该比较全面，希望大家在理解的基础上运行此代码，学习base plot的画图思路。
+
+## 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.txt，每行一个样本，第一列为分组（被画在图的第一行），第二列往后是其他信息（被画在图的第二行以后），用yes和no记录。
+
+```{r}
+dat <- read.table("easy_input.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = NULL)
+head(dat)
+tail(dat)
+```
+
+## 独立性检验，计算P value，用于标注在图的右侧
+
+```{r}
+p.chisq <- c()
+for (i in 3:ncol(dat)) { # 第一列是亚型，第二列例文没有做独立性检验，所以从第三列开始
+  tmp <- table(dat[,1],dat[,i])
+  p.chisq <- c(p.chisq,round(chisq.test(tmp)$p.value,3)) # 使用卡方检验
+}
+head(p.chisq)
+
+# 生成右侧label，要根据你自己展示的信息来修改
+ann_labels <- paste0(c("AJCC stage(III)", "Tumor size (>15cm3)","Penetration (Serosa)"),"\nP",ifelse(p.chisq < 0.001," < 0.001",paste0(" = ",p.chisq)))
+ann_labels <- c(NA,"F.nucleatum",ann_labels) # 将第一列和第二列的label补上（第一列根据例文没有label，由图例占据该位置）
+```
+
+## 开始画图
+
+下面感受一下用base plot像画笔一样画出图中的每一个元素：
+
+```{r}
+### 设置颜色 ###
+darkblue  <- "#292C7C"
+lightblue <- "#97B9D7"
+blue      <- "#4582B5"
+white     <- "#FFFFFF"
+dwhite    <- "#B6D1E8"
+
+pdf("AssociationHeatmap.pdf",width = 8,height = 5)
+
+par(bty="n", mgp = c(2,0.15,0), mar = c(3.1,2.1,3.1,8.1),tcl=-.25, font.main=3) # 张开画布，设置基本参数
+par(xpd=NA)
+# 生成一个空白图
+plot(c(0,nrow(dat)), c(0,ncol(dat)), # 产生左下和左上两个点，张开画布
+     col = "white", # 点设置为白色
+     xlab = "", xaxt = "n", # 不显示x坐标轴
+     ylab = "", yaxt = "n") # 不显示y坐标轴)
+title(bquote(underline("Cohort 2")), adj = 0, line = 0) # 左对齐title，并添加下划线
+
+# 生成纵坐标
+axis(4, at = 0.475:(ncol(dat)-0.475), # 对应每行0.95的高度，因此中点在0.475的位置
+     labels = ann_labels[5:1], las = 1, # 生成y坐标轴刻度，并位于每个间隔的中心位置
+     col = "white") # 隐藏坐标轴
+
+# 生成横坐标
+axis(1, at = c(seq(0, nrow(dat), 20), nrow(dat)), labels = T) # 生成x坐标轴刻度
+
+# 产生对应颜色
+input_matrix <- as.matrix(dat) 
+col.mat <- matrix(NA, byrow = T, ncol = nrow(input_matrix), nrow = ncol(input_matrix)) # 生成空的颜色矩阵
+rownames(col.mat) <- colnames(input_matrix)
+
+for (i in 2:nrow(col.mat)) { # 由于例文第一列数据的颜色不同，所以单独分配，这里从第二列开始
+  for (j in 1:ncol(col.mat)) {
+    col.mat[i,j] <- ifelse(input_matrix[j,i] == "yes",blue,white) # 根据输入数据（二分类数据）给对应的颜色矩阵赋值
+  }
+}
+col.mat[1,] <- ifelse(input_matrix[,1] == "High_F.nucleatum",darkblue,lightblue) # 分配第一列的颜色
+
+# 通过矩形块产生热图
+x_size <- nrow(input_matrix)
+y_size <- ncol(input_matrix)
+
+my_xleft = rep(0:(x_size-1), each = y_size) # 产生各个矩形的左x点，注意是从上到下从左往右的顺序
+my_xright = my_xleft + 1 # 产生各个矩形的右x点
+my_ybottom = rep((y_size-1):0, x_size) # 产生各个矩形的下y点
+my_ytop = my_ybottom + 0.95 # 产生各个矩形的上y点, 每行余留0.05的空隙
+rect(xleft = my_xleft,
+     ybottom = my_ybottom,
+     xright = my_xright,
+     ytop = my_ytop,
+     col= col.mat, # 填充颜色
+     border = dwhite) # 矩形的边界定义为深白色
+
+# 根据原文图样，修饰第一行，隐去间隔
+my_xleft = rep(0:(x_size-1)) # 产生各个矩形的左x点
+my_xright = my_xleft + 1 # 产生各个矩形的右x点
+my_ybottom = rep(y_size-1, x_size) # 产生各个矩形的下y点
+my_ytop = my_ybottom + 0.95 # 产生各个矩形的上y点, 每行余留0.05的空隙
+
+rect(xleft = my_xleft,
+     ybottom = my_ybottom,
+     xright = my_xright,
+     ytop = my_ytop,
+     col= col.mat[1,], # 填充颜色
+     border = NA) # 取消矩形的边界
+
+# 第一行的文字
+text(nrow(input_matrix)/4, ncol(input_matrix) - 0.55,
+     substitute(paste("High ", italic("F.nucleatum"))), cex = 1.3, col = "white") # 填充标签，注意位置，斜体和字体颜色
+text(nrow(input_matrix)/4*3, ncol(input_matrix) - 0.55,
+     substitute(paste("Low ", italic("F.nucleatum"))), cex = 1.3, col = "black") # 填充标签，注意位置，斜体和字体颜色
+
+# 图例
+legend("topright", 
+       inset = c(-0.1,0.07), # 微调图例的位置，让图例在画布外侧
+       xjust = 0, # 左对齐
+       cex = 1,
+       y.intersp = 1.3, # 两个图例的间距大一点
+       fill = c(blue, white), # 图例颜色
+       legend = c("yes", "no"), 
+       bty = "n") # 不绘制外部矩形
+
+invisible(dev.off())
+```
+
+![](AssociationHeatmap.pdf)
+
+```{r}
+sessionInfo()
+```

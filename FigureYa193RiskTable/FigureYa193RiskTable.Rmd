@@ -1,0 +1,236 @@
+---
+title: "FigureYa193RiskTable"
+author: "小丫画图出品"
+date: "2020-8-28"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+上半部分是TCGA数据，下半部分是用GEO数据集验证，riskscore用多因素cox或lasso都行。搞一个GEO验证集就好了，例文的两个GEO数据都是类似的，我们比葫芦画瓢。
+
+![](example.png)
+
+出自<https://translational-medicine.biomedcentral.com/articles/10.1186/s12967-019-1824-4>
+
+# 应用场景
+
+训练集构建riskscore并验证，采用多变量回归检验预后独立性并绘制森林图。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+
+```{r}
+library(survival) # 生存分析
+library(glmnet) # LASSO回归
+library(forestplot) # 绘制森林图
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数显示进程
+
+```{r}
+display.progress = function (index, totalN, breakN=20) {
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}  
+```
+
+# 输入文件
+
+需要表达矩阵和生存信息。表达矩阵文件较大，请到微云下载：<https://share.weiyun.com/92trvp7M>
+
+这里用TCGA数据做训练集，用从GEO数据库下载的一组表达数据做测试集。如果你用多组GEO数据或自己的表达数据做测试集，就依次添加。
+
+- tcga.expr.txt，TCGA的表达矩阵；
+- tcga.surv.txt，TCGA的生存数据。
+- gse39582.expr.txt，GEO的表达矩阵；
+- gse39582.surv.txt，GEO的生存数据。
+
+```{r}
+# 加载TCGA训练集
+tcga.expr <- read.table("tcga.expr.txt", row.names = 1, check.names = F, stringsAsFactors = F, header = T)
+tcga.expr[1:3, 1:3]
+tcga.surv <- read.table("tcga.surv.txt", row.names = 1, check.names = F, stringsAsFactors = F, header = T)
+tcga.surv[1:3,]
+# 保留既有表达数据又有生存数据的sample
+comsam.tcga <- intersect(rownames(tcga.surv), colnames(tcga.expr))
+tcga.expr <- tcga.expr[,comsam.tcga]
+tcga.surv <- tcga.surv[comsam.tcga,]
+
+# 加载GEO测试集
+geo.expr <- read.delim("gse39582.expr.txt", row.names = 1, check.names = F, stringsAsFactors = F, header = T)
+geo.surv <- read.table("gse39582.surv.txt", row.names = 1, check.names = F, stringsAsFactors = F, header = T)
+# 保留既有表达数据又有生存数据的sample
+comsam.geo <- intersect(rownames(geo.surv), colnames(geo.expr))
+geo.expr <- geo.expr[,comsam.geo]
+geo.surv <- geo.surv[comsam.geo,]
+
+# 取交集基因并做数据标准化用于模型构建
+comgene <- intersect(rownames(tcga.expr), rownames(geo.expr))
+tcga.expr <- as.data.frame(t(scale(t(log2(tcga.expr[comgene,] + 1)))))
+geo.expr <- as.data.frame(t(scale(t(geo.expr[comgene,]))))
+```
+
+# 训练集用传统做法构建riskscore（单变量cox + 多变量cox + LASSO惩罚）
+
+```{r}
+# 单变量cox
+unicox <- data.frame()
+for(i in 1:nrow(tcga.expr)){
+  
+  display.progress(index = i, totalN = nrow(tcga.expr))
+  gene <- rownames(tcga.expr)[i]
+  tmp <- data.frame(expr = as.numeric(tcga.expr[i,]),
+                    futime = tcga.surv$OS.time,
+                    fustat = tcga.surv$OS,
+                    stringsAsFactors = F)
+  cox <- coxph(Surv(futime, fustat) ~ expr, data = tmp)
+  coxSummary <- summary(cox)
+  unicox <- rbind.data.frame(unicox,
+                             data.frame(gene = gene,
+                                        HR = as.numeric(coxSummary$coefficients[,"exp(coef)"])[1],
+                                        z = as.numeric(coxSummary$coefficients[,"z"])[1],
+                                        pvalue = as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1],
+                                        lower = as.numeric(coxSummary$conf.int[,3][1]),
+                                        upper = as.numeric(coxSummary$conf.int[,4][1]),
+                                        stringsAsFactors = F),
+                             stringsAsFactors = F)
+}
+
+# 多变量cox+LASSO惩罚
+set.seed(2020821)
+selgene <- unicox[which(unicox$pvalue < 0.05), "gene"]
+cvfit = cv.glmnet(t(tcga.expr[selgene,]), 
+                  Surv(tcga.surv$OS.time,tcga.surv$OS),
+                  family = "cox",
+                  nfold = 10) 
+myCoefs <- coef(cvfit, s="lambda.min");
+lasso_fea <- myCoefs@Dimnames[[1]][which(myCoefs != 0 )]
+
+# 计算训练集riskscore（rs）
+rs.tcga <- apply(t(tcga.expr[lasso_fea,]), 1, function(x) {x %*% myCoefs@x})
+
+# 计算测试集riskscore
+rs.geo <- apply(t(geo.expr[lasso_fea,]), 1, function(x) {x %*% myCoefs@x})
+
+#--------------------#
+# 计算rs的预后独立性 #
+
+# 训练集预后独立性
+tcga.surv$riskscore <- rs.tcga[rownames(tcga.surv)]
+head(tcga.surv)
+mulcox.tcga <- summary(coxph(Surv(OS.time, OS) ~ ., data = tcga.surv))
+mulcox.tcga <- data.frame(variable = rownames(mulcox.tcga$conf.int),
+                          HR = mulcox.tcga$conf.int[,1],
+                          lower.95CI = mulcox.tcga$conf.int[,3],
+                          upper.95CI = mulcox.tcga$conf.int[,4],
+                          p = mulcox.tcga$coefficients[,5],
+                          stringsAsFactors = F)
+rownames(mulcox.tcga) <- NULL
+head(mulcox.tcga)
+
+# 测试集预后独立性
+geo.surv$riskscore <- rs.geo[rownames(geo.surv)]
+head(geo.surv)
+geo.surv <- geo.surv[,c("Age","Sex","Stage","OS","OS.time","riskscore")] # 保持和训练集一样的顺序（只是为了好看）
+mulcox.geo <- summary(coxph(Surv(OS.time, OS) ~ ., data = geo.surv))
+mulcox.geo <- data.frame(variable = rownames(mulcox.geo$conf.int),
+                         HR = mulcox.geo$conf.int[,1],
+                         lower.95CI = mulcox.geo$conf.int[,3],
+                         upper.95CI = mulcox.geo$conf.int[,4],
+                         p = mulcox.geo$coefficients[,5],
+                         stringsAsFactors = F)
+rownames(mulcox.geo) <- NULL
+head(mulcox.geo) # 该死，这个riskscore在测试集里不是独立预后因素，但nobody cares，继续画图
+```
+
+# 绘制森林图
+
+注意！因为HR值太大了，画出来很丑，所以我把轴状的HR取了对数，此时log2(HR)范围在[-Inf, Inf]，参考值为0（对应HR为1无意义的时候）
+
+取对数画图的做法，可参考我最新发表在Cell Proliferation上的文章中的Figure 2B （RNA processing genes characterize RNA splicing and further stratify colorectal cancer）<https://onlinelibrary.wiley.com/doi/full/10.1111/cpr.12861>
+
+```{r}
+hrtable <- rbind(c("TCGA",NA,NA,NA,NA),
+                 mulcox.tcga,
+                 c("GSE39582",NA,NA,NA,NA),
+                 mulcox.geo)
+tabletext <- cbind(c("Variable",hrtable$variable),
+                   c("HR",format(round(as.numeric(hrtable$HR),3),nsmall = 3)),
+                   c("lower 95%CI",format(round(as.numeric(hrtable$lower.95CI),3),nsmall = 3)),
+                   c("upper 95%CI",format(round(as.numeric(hrtable$upper.95CI),3),nsmall = 3)),
+                   c("pvalue",formatC(as.numeric(hrtable$p), format = "e", digits = 2)))
+tabletext
+nrow(tabletext) + 1 #把这个数字写入hrzl_lines参数的第四行
+
+# 按需设置，因为注意到第二行的NA变成了字符串，因此会显示在最终的森林图里，这里改为NA
+tabletext[2,] <- c("TCGA",NA,NA,NA,NA) 
+# 按需设置，因为注意到第九行的NA变成了字符串，因此会显示在最终的森林图里，这里改为NA
+tabletext[9,] <- c("GSE39582",NA,NA,NA,NA) 
+
+pdf("forestplot of risk table.pdf", width = 8, height = 5)
+forestplot(labeltext=tabletext,
+           mean=c(NA,log2(as.numeric(hrtable$HR))),#log2(HR)
+           lower=c(NA,log2(as.numeric(hrtable$lower.95CI))), #log2(95%置信区间下限)
+           upper=c(NA,log2(as.numeric(hrtable$upper.95CI))),#log2(95%置信区间上限)
+           graph.pos=6,#图在表中的列位置
+           graphwidth = unit(.25,"npc"),#图在表中的宽度比
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石
+           col=fpColors(box="#00A896", lines="#02C39A", zero = "black"),#box颜色
+           boxsize=0.4,#box大小固定
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=F,#不显示区间
+           zero=0,#zero线横坐标
+           lwd.zero=2,#zero线宽
+           xticks = c(-1,0,1,2,3,4,5),#横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,
+           xlab=expression("log"[2]~"HR"),
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"),#第二行顶部加黑实线
+                           "2" = gpar(lwd=1, col="grey50", lty=2),#第二行顶部加灰色虚线
+                           "9" = gpar(lwd=1, col="grey50", lty=2),#第九行顶部加灰色虚线
+                           "16" = gpar(lwd=2, col="black")),#最后一行底部加黑线，""中数字为nrow(tabletext) + 1
+           txt_gp=fpTxtGp(label=gpar(cex=1.2),#各种字体大小设置
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.5)),
+           lineheight = unit(.75,"cm"),#固定行高
+           colgap = unit(0.3,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+invisible(dev.off())
+```
+
+![](forestplot of risk table.pdf)
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,141 @@
+---
+title: "FigureYa138NiceCalibration"
+author: "小丫画图出品"
+date: "2019-10-13"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+想要众筹这个漂亮的calibration图（A），用于logistics回归，要有这个Hosmer-Lemeshow test。
+
+![](example.png)
+
+出自<https://www.frontiersin.org/articles/10.3389/fonc.2019.00488/full>
+
+FIGURE 6 | Model performance and clinical usefulness of the LNM-nomogram. (A) Calibration curve with Hosmer-Lemeshow test of the LNM-nomogram in the training set of TCGA-cohort. Calibration curve depicts the calibration of the fitted model in terms of the **agreement between the predicted risk of LN metastasis and real observed outcomes**. The x-axis represents the predicted LN metastasis risk and y-axis represents the actual LN metastasis rate. The pink solid line represents the performance of the LNM-nomogram, of which a closer fit to the diagonal dotted blue line represents an ideal prediction. The calibration curve was drawn by plotting ˆP on the x-axis and Pc = 1 + exp 􀀀− 0 + 1L−1on the y-axis, where Pc is the actual probability, L = logit ˆP , ˆP is predicted probability, 0 is corrected intercept, and 1 is slope estimates.
+
+**Validation of the LNM Nomogram and Its Clinical Usefulness**
+
+Total points calculated by LNM nomogram for each sample in the testing set was determined to be a significant predictor when performing logistic regression (p = 0.032), and no departure from perfect fit was identified (p = 0.485) (Figure 6A)
+
+**图的解读**
+
+上文找到了预测淋巴结转移（LNM）的指标LNM Nomogram，接下来验证和评价其临床可用性。
+- 用Calibration来评价一致性/标定度/校准度，即预测值和真实值之间的差异（本文）档）
+- 用ROC来评价区分度，即特异性和敏感性（可参考FigureYa24ROC）；
+- 用DCA来帮助确定高风险的患者进行干预、低风险的患者避免过度医疗（可参考FigureYa33DCA）。
+
+## 应用场景
+
+可用于评价诊断模型，是针对逻辑回归的。不能做预后模型，预后的calibration是不会曲折的。
+
+通常用Hosmer-Lemeshow good of fit test（拟合优度检验）来评价预测模型的校准度。Hosmer-Lemeshow检验的思路和SPSS实现方法看这篇：<https://zhuanlan.zhihu.com/p/35574120>
+
+Discrimination（区分度）和Calibration（一致性/标定度）是评价预测模型效能的两个重要指标。例文中都有提及，详情看这篇：<http://www.dxy.cn/bbs/topic/38248198?from=recommend>
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+# https://github.com/psolymos/ResourceSelection
+install.packages("ResourceSelection")
+```
+
+加载包
+
+```{r}
+library(rms)
+library(ResourceSelection)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.csv，每行一个sample。
+- 第一列MetaScore和第二列MLL2突变，自变量；
+- 第三列MetaStatus生存信息，因变量。
+
+```{r}
+dat <- read.table("easy_input.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+head(dat)
+summary(dat$MetaScore)
+table(dat$MLL2)
+table(dat$MetaStatus)
+```
+
+## Hosmer-Lemeshow Goodness of Fit
+
+```{r}
+# 先构建逻辑回归，使用glm函数，为了做hoslem检验
+fullmodel_glm <- glm(MetaStatus ~ MetaScore + MLL2, 
+                     data = dat, 
+                     family = "binomial", 
+                     control = list(maxit = 50))
+
+# 做hosmer-lemeshow 检验来判断no departure from perfect ???t if p > 0.05
+p.hoslem <- hoslem.test(fullmodel_glm$y, fitted(fullmodel_glm), g=10)$p.value
+
+# 再次构建逻辑回归，但是此时使用lrm函数，为了计算calibration
+full_lrm <- lrm(MetaStatus ~ MetaScore + MLL2,
+                data = dat,
+                x=TRUE,
+                y=TRUE)  
+# 取出calibration的结果
+full_calibrate <- calibrate(full_lrm, group=dat$MetaStatus) 
+```
+
+## 开始画图
+
+```{r}
+red <- "#FF0197"
+blue <- "#0093FF"
+
+pdf("calibration_for full model.pdf",width = 5,height = 5)
+
+plot(full_calibrate[,"predy"], # predicted value
+     full_calibrate[,"calibrated.corrected"], # actual rate
+     lty=1,type="l",lwd = 2,
+     col=alpha(red,0.6), # change colors
+     xlab="Nomogram Predicted Probability", ylab="Actual LN Metastasis Rate" )
+
+# 添加45°斜线作为标准
+abline(0,1, lwd = 1.5, lty = "longdash", col = blue)
+
+legend("topleft", #图例的位置
+       legend = c("Ideal","LNM-nomogram"), #图例文字
+       col =c(blue,red), #图例线的颜色，与文字对应
+       lwd = 2,#图例中线的粗细
+       lty = c("longdash","solid"),
+       cex = 1,#图例字体大小
+       bty = "n")#不显示图例边框
+
+# 添加hosmer-lemeshow检验
+text(0,0,bquote("Hosmer-Lemeshow "~italic(P)~" = "~.(round(p.hoslem,3))),adj = 0)
+
+invisible(dev.off())
+```
+
+![](calibration_for full model.pdf)
+
+```{r}
+sessionInfo()
+```

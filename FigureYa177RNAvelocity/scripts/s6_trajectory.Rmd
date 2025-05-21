@@ -1,0 +1,168 @@
+---
+title: "Trajectory Analysis"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r, eval=TRUE}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+> *Subclustering based on DEGs* <br>
+  DEGs between old and young fbroblasts were used for subclustering and
+detecting cell populations of fbroblasts based on the signal produced by these genes. We used Monocle2
+sorting cell functions and set up the DEGs as ordering genes for reducing dimensions. Seurat objects were
+converted into Monocle (v2.4) (36) objects using the “importCDS” function. Two dimension reduction
+algorithms were used for graphical representation of the data, the tSNE and DDRTree. For tSNE we used
+the following parameters: num_dim = 15, max_components = 2, and norm_method = log. The clustering
+was performed using the following parameters: rho_threshold = 2, and delta_threshold = 5. For DDRTree
+we used this as the parameter: auto_param_selection = T.
+  The DDRTree graph representation helped us visualize the progress of possible cell transitions within
+the cell types using aging as the sorting factor. We plotted the subclusters split by age and states split by
+subcluster and age.
+
+```{r, eval=TRUE}
+library(monocle, lib.loc = newpath)
+library(Seurat, lib.loc = newpath)
+packageVersion("monocle")
+```
+
+导入第四部分和第五部分的结果
+```{r}
+if (!exists("seu.CCA")) {
+  seu.CCA <- readRDS("tmp/s4.2-seu_CCA_clustering_cellAnnotation.rds")
+}
+res <- readRDS("tmp/s5.2-DEG_fibroblast.rds")
+```
+
+获取差异基因
+```{r}
+fib.DEG <- rownames(subset(res, significant_change))
+```
+
+数据格式转换<br>
+Seurat obj => monocle2
+
+> Seurat objects were converted into Monocle (v2.4) (36) objects using the “importCDS” function.
+
+```{r}
+# only fibroblast
+fib.cell <- rownames(subset(seu.CCA@meta.data, cell_type == "fibroblasts"))
+seu.CCA <- SubsetData(seu.CCA, cells.use = fib.cell)
+monocle_cds <- importCDS(seu.CCA, import_all = FALSE)
+pData(monocle_cds)$age <- factor(pData(monocle_cds)$age, levels = c("young", "old"))
+```
+
+```{r, include=FALSE, eval=TRUE}
+monocle_cds <- readRDS("tmp/s6-fib_monocle.rds")
+```
+
+
+```{r, eval=TRUE}
+monocle_cds
+```
+
+估计library size factor
+```{r}
+monocle_cds <- estimateSizeFactors(monocle_cds)
+```
+
+估计基因表达量的离散程度
+```{r}
+monocle_cds <- estimateDispersions(monocle_cds)
+```
+
+标记用来进行聚类的基因 
+
+> We used Monocle2 sorting cell functions and set up the DEGs as ordering genes for reducing dimensions.
+
+```{r}
+monocle_cds <- setOrderingFilter(monocle_cds, fib.DEG)
+```
+
+黑色点表示用来进行降维和聚类的基因
+```{r, fig.width=5, fig.height=3, eval=TRUE}
+plot_ordering_genes(monocle_cds)
+```
+
+tSNE降维
+
+> For tSNE we used the following parameters: num_dim = 15, max_components = 2, and norm_method = log.
+
+```{r}
+monocle_cds <- reduceDimension(monocle_cds, 
+                               max_components = 2, 
+                               num_dim = 15, 
+                               reduction_method = 'tSNE', 
+                               norm_method = "log",
+                               verbose = T)
+```
+
+聚类
+
+> The clustering was performed using the following parameters: rho_threshold = 2, and delta_threshold = 5.
+
+```{r}
+monocle_cds <- clusterCells(monocle_cds, rho_threshold = 2, delta_threshold = 5)
+```
+
+
+```{r, fig.width=10, fig.height=5, eval=TRUE}
+p1 <- plot_cell_clusters(monocle_cds, color_by = "age", cell_size = .5)
+p1 <- p1 + guides(colour = guide_legend(title = "", 
+                                        keyheight = 1.5, 
+                                        override.aes = list(size=6)))
+p2 <- plot_cell_clusters(monocle_cds, cell_size = .5)
+p2 <- p2 + guides(colour = guide_legend(keyheight = 1.5, 
+                                        override.aes = list(size=6)))
+cowplot::plot_grid(p1,p2, ncol = 2)
+```
+
+DDRTree, 细胞轨迹
+
+> For DDRTree we used this as the parameter: auto_param_selection = T.
+
+```{r}
+monocle_cds <- reduceDimension(monocle_cds, 
+                               max_components = 2, 
+                               reduction_method = "DDRTree", 
+                               auto_param_selection = TRUE)
+```
+
+Order cells, 计算细胞状态以及假时间
+
+```{r}
+monocle_cds <- orderCells(monocle_cds)
+```
+
+可视化细胞轨迹<br>
+我们可以看到DDRTree从左向右，描述了fibroblast aging的动态过程
+```{r, fig.width=10, fig.height=5, eval=TRUE}
+p1 <- plot_cell_trajectory(monocle_cds, color_by = "age", cell_size = .5)
+p1 <- p1 + guides(colour = guide_legend(title = "", 
+                                        keyheight = 1.5, 
+                                        override.aes = list(size=6))) + 
+  theme(legend.position = c(0.8, 0.15),
+        legend.text = element_text(size=15))
+p2 <- plot_cell_trajectory(monocle_cds, color_by = "Cluster", cell_size = .5)
+p2 <- p2 + guides(colour = guide_legend(title = "subCluster", 
+                                        keyheight = 1.5, ncol = 2,
+                                        override.aes = list(size=6))) + 
+  theme(legend.position = c(0.15, 0.82),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 15))
+cowplot::plot_grid(p1,p2, ncol = 2)
+```
+
+保存结果
+```{r}
+saveRDS(monocle_cds, "tmp/s6-fib_monocle.rds")
+```
+
+

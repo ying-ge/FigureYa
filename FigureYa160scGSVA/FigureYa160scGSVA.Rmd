@@ -1,0 +1,278 @@
+---
+title: "FigureYa160scGSVA"
+author: "小丫画图出品"
+date: "2020-2-16"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Jinen
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+对单细胞亚群进行功能注释后，如何求每群细胞某条pathway的gene set score
+
+![](example.png)
+
+出自<https://www.ahajournals.org/doi/10.1161/CIRCULATIONAHA.118.038362>
+
+Figure 5. Pathway analysis of endothelial cell (EC) subpopulations. B, Functional gene sets identified from Reactome pathway enrichment and subpopulation markers differentiate the 2 major EC populations EC 1 and EC 2.
+
+# 应用场景
+
+单细胞数据，从matrix到分组，用GSVA计算pathway的表达量，然后比较pathway在组间的差异，画图。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(ComplexHeatmap)
+library(GSVA)
+library(GSEABase)
+library(limma)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+加载自定义函数
+
+做单细胞分析时，代码会非常多而且繁杂，为了脚本的整洁简短，我们把这些函数单独放在一个文件里，使用时导入就可以了。
+
+```{r}
+source("seurat_pipeline.R")
+```
+
+# 输入文件
+
+输入文件位于文件夹：pbmc3k_filtered_gene_bc_matrices/filtered_gene_bc_matrices/hg19/，包括raw gene expression matrix、barcode和gene annotation。
+
+数据来源：<https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz>
+
+```{r}
+pbmc.data <- Read10X(data.dir = "pbmc3k_filtered_gene_bc_matrices/filtered_gene_bc_matrices/hg19/")
+# Initialize the Seurat object with the raw (non-normalized data).
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+pbmc
+```
+
+主要步骤：
+
+- STEP 1 : 对单细胞数据进行分组，获得分组信息
+- STEP 2 : 进行GSVA分析、差异表达分析
+- STEP 3 : 根据已经得到的分组信息，挑选感兴趣的通路，画图
+
+# STEP 1: 对单细胞数据进行分组，获得分组信息
+
+用于从raw gene expression matrix开始。
+
+如果已经完成了聚类，请移动到STEP 2。
+
+使用seurat分析单细胞数据需要注意的几个地方: 
+
+## 1. 数据过滤
+
+(1) 细胞内表达基因个数 <200 或 > 7500的过滤掉。这里过滤的上限和下限自己把控，没有固定值。过滤掉基因表达高的是为了减少多细胞比例
+
+(2) 在 <3 个细胞内有表达的基因，过滤掉。因为很多基因的表达值都是0，这种可以过滤掉很多表达全为0的基因
+
+(3) 线粒体基因比例，一定程度上代表这建库时细胞的完整性。如果线粒体基因比例太高，说明细胞非常有可能破损了，在油包水时就不完整了
+
+MT genes% < 20% 左右，根据自己的数据把控。就算这里过滤的不严格，也没有关系，后面聚类时，这些高线粒体基因比例的细胞都会聚到一类。
+
+后续分析时排除这些细胞就可以了。一般外周血数据中线粒体基因比例都很低。
+
+
+## 2 聚类和降维可视化
+
+这里有两个参数不好把控，一个是选择PCA结果中的PC个数，另一个就是resolution。
+
+- PC个数选择，可以根据ElbowPlot(拐点图)，选择拐点出现位置附近的PC数即可。这个参数会影响聚类的结果已经后续降维图形的。
+- resolution：这个参数相对的不那么重要，只是会影响分出的cluster的数目多少。当resolution选的比较大，cluster分的很多，后续分析也可以
+
+根据marker genes等，对细胞类型进行定义，然后人为的把相同细胞类型的cluster合并。
+
+一般细胞数目 5000 - 10000 左右时，选择 resolution = 1 都是可以的，细胞数量更多时可以选择2。自己根据分出的效果来调控，这个不影响大局。
+
+## 用自定义函数`Seurat.pipeline`做预处理
+
+整个过程中需要调整的就只有这几个参数了：
+
+```{r}
+Seurat.pipeline(RdsName = pbmc, outputname = "PBMC", MTfraction = 0.05, pc = 10, res = 0.6)
+# 这里需要运行几分钟
+# 经过这一步的处理，现在在pbmc这个seurat object 的assays中存储了三种基因表达数据，保存在PBMC_pc10_res0.6.rds里
+# (1) pbmc@assays$RNA@counts : raw count
+# (2) pbmc@assays$RNA@data : Normalized data
+# (3) pbmc@assays$RNA@scale.data: scaled之后的data
+# 做GSVA分析时，使用normalized data就可以了.
+```
+
+提取出每个细胞的基因表达量和对应的分组信息。
+
+> 查看生成的`PBMC_pc10_res0.6.pdf`文件，分成了9个cluster
+
+如何鉴定每个cluster是什么细胞类型？经典的做法是找出每个cluster中的高表达的基因，然后根据经典的细胞marker来确定细胞类型，需要查找文献。方法见官网<https://satijalab.org/seurat/v3.1/pbmc3k_tutorial.html>
+
+# STEP 2 : GSVA 分析和差异表达分析
+
+选择感兴趣的两个细胞亚群（cluster），用GSVA算出pathway的表达量，然后对比，画出感兴趣的pathway的图。
+
+```{r}
+# 加载 STEP 1 获得的pbmc
+pbmc <- readRDS("PBMC_pc10_res0.6.rds")
+
+# 导入gmt文件，这里以MsigDB中的Hallmark为例
+# MsigDB链接(https://www.gsea-msigdb.org/gsea/msigdb/)
+# 下载文件时，注意选择对应的gene格式吗，一般10X的结果，都是gene symbol格式的。
+genesets <- getGmt("h.all.v7.0.symbols.gmt")
+
+### 1. 找到感兴趣的细胞组别，两者间进行比较
+# 这里以cluster6和cluster8为例
+subcluster = c(6, 8)
+sub <- subset(pbmc, idents = subcluster)
+df.data <- GetAssayData(object = sub, slot = "data")
+
+# 将细胞所属的group信息保存起来
+df.group <- data.frame(umi = names(Idents(sub)), 
+                       cluster = as.character(sub@meta.data$RNA_snn_res.0.6), 
+                       stringsAsFactors = F)
+# 查看一下结果是什么样子的
+head(df.group)
+
+### 2. 做gsva
+# 因为是normalized后的数据，所以使用默认参数就可以了。根据自己的电脑cpu来调整parallel.sz
+gsvascore <- gsva(data.matrix(df.data), genesets, parallel.sz = 2)
+# 因为单细胞数据中有很多基因表达值为0，所以会出现红色的warning信息，没有关系。
+
+# 查看一下结果
+gsvascore[1:5, 1:5]
+
+# 先用热图展示一下hallmarker中全部的50个geneset得到的结果
+ha.t <- HeatmapAnnotation(Cluster = df.group$cluster)
+Heatmap(as.matrix(gsvascore), 
+        show_column_names = F, 
+        cluster_rows = T, 
+        cluster_columns = T, 
+        top_annotation = ha.t, 
+        column_split = df.group$cluster, 
+        row_names_gp = gpar(fontsize = 8), 
+        row_names_max_width = max_text_width(rownames(gsvascore), 
+                                             gp = gpar(fontsize = 8)))
+
+### 3. 挑选出要使用小提琴图展示的通路
+# 使用limma包进行差异分析，然后根据差异分析结果，对通路进行选择。
+cluster.group <- as.numeric(df.group$cluster) 
+# 确定分组信息
+group2 <- 6 
+# 根据子集中细胞类型的名称来定
+# 这里cluster6作为实验组（group2)，cluster8作为对照组（group1)
+cluster.group[which(cluster.group != group2)] <- 0
+cluster.group[which(cluster.group == group2)] <- 1
+design <- cbind(sampleGroup1=1, sampleGroup2vs1=cluster.group)
+
+# 利用limma包进行差异分析
+fit <- lmFit(gsvascore, design)    
+fit <- eBayes(fit)
+sigPathways <- topTable(fit, coef="sampleGroup2vs1", 
+                        number=Inf, p.value=0.05, adjust="BH")
+# 添加一下分组信息，方便导出的数据区分实验组和对照组。
+sigPathways$celltype <- rep(group2, length(nrow(sigPathways))) 
+# 保存到文件
+write.csv(sigPathways, file = "PBMC_DE_genesets_hallmarker_cluster6_vs_8.csv")
+```
+
+# STEP 3：根据已经得到的分组信息，挑选出需要的通路，画图
+
+从sigPathways中挑选一个gene set来展示例图的画法。你也可以写成循环，画多个。
+
+```{r}
+# 这里选第一个pathway画图
+count <- gsvascore[rownames(sigPathways)[1], , drop = FALSE]
+count <- as.data.frame(t(count))
+colnames(count) <- "geneset"
+count$cluster <- as.character(Idents(sub))
+# 用通路的名称作为图形标题
+title.name = rownames(sigPathways)[1]
+
+# 添加P值
+# 得到cluster6和cluster10中的gsva score 最大值
+count.geneset.group1 <- count$geneset[count$cluster == subcluster[1]]
+count.geneset.group2 <- count$geneset[count$cluster == subcluster[2]]
+
+# 确定P值添加的位置
+ysegment1 <- max(count.geneset.group1)
+ysegment2 <- max(count.geneset.group2)
+ysegment.max <- max(ysegment1, ysegment2)
+
+# 根据P值确定加几颗星
+pval <- sigPathways$P.Value[1]
+
+if (pval < 0.001) {
+  pval.label = "***"
+} else if (pval < 0.005) {
+  pval.label = "**"
+} else if (pval < 0.05) {
+  pval.laben = "*"
+} else if (pval >= 0.05) {
+  pval.label = "non.sig"
+}
+
+# 自定义颜色
+blue <- "#619CD6"
+green <- "#89C32E"
+p <- ggplot(count, aes(x = cluster, y = geneset, fill = cluster)) +
+  geom_violin() +
+  scale_fill_manual(values = c(blue, green)) + # 用自定义颜色填充
+  theme_classic() +
+  theme(panel.grid = element_blank(), 
+        plot.margin = margin(0.5, 0.5, 0.5, 0.5, "cm"), 
+        axis.title.x = element_text(color = "black", size = 20), 
+        axis.title.y = element_blank(), 
+        axis.text = element_text(color = "black", size = 16), 
+        axis.line = element_line(colour = "black", size = 0.6), 
+        plot.title = element_text(size = 20, hjust = 0.5)) + 
+  # 添加图形标题
+  ggtitle(title.name) +
+  guides(fill = F)
+p
+
+# 前面已经得到了pvalue,添加上去就可以了
+p + 
+  # 图形中的一个横线和两个竖线
+  annotate("segment", x = 1, xend = 2, y = ysegment.max + 0.02, yend = ysegment.max + 0.02) + 
+  annotate("segment", x = 1, xend = 1, y = ysegment1 + 0.01, yend = ysegment.max + 0.02) +
+  annotate("segment", x = 2, xend = 2, y = ysegment2 + 0.01, yend = ysegment.max + 0.02) +
+  # 添加P值对应的星号
+  annotate("text", 
+           size = 12, # *的大小
+           x = 1.5, 
+           y = ysegment.max - 0.03, #可以微调*所在的位置
+           label = pval.label)
+
+ggsave("PBMC_DE_genesets_hallmarker_cluster6_vs_8.pdf", width = 5.5, height = 5)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

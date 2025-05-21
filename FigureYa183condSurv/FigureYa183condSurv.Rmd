@@ -1,0 +1,317 @@
+---
+title: "FigureYa183condSurv"
+author: "小丫画图出品"
+date: "2020-6-28"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+@ 西红柿、小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+想画条件生存曲线，conditional survival，R包condsurv能实现。
+
+![](example.png)
+
+出自<https://link.springer.com/article/10.1245/s10434-020-08235-w>
+
+FIG. 1 Kaplan–Meier estimates for conditional survival up to 8 years in 3082 patients given 0–5 years’ 1.00 survival after resection of pancreatic cancer
+
+# 应用场景
+
+绘制条件概率生存曲线，给出条件生存概率表。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+options(warn = -1)
+
+```
+
+加载包
+
+```{r}
+#library(condsurv) # 本代码使用的函数为该函数包中gg_conditional_surv的修改版
+library(survival)
+library(tidyverse)
+library(survminer)
+library(ggpubr)
+library(patchwork)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+conditional_surv_est <- function(basekm, t1, t2) {
+  if (class(basekm) != "survfit") {
+    stop(
+      "Argument to basekm must be of class survfit"
+    )
+  }
+
+  if (max(t1) > max(basekm$time)) {
+    stop(
+      paste(
+        "Argument to t1 specifies a value outside the range of observed times;", "the maximum observed time is", round(max(basekm$time), 2)
+      )
+    )
+  }
+
+  if (max(t2) > max(basekm$time)) {
+    stop(paste(
+      "Argument to t2 specifies a value outside the range of observed times;",
+      "the maximum observed time is", round(max(basekm$time), 2)
+    ))
+  }
+
+  cs <- summary(basekm, times = c(t1, t2))$surv[2] /
+    summary(basekm, times = c(t1, t2))$surv[1]
+  cs.sq <- cs^2
+
+  d <- basekm$n.event[basekm$time >= t1 &
+                        basekm$time <= t2 &
+                        basekm$n.event > 0]
+
+  r <- basekm$n.risk[basekm$time >= t1 &
+                       basekm$time <= t2 &
+                       basekm$n.event > 0]
+
+  dr <- d / (r * (r - d))
+  var.cs <- 1 / (log(cs)^2) * sum(dr)
+  ci <- cs^(exp(c(1, -1) * stats::qnorm(0.975) * sqrt(var.cs)))
+  ci.cs <- round(ci, 2)
+
+  return(
+    list(
+      cs_est = round(cs, 2),
+      cs_lci = ci.cs[1],
+      cs_uci = ci.cs[2]
+    )
+  )
+}
+
+con_prob <- function(i){
+  y <- as.numeric(i)
+  table=purrr::map_df(
+    prob_times,
+    ~conditional_surv_est(
+      basekm = myfit,
+      t1 = y,
+      t2 = .x)) %>%
+    mutate(years = prob_times) %>%
+    select(years, everything())
+  table$con=i
+  table$label=ifelse(table$years<y,NA,paste0((table$cs_est)*100,"%"))
+  data.frame(table)
+}
+
+plot_condsurv <- function (survdt = NULL,
+                           at, 
+                           surv.cut = NULL,
+                           main = "", 
+                           xlab = "Time (Years)", 
+                           ylab = "Survival probability", 
+                           curv.col = NULL,
+                           lwd = 1.2,
+                           legend.pos = "top") 
+{
+  # survdat: 生存数据，至少包含两列，生存时间（futime，年为单位）和生存状态（fustat）
+  # at：一个数值序列，表示条件生存时间中的附加时间，如在第三年存活的基础上额外存活at年的概率
+  # surv.cut：KM曲线在surv.cut处截断
+  # main：图像主题，默认无
+  # xlab：图像x轴名称，默认以年为单位
+  # ylab：图像y轴名称，默认以25%为间隔
+  # curv.col：各条件生存曲线的颜色
+  # lwd：线条宽度
+  # legend.pos：图例位置，默认为顶部
+  
+  library(ggplot2)
+  library(survival)
+  library(tidyverse)
+  
+  basekm <- survfit(Surv(futime, fustat)~ 1, data=survdt, type="kaplan-meier", error="greenwood", conf.type="plain", na.action=na.exclude)
+  
+  if (max(at) > max(basekm$time)) {
+    stop(paste("Argument to at specifies value(s) outside the range of observed times;", 
+               "the maximum observed time is", round(max(basekm$time), 2)))
+  }
+  if(surv.cut <= max(at)) {
+    stop("Time cutoff should be greater than the maximal conditional survival point\n")
+  }
+  if(!all(is.element(c("fustat","futime"),colnames(survdt)))) {
+    stop("Make sure the survival data has two columns of fustat and futime\n")
+  }
+  
+  nt <- length(at)
+  fitkm <- list()
+  fitkmdat <- list()
+  for (i in 1:nt) {
+    fitkm[[i]] <- survival::survfit(formula = stats::as.formula(basekm$call$formula), 
+                                    data = eval(basekm$call$data), start.time = at[i])
+    fitkmdat[[i]] <- tibble::tibble(timept = fitkm[[i]]$time, 
+                                    prob = fitkm[[i]]$surv)
+  }
+  condsurvdat <- fitkmdat %>% purrr::map_df(`[`, .id = "which_at") %>% 
+    dplyr::mutate(condtime = factor(which_at, levels = seq(1, nt), labels = at))
+  
+  condsurvdat$condtime <- paste0(condsurvdat$condtime," Year")
+  
+  # 第一幅条件生存概率曲线
+  if(is.null(surv.cut)) {
+    condsurv_plot <- ggplot(condsurvdat, aes(x = timept, y = prob, color = condtime)) + 
+                            scale_color_manual(values = mycol) + 
+                            geom_step(lwd = lwd) + 
+                            ylim(0, 1) + 
+                            labs(x = xlab, y = ylab, title = main, color = "Given conditional survival") + 
+                            geom_segment(aes(x = 0, y = 1, xend = at[length(at)], yend = 1),lwd = lwd, color = curv.col[at[length(at)] + 1]) +
+                            theme_classic() +
+                            theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 12),
+                                  panel.border = element_rect(colour = "black", fill=NA, size=0.2),
+                                  axis.ticks = element_line(size=0.2, color="black"),
+                                  axis.ticks.length = unit(0.2, "cm"),
+                                  legend.position = legend.pos,
+                                  axis.title = element_text(size = 15),
+                                  axis.text = element_text(size = 10))
+    ggsave("conditional_survival_curve.pdf")
+    
+  } else {
+    condsurv_plot <- ggplot(condsurvdat, aes(x = timept, y = prob, color = condtime)) + 
+                            scale_color_manual(values = mycol) + 
+                            geom_step(lwd = lwd) + 
+                            ylim(0, 1) + 
+                            xlim(0, surv.cut) + 
+                            labs(x = xlab, y = ylab, title = main, color = "Given conditional survival") + 
+                            geom_segment(aes(x = 0, y = 1, xend = at[length(at)], yend = 1),lwd = lwd, color = curv.col[at[length(at)] + 1]) +
+                            theme_classic() +
+                            theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 12),
+                                  panel.border = element_rect(colour = "black", fill=NA, size=0.2),
+                                  axis.ticks = element_line(size=0.2, color="black"),
+                                  axis.ticks.length = unit(0.2, "cm"),
+                                  legend.position = legend.pos,
+                                  axis.title = element_text(size = 15),
+                                  axis.text = element_text(size = 10))
+  }
+  
+  # 输出条件生存概率表
+  condsurvmat <- matrix("",
+                        nrow = max.condsurv + 1,
+                        ncol = floor(max(survdt$futime)) + 1,
+                        dimnames = list(paste0("y",0:max.condsurv),
+                                         paste0("y",0:floor(max(survdt$futime)))))
+  condsurvmat <- as.data.frame(condsurvmat)
+  
+  for (given_year in 0:max.condsurv) {
+    for (reach_year in given_year:floor(max(survdt$futime))) {
+      condsurvmat[paste0("y",given_year),paste0("y",reach_year)] <- 
+        paste0(conditional_surv_est(basekm, given_year, reach_year)$cs_est * 100,"%")
+    }
+  }
+  write.csv(condsurvmat,file = "conditional_survival_matrix.csv",row.names = T,col.names = NA,quote = F)
+  
+  return(list(condsurvdat = condsurvdat, condsurvcurve = condsurv_plot, condsurvmat = condsurvmat, cond = at, prob_times = seq(0,surv.cut,1), basekm = basekm))
+}
+```
+
+# 输入文件
+
+easy_input.csv，生存数据，至少包含两列，生存时间（futime，年为单位）和生存状态（fustat）。
+
+```{r}
+dat <- read.csv("easy_input.csv",row.names = NULL,check.names = F,stringsAsFactors = F, header = T)
+head(dat)
+table(dat$fustat)
+```
+
+# 分析画图
+
+原文上半部分是图，下半部分是表格。
+
+这里都用画图的方式实现，让三部分结果对齐。当然你也可以像原文那样画成表格。
+
+```{r}
+# 注意将生存时间转换为年
+dat$futime <- dat$futime/365
+
+# 设置最长希望观测的生存时间点（条件概率的最大生存时间，如5年）
+max.condsurv <- 5
+
+# 自定义颜色
+mycol <- RColorBrewer::brewer.pal(n = max.condsurv + 1, name = 'Set2')
+
+# 第一幅
+# 调用函数画图，同时输出生存概率表
+p1 <- plot_condsurv(survdt = dat,
+                   at = 0:max.condsurv,
+                   surv.cut = 6,
+                   curv.col = mycol,
+                   legend.pos = "top")
+
+# 第二幅
+# 把条件生存概率表画成图
+myfit <- p1$basekm 
+cond <- p1$cond
+prob_times <- p1$prob_time
+data <- do.call(rbind,lapply(cond, con_prob))
+data$years <- as.factor(data$years)
+p2 <- ggplot(data = data, aes(x=years,y=con,label=label))+
+        ggpubr::geom_exec(geom_text, data = data, size = 5, color = "con")+
+        scale_y_reverse()+theme_classic()+
+        theme(legend.position = "none",
+           axis.text.x = element_text(size=15),
+           axis.text.y = element_text(size=15),
+           axis.title = element_text(size=15))+
+        xlab("Survival probability to reach X years")+
+        ylab("Given years of survival") +
+        scale_color_gradientn(colours = mycol) #颜色跟第一幅图一致
+
+# 第三幅
+n <- ggrisktable(myfit, break.time.by=1, data = dat)
+m <- n$data[(min(prob_times)+1):(max(prob_times)+1),]
+m$time <- as.factor(m$time)
+# 把风险表输出到文件
+risk <- t(data.frame(risk = m$n.risk))
+colnames(risk) <- m$time
+write.csv(risk, "number_at_risk.csv", quote = F)
+# 把风险表画成图
+p3 <- ggplot(data = m, aes(x=time, y=strata, label=n.risk)) +
+  ggpubr::geom_exec(geom_text, data = m, size = 5, color = "black") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(size=15),
+        axis.text.y = element_text(size=15),
+        axis.title = element_text(size=15)) +
+  ylab("Number at risk") + 
+  xlab("Years")
+```
+
+合并图像并输出
+
+```{r fig.width=8, fig.height=12}
+condsurv_plot <- p1$condsurvcurve + p2 + p3 + 
+  plot_layout(ncol = 1, heights = c(5,5,1))
+condsurv_plot
+ggsave("conditional_survival_curve.pdf", width = 8, height = 12)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

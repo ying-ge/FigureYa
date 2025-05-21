@@ -1,0 +1,182 @@
+---
+title: "FigureYa216MetaREM"
+author: "小丫画图出品"
+date: "2021-1-15"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：触手可及
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用meta做了三个数据集的总的预后情况，主要用了meta和随机效应模型。原文画图用的是STATA软件，这里用R。
+
+![](example.jpg)
+
+出自<https://www.sciencedirect.com/science/article/abs/pii/S030438352030135X>
+
+# 应用场景
+
+计算多个数据集的预后meta分析，分别展示随机效应模型和固定效应模型的画法。
+
+先分开计算每个数据集、基因的HR（各数据集的HR、LCI、HCI、pvalue作为输入），然后利用meta分析的随机效应模型合并效应量，给出一个总的HR值。
+
+我们众筹的森林图分别适用的情况：
+
+- FigureYa90subgroup适用于可以获取具体每个病历的生存信息的情况，是合并原始数据然后分析；
+- FigureYa193riskTable是多个数据集分开多因素，只不过是用森林图来呈现；
+- FigureYa216MetaREM适用于只能获取每个队列的HR，最终meta分析。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("meta")
+```
+
+加载包
+
+```{r}
+library(meta)
+library(dplyr)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.csv，亚组分析结果。
+
+```{r}
+input <- read.csv("easy_input.csv")
+head(input)
+```
+
+# meta分析
+
+```{r}
+input <- input %>%
+        mutate(`Hazard Ratio(95%CI)` = paste(HR,'(',LCI,'-',HCI,')',sep=""))   
+
+# 对不服从正态分布的HR对数转换
+lnhr <- log(input$HR)
+lnlci <- log(input$LCI)
+lnhci <- log(input$HCI)
+selnhr <- (lnhci-lnlci)/(2*1.96)
+
+# 一句代码完成meta分析
+# meta包同样可以完成亚组分析：metagen中加入“byvar=”参数即可
+metamodel = metagen(TE = lnhr, seTE = selnhr,
+                    sm="HR",            # 待合并的效应量
+                    data=input,  # 输入数据
+                    studlab=Groups)     # 研究标签
+
+metamodel
+```
+
+**结果的解读**
+
+以Fig S14的统计结果为例：
+
+- I^2 = 58.3%，I^2 > 50% 说明存在一定的异质性；
+- 异质性检验Q = 4.80，p-value = 0.0907，说明纳入研究间异质性小，出现矛盾的结果可能和纳入的研究较少有关，所以此处谨慎起见，使用**随机效应模型**。
+- 固定效应模型合并效应量HR = 3.83，p-value < 0.0001；随机效应模型合并效应量HR = 4.13，p-value < 0.0001；两者相差不大。
+- 因此可以得出免疫相关基因标志物对早期LUAD患者OS具有较好的分层效果。
+
+# 开始画图
+
+## 原图用的随机效应模型
+
+自定义外观
+
+```{r,fig.height=6,fig.width=10,fig.align='center'}
+pdf("meta_random_diy.pdf", width = 8, height = 5)
+forest(metamodel, 
+       rightcols = c("Hazard Ratio(95%CI)","pvalue"), # 设置右侧标签
+       leftcols = c("Groups"),                        # 设置左侧标签
+       digits.tau2 = 3,label.right = c(input$pvalue,metamodel$pval.random),
+       
+       # 原图选择随机效应模型，故前者设置为F，后者设置为T
+       comb.fixed = F, comb.random = T, 
+       print.pval.Q = T,print.I2 = T,print.tau2 = T,        # 是否打印异质性检验的结果
+       col.square = "#8B0000",col.square.lines = "#8B0000", # 设置HR方块颜色
+       col.diamond = "#8B0000",col.diamond.lines = "#8B0000")# 设置合并效应量HR的颜色
+dev.off()
+```
+
+![](meta_random_diy.pdf)
+
+![](method.jpg)
+
+原文使用的使STATA软件，这里用的是R包：
+
+- 两种方式计算获得的合并的效应量HR基本一致；
+- 出图存在一定的差异，可以生成pdf文件，是矢量图，借助Illustrator进一步修改图和文字。或用export包导出ppt文件，进一步修改；如果安装export包遇到问题，可[参考此帖](https://www.jianshu.com/p/ff5bcf46c34a)
+
+```{r}
+# export::graph2ppt(file = "MetaREM forest.pptx",width = 18/2.54,height = 12/2.54)
+```
+
+还可以套用RevMan 5风格
+
+```{r}
+pdf("meta_random_revman5.pdf", width = 8, height = 5)
+forest(metamodel,
+       comb.fixed = F, comb.random = T, 
+       layout = 'revman5') # 套用RevMan 5风格
+dev.off()
+```
+
+![](meta_random_revman5.pdf)
+
+## 固定效应模型
+
+```{r}
+pdf("meta_fixed_revman.pdf", width = 8, height = 5)
+forest(metamodel,
+       # 固定效应模型，故前者设置为T，后者设置为F
+       comb.fixed = T, comb.random = F, 
+       layout = 'revman5') # 套用RevMan 5风格
+dev.off()
+```
+
+![](meta_fixed_revman.pdf)
+
+# 附
+
+## 发表偏倚的检验
+
+```{r}
+funnel(metamodel)  # 查看纳入研究是否对称分布
+metabias(metamodel, method="rank")  # Begg's检验
+metabias(metamodel, method="linreg")# Egger's检验
+```
+
+- 警告信息：“Number of studies (k=3) too small to test for small study effects (k.min=10). Change argument 'k.min' if appropriate.”
+
+可以发现meta包建议纳入至少10项及以上的研究进行分析，原文仅纳入三项研究进行meta分析，并不可取。个人观点，欢迎讨论。
+
+## 敏感性分析
+
+```{r}
+forest(metainf(metamodel,pooled = 'random'), layout = "JAMA")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

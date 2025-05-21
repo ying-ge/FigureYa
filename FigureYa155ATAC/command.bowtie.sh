@@ -1,0 +1,16 @@
+bowtie2 -p 6 -x MM9 -U SRR5388866.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388866.bam
+bowtie2 -p 6 -x MM9 -U SRR5388867.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388867.bam
+bowtie2 -p 6 -x MM9 -U SRR5388868.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388868.bam
+bowtie2 -p 6 -x MM9 -U SRR5388869.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388869.bam
+bowtie2 -p 6 -x MM9 -U SRR5388870.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388870.bam
+bowtie2 -p 6 -x MM9 -U SRR5388871.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388871.bam
+bowtie2 -p 6 -x MM9 -U SRR5388872.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388872.bam
+bowtie2 -p 6 -x MM9 -U SRR5388873.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388873.bam
+bowtie2 -p 6 -x MM9 -U SRR5388874.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388874.bam
+bowtie2 -p 6 -x MM9 -U SRR5388875.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388875.bam
+bowtie2 -p 6 -x MM9 -U SRR5388876.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388876.bam
+bowtie2 -p 6 -x MM9 -U SRR5388877.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388877.bam
+bowtie2 -p 6 -x MM9 -U SRR5388878.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388878.bam
+bowtie2 -p 6 -x MM9 -U SRR5388879.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388879.bam
+bowtie2 -p 6 -x MM9 -U SRR5388880.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388880.bam
+bowtie2 -p 6 -x MM9 -U SRR5388881.fastq.gz | samtools view -bS| samtools sort - | samtools rmdup -s - SRR5388881.bam

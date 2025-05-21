@@ -1,0 +1,254 @@
+---
+title: "FigureYa194pySCENIC"
+author: "小丫画图出品"
+date: "2020-9-11"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Jarning
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+这是一篇用SCENIC挖掘公共数据的文章，Figure2特别值得学习一下。
+
+上次FigureYa177RNAvelocity直播讲解时，小伙伴提出想请作者Jarning分享一下SCENIC的用法和经验。于是，邀请Jarning再次出马，建立专属讨论群，并开直播讲解，带小伙伴顺利用上SCENIC。
+
+![](example.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S2211124718316346>
+
+Figure 2. Cell-Type-Specific Regulon Activity Analysis
+(A–D) Erythroblast.
+(A) Rank for regulons in erythroblast cell based on regulon specificity score (RSS).
+(B) Erythroblast cells are highlighted in the t-SNE map (red dots).
+(C) Binarized regulon activity scores (RAS) (do Z score normalization across all samples, and set 2.5 as cutoff to convert to 0 and 1) for top regulon Lmo2 on t-SNE
+map (dark green dots).
+(D) SEEK co-expression result for target genes of top regulon Lmo2 in different GEO datasets. The x axis represents different datasets, and the y axis represents the
+co-expression significance of target genes in each dataset. Erythroblast related datasets with significant correlation (p value < 0.01) are highlighted by yellow dots.
+(E–H) Same as (A)–(D) but for B cells.
+(I–L) Same as (A)–(D) but for oligodendrocytes.
+(M–P) Same as (A)–(D) but for alveolar type II cells.
+
+# 应用场景
+
+用单细胞转录组测序数据构建转录调控网络，鉴定cell-state。
+
+目前SCENIC支持*human*, *mouse* and *fly* (Drosophila melanogaster)这三个物种。
+
+关注“小丫画图”微信公众号，回复“194”，查看作者对文章method的解读。
+
+下面开始复现文章中的Figure 1、2、3
+
+# 环境设置
+
+作者在发出文章的时候，pySCENIC还没有开发完成，作者应该是使用R-SCENIC分析的，R-SCENIC的性能远不如pySCENIC (a tenfold increase in speed)，尤其是对于大数据集。故本教程以pySCENIC为主。
+
+官方参考资料：
+
+- <https://github.com/aertslab/pySCENIC>
+- <https://www.nature.com/articles/s41596-020-0336-2>
+
+## SCENIC R
+见`scripts/s0_createEnv.Rmd`
+
+## pySCENIC
+见[createEnv](doc/createEnv.md)
+
+# 输入文件
+
+> 所有文件已上传至百度云<https://pan.baidu.com/s/1xtVejwVP8iiRJ4EqtfNpKA>，提取码：tpf9
+
+下载后把本文档跟其他文件放在同一目录下即可。
+
+下载[细胞注释](https://ndownloader.figshare.com/files/10760158)和[基因表达矩阵](https://ndownloader.figshare.com/files/10351110)
+
+![](doc/fig/inputData.png)
+
+解压`MCA_Figure2batchremoved.txt.tar.gz`重新压缩为gz文件(节省硬盘空间)
+
+```bash
+tar zxvf MCA_Figure2batchremoved.txt.tar.gz
+gzip Figure2-batch-removed.txt
+
+## 提取矩阵列名
+zcat Figure2-batch-removed.txt.gz | head -1 | tr "\t" "\n" | sed 's/\"//g' > Figure2-batch-removed.header.txt
+```
+
+`MCA_Figure2_Cell.Info.xlsx`中有3个sheet，只有前两个对我们有用
+
+![](doc/fig/CellInfo.png)
+
+将`MCA_Fig2_Cell`中的内容复制到`Cell.Info.txt`文件中
+
+将MCA_Fig2_Celltype中的内容复制到`CellType.Info.txt`文件中
+
+此时data目录下的文件组织如下：
+
+```shell
+.
+├── cisTarget_databases
+│   ...
+├── data
+│   ├── Cell.Info.txt
+│   ├── CellType.Info.txt
+│   ├── Figure2-batch-removed.txt.gz
+│   ├── Figure2-batch-removed.header.txt
+│   └── test
+│       ...
+└── scripts
+    ...
+```
+
+# MCA2Avg20
+
+用SCENIC R对数据进行预处理，过滤掉不在`cisTarget database`有记录的基因，
+
+从MCA单细胞转录组数据自动随机生成Avg20，
+
+最后用`SCopeLoomR`将基因表达矩阵保存为loom文件。
+
+- `s1_subsampling.Rmd`
+
+  - brief intro: 定义了AvgN()函数，将基因表达矩阵(row=genes, col=cells)变成pooling后的基因表达矩阵(row=genes, col=Avg20-cells)。此外，将基因表达矩阵转变为loom格式（作为pySCENIC AUCell的输入，用于计算RAS矩阵）。
+  - input: 
+    -  `Cell.Info.txt`
+    - `CellType.Info.txt`
+    - `Figure2-batch-removed.txt.gz`(基因表达矩阵，行为基因，列为细胞)
+    - `Figure2-batch-removed.header.txt`
+  - output：
+    - `s1_avg20_rep1.loom`
+    - `s1_avg20_rep2.loom`
+    - `s1_avg20_rep3.loom`
+    - `s1_exprMat.loom`
+
+# SCENIC分析
+
+SCENIC的分析流程包括三个步骤：
+
+`step1 (GENIE3/GRNBoost)`，通过基因共表达分析，建立基因共表达网络。
+
+`step2 (RcisTarget)`，根据基因共表达网络，建立可能的TF-target调控关系。通过motif分析，建立其TF-target的直接调控关系。这样对每个TF，我们可能会找到若干个直接下游，这些基因我们将之命名为`regulon`。<span style="color:red">目前SCENIC只支持转录正调控分析。</span>
+
+`step3 (AUCell)`，基于step2的结果，对每个细胞计算regulon activity score (RAS)。
+
+SCENIC有R（SCENIC）和python（pySCENIC）两种实现方式。pySCENIC相对于SCENIC(R)更快。**我们后续的所有分析都基于pySCENIC**。
+
+pySCENIC的`Input`为**行为gene symbols，列为cell ID的基因表达矩阵**。基因表达矩阵可以是UMI counts, normalized UMI counts, TPM以及logged UMI counts。作者认为<span style="color:red">矩阵的正则化与否以及正则化的方式</span>对SCENIC的结果影响不大。
+
+- `s2_cmd.sh`
+
+  ```shell
+  ## Demos for how to use s2_runPySCENIC.sh
+  bash s2_runPySCENIC.sh avg20_rep1
+  ```
+
+- `s2_runPySCENIC.sh`
+
+  - brief intro: 分别执行pySCENIC的三个步骤，`grnboost2`、`ctx`、`aucell`
+  - grnboost2
+    - input: 
+      - `s1_avg20_rep1.loom`
+    - reference:
+      -  `mm_mgi_tfs.txt`
+    - output：
+      - `s2_avg20_rep1.adj.tsv`（基因共表达网络的邻接矩阵）
+  - ctx (cisTarget)
+    - input: 
+    
+      - `s2_avg20_rep1.adj.tsv`
+      - `s1_avg20_rep1.loom`
+    
+    - reference:
+    
+      - `motifs-v9-nr.mgi-m0.001-o0.0.tbl`
+      - `mm10__refseq-r80__10kb_up_and_down_tss.mc9nr.feather`
+      - `mm10__refseq-r80__500bp_up_and_100bp_down_tss.mc9nr.feather`
+    
+      注：后两个文件可以二选一，或者可以一块使用
+    
+    - output:
+    
+      -  `s2_avg20_rep1.reg.tsv`（记录了regulon的信息）
+  - aucell
+    - input: 
+      - `s1_exprMat.loom`
+      - `s2_avg20_rep1.reg.tsv`
+    - output: 
+      
+      - `s2_avg20_rep1.pyscenic.loom`
+      
+# 利用RAS矩阵对单细胞数据进行降维
+
+- [pySCENIC的结果解读](doc/outputOfPySCENIC.md)
+
+- `scripts/s3_postSCENIC.py`
+
+  - brief intro: 解析pySCENIC的结果。
+  - input
+    - `s2_avg20_rep1.pyscenic.loom`
+    - `s2_avg20_rep1.reg.tsv`
+  - output
+    - `s3_avg20_rep1.regulons.txt`
+    - `s3_avg20_rep1.regulons.gmt`（gmt文件可以直接作为GSVA的输入，可以在bulk RNA-seq data中进一步探索单细胞数据的结论）
+    - `s3_avg20_rep1.AUCell.txt`（RAS矩阵）
+    - `s3_avg20_rep1.auc_thresholds.txt`（binary阈值）
+    - `s3_avg20_rep1.binary_mtx.txt`（binary RAS矩阵）
+    - `s3_avg20_rep1.tsne.txt`（利用RAS矩阵对细胞进行tSNE embedding)
+    - `s3_avg20_rep1.umap.txt`（利用RAS矩阵对细胞进行UMAP embedding)
+
+- `scripts/s3_postSCENIC.sh`
+
+  ```shell
+  ## A demo for how to use s3_postSCENIC.py
+  f_loom_path_scenic=output/s2_avg20_rep1.pyscenic.loom
+  ctx_output=output/s2_avg20_rep1.reg.tsv
+  sample_name=output/s3_avg20_rep1
+  threads=10
+  min_regulon_size=10
+  python s3_postSCENIC.py $f_loom_path_scenic $ctx_output $sample_name $threads $min_regulon_size
+  ```
+
+- `scripts/s4_Figure1.Rmd`
+
+  - 可视化pySCENIC的结果，绘制文章的Figure1 (1B, 1C 1D)
+
+    ![](doc/fig/figure1.png)
+
+# 计算Cell type specific regulon
+
+- `scripts/s5_Figure2.Rmd`
+
+  - 计算RSS(Regulon specific score) matrix，寻找特定细胞特异的regulon，并利用SEEK进行验证。绘制文章的Figure2。
+
+    ![](doc/fig/Figure2.png)
+
+- [如何用SEEK对cell specific regulon进行验证](doc/validationCellSpecificRegulonWithSEEK.md)
+
+# Combinatorial Regulon Modules  
+
+- `scripts/s6_Figure3.Rmd`
+
+  - 计算CSI（Connection Specificity Index） matrix，基于CSI对regulon进行层次聚类，绘制Figure3A中的Heatmap。此外基于聚类结果，定义regulon module，得到regulon module和regulon的关系。对每个细胞计算regulon modeul activity score（average RAS on regulons in each module）。对不同的cellType计算average regulon module activity score的均值，寻找regulon module和Cell type的对应关系。
+
+  ![](doc/fig/Figure3.png)
+
+- `scripts/s7_TFMotif.Rmd`
+
+  - 在[JASPAR数据库](http://jaspar.genereg.net/search?advanced=true)中下载给定转录因子的motif矩阵，绘制motif logo
+
+  - AI中精修Figure3A
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

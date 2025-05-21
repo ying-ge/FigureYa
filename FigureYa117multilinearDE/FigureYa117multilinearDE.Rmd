@@ -1,0 +1,215 @@
+---
+title: "FigureYa117multilinearDE"
+author: "小丫画图出品"
+date: "2019-7-21"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+去除RNAseq表达量混杂因素，混杂因素包括年龄、性别、人种、批次等。
+方法在文章method部分的Differential expression analyses里面描述。
+结果图可以放两个热图进行比较
+
+![](method.png)
+
+出自<https://academic.oup.com/hmg/article/22/24/5001/568201>
+
+或参考：Evaluation of logistic regression models and effect of covariates for case–control study in RNA-Seq analysis，<https://link.springer.com/article/10.1186%2Fs12859-017-1498-y>
+
+**题外话：**例文中采用这种多变量逻辑回归的方式考虑协变量的影响，个人觉得在一些成熟的差异表达算法（如DESeq2，edgeR，limma）的design matrix中加入这些变量可能更稳定。
+
+## 应用场景
+
+用于做差异表达分析。大规模测序数据，往往混杂着各种协变量，影响差异基因筛选，常见的两种策略：
+
+- 策略一，去除这些混杂因素，例文采取的是这种策略；
+- 策略二，把这些因素加入到DESeq2的design里，推荐这种策略。
+
+下面这篇文章详细探讨了第一种方式的缺点，并给出了实际操作时的指导意见：2016年的Biostatistics，Methods that remove batch effects while retaining group differences may lead to exaggerated confidence in downstream analyses，<https://t.zsxq.com/3j2beI6>
+
+## 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(glmnet)
+library(pheatmap)
+library(ClassDiscovery)
+library(gplots)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数
+
+```{r}
+# 显示差异表达进程
+display.progress = function ( index, totalN, breakN=20) {
+  
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}    
+
+# 多变量线性回归差异表达分析（考虑其他协变量）
+multilinearDE <- function(emat = NULL, sinfo = NULL, res.var = NULL, cov.var = NULL, logtrans = T, isorder = T) {
+  
+  # emat：输入的表达矩阵（行为基因；列为样本），一般是适用于回归模型的数据变量，如FPKM，TPM，标准化的count以及芯片数据等
+  # sinfo： 样本信息，包括差异表达的两个组，其他感兴趣变量或批次效应（协变量）
+  # res.var： response variable逻辑回归中的响应变量（单一字符串），及差异表达要比较的两个组，请优先转换为1和0
+  # cov.var： covariate variable逻辑回归中的协变量（可为多个变量），及差异表达时要考虑的其他因素，请优先添加额外的因素，比如age的平方等
+  # logtrans： 逻辑变量，指示在逻辑回归时对基因表达量是否做log2转化，默认为TRUE
+  # isorder： 逻辑变量，指示是否对结果中的FDR进行升序排列，默认为TRUE
+  
+  if(!identical(colnames(emat),rownames(sinfo))) {
+    stop("Error! The sampleIDs are not matched in emat and sinfo!\n")
+  }
+  
+  if(sum(is.element(c("1","0"),as.character(sinfo[,res.var]))) != 2) { # 确保响应变量必须是0和1，且二者均存在
+    stop("Error! The response variable must be 1 and 0, please transform it first!\n")
+  }
+  
+  if(!all(is.element(c(res.var,cov.var),colnames(sinfo)))) {
+    stop("Error! All the variable should be included in sinfo with the same label name!\n")
+  }
+  
+  p.gene <- fc <- log2fc <- c() # 初始化变量
+  for (i in 1:nrow(emat)) {
+    
+    display.progress(index = i,totalN = nrow(emat)) # 显示计算进度，当基因量多的时候请耐心等耐
+    
+    gene = rownames(emat)[i]
+    
+    if(logtrans) {
+      tmp <- cbind.data.frame(gene = log2(t(emat[gene,]) + 1), sinfo) # 新建临时变量包括当前gene和样本信息
+    } else { tmp <- cbind.data.frame(gene = t(emat[gene,]), sinfo) }
+    colnames(tmp)[1] <- "gene"
+    
+    f <-  as.formula(paste(res.var, "~", paste(c("gene",cov.var), collapse = ' + '))) # 根据res.var和cov.var生成公式
+    
+    model_glm <- glm(f, data = tmp, family = "binomial") # 二元多变量逻辑回归
+    p.gene <- c(p.gene,summary(model_glm)$coefficients["gene",4]) # 取出结果中的显著性p值
+    
+    a <- as.numeric(emat[gene,which(tmp$class == "1"),])
+    b <- as.numeric(emat[gene,which(tmp$class == "0"),])
+    fc <- c(fc,mean(a)/mean(b)) # 计算foldchange
+    log2fc <- c(log2fc,log2(mean(a)/mean(b))) # 计算log2foldchange
+  }
+  
+  # 生成结果
+  outTab <- data.frame(gene = rownames(emat), 
+                       fc = fc,
+                       log2fc = log2fc,
+                       p.value = p.gene, 
+                       fdr = p.adjust(p.gene,method = "fdr"), 
+                       stringsAsFactors = F)
+  
+  if(isorder) { # 是否按照FDR排序
+    outTab <- outTab[order(outTab$fdr),]
+    return(outTab)
+  } else {return(outTab)}
+}
+```
+
+## 输入文件
+
+easy_input_expr.txt，表达矩阵。
+
+easy_input_info.txt，样品信息，包含亚型、年龄、性别。
+
+```{r}
+# 表达谱
+expr <- read.table("easy_input_expr.txt",sep = "\t",check.names = F,stringsAsFactors = F,row.names = 1,header = T)
+expr[1:3, 1:3]
+
+# 样本信息
+sinfo <- read.table("easy_input_info.txt",sep = "\t",check.names = F,stringsAsFactors = F,row.names = 1,header = T)
+head(sinfo)
+
+# 匹配样本并移除协变量缺失的样本
+sinfo <- as.data.frame(na.omit(sinfo[intersect(rownames(sinfo),colnames(expr)),]))
+sinfo <- as.data.frame(na.omit(sinfo))
+
+sinfo$class <- ifelse(sinfo$`TCGA Subtype` == "immune",1,0) # 这里做immune vs others 的差异表达分析，并在线性模型中考虑年龄和性别的影响
+emat <- expr[,rownames(sinfo)]
+```
+
+## 多变量逻辑回归确定显著转录本
+
+```{r}
+sinfo$age2 <- sinfo$age^2 # 优先设置其他协变量，如这里的年龄平方
+
+outTab <- multilinearDE(emat = emat,
+                        sinfo = sinfo,
+                        res.var = "class",
+                        cov.var = c("age","age2","sex"),
+                        logtrans = T,
+                        isorder = F) # 不排序
+head(outTab)
+
+# 把差异表达分析结果输出到文件
+write.table(outTab,"DE results by multilinear regression considering covariates.txt",sep = "\t",row.names = F,quote = F)
+```
+
+## 开始画图
+
+通过绘制热图查看分型效果
+
+```{r}
+degs <- outTab[which(outTab$fdr < 0.05 & abs(outTab$log2fc) > 2), "gene"] # 筛选差异表达基因
+
+annCol <- data.frame(class=sinfo$class,row.names = rownames(sinfo),stringsAsFactors = F) # 创建样本注释信息
+annCol$class <- ifelse(annCol$class == 1,"Immune","Others") 
+annColors <- list("class"=c("Immune"="#2874C5","Others"="#EABF00")) # 创建注释颜色
+
+indata <- log2(emat + 1)
+hcg <- hclust(distanceMatrix(as.matrix(t(indata[degs,rownames(sinfo)])), "euclidean"), "ward.D") # 行聚类，修改参数请参阅??distanceMatrix
+hcs <- hclust(distanceMatrix(as.matrix(indata[degs,rownames(sinfo)]), "euclidean"), "ward.D") # 列聚类，修改参数请参阅??distanceMatrix
+
+# 由于这里值跨度太大，所以fix在[-3，3]之间
+plotdata <- t(scale(t(indata)))
+plotdata[plotdata >= 3] <- 3
+plotdata[plotdata <= -3] <- -3
+
+# 绘图（可参考FigureYa91cluster_heatmap）
+pheatmap(plotdata[degs,],
+         annotation_col = annCol,
+         annotation_colors = annColors,
+         cluster_cols = hcs,
+         show_rownames = F,
+         show_colnames = F,
+         cluster_rows = hcg,
+         labels_col = NULL,
+         labels_row = NULL,
+         filename = "heatmap for DEGs.pdf")
+```
+
+![](heatmap for DEGs.pdf)
+
+从热图可以看出差异表达基因较好地分开了immune 和 others亚型，去除混杂因素的效果还不错。
+
+```{r}
+sessionInfo()
+```

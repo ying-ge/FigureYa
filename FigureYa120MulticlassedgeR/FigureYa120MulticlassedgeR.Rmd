@@ -1,0 +1,206 @@
+---
+title: "FigureYa120MulticlassedgeR"
+author: "小丫画图出品"
+date: "2019-7-28"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用edgeR实现多组差异分析。能用来替换FigureYa109SubtypeGSEA中的配对差异表达过程（亚型数目>=3），并跟它无缝对接。
+
+## 应用场景
+
+结合FigureYa109subtypeGSEA，分析每一组与其他样品的差异基因，进而找出亚型特异富集的通路；
+
+结合FigureYa116supervisedCluster，分析每一组与其他样品的差异基因，进而找出亚型特异的marker基因。
+
+**注意：**本众筹不涉及批次效应消除，若样本间含有批次效应，请阅读edgeR的document，在设计矩阵中纳入batch effect。<https://bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf>，有个完整的例子：4.2 RNA-Seq of pathogen inoculated arabidopsis with batch effects
+
+这里针对read count表达矩阵作为输入的情况，还可以用FigureYa118MulticlassDESeq2。如果你的数据是FPKM/RPKM或芯片数据，请参考FigureYa119Multiclasslimma。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("edgeR")
+```
+
+加载包
+
+```r
+library(edgeR)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数，分别比较每一组跟其他样品之间的差异，如果有更多组，按规律补充进去即可。
+
+```{r}
+# 创建需要配对比较的列表
+createList <- function(group=NULL) {
+  
+  tumorsam <- names(group)
+  sampleList = list()
+  treatsamList =list()
+  treatnameList <- c()
+  ctrlnameList <- c()
+  
+  #A-1: 类1 vs 其他
+  sampleList[[1]] = tumorsam
+  treatsamList[[1]] = intersect(tumorsam, names(group[group=="immune"])) # 亚型名称需要根据情况修改
+  treatnameList[1] <- "immune" # 该亚型的命名
+  ctrlnameList[1] <- "Others" # 其他亚型的命名
+  
+  #A-2: 类2 vs 其他
+  sampleList[[2]] = tumorsam
+  treatsamList[[2]] = intersect(tumorsam, names(group[group=="keratin"]))
+  treatnameList[2] <- "keratin"
+  ctrlnameList[2] <- "Others"
+  
+  #A-3: 类3 vs 其他
+  sampleList[[3]] = tumorsam
+  treatsamList[[3]] = intersect(tumorsam, names(group[group=="MITF-low"]))
+  treatnameList[3] <- "MITF-low"
+  ctrlnameList[3] <- "Others"
+  
+  return(list(sampleList, treatsamList, treatnameList, ctrlnameList))
+  
+}
+
+# 配对edgeR
+twoclassedgeR <- function(res.path=NULL, countsTable=NULL, prefix=NULL, complist=NULL, overwt=FALSE) {
+  
+  #Groupinfo could contain "batch", which will be considered by edgeR design matrix
+  sampleList <- complist[[1]]
+  treatsamList <- complist[[2]]
+  treatnameList <- complist[[3]]
+  ctrlnameList <- complist[[4]]
+  allsamples <- colnames(countsTable)
+  
+  options(warn=1)
+  for (k in 1:length(sampleList)) { # 循环读取每一次比较的内容
+    samples <- sampleList[[k]]
+    treatsam <- treatsamList[[k]]
+    treatname <- treatnameList[k]
+    ctrlname <- ctrlnameList[k]
+    
+    compname <- paste(treatname, "_vs_", ctrlname, sep="") # 生成最终文件名
+    tmp = rep("others", times=length(allsamples))
+    names(tmp) <- allsamples
+    tmp[samples]="control"
+    tmp[treatsam]="treatment"
+    outfile <- file.path( res.path, paste(prefix, "_edgeR_test_result.", compname, ".txt", sep="") )
+    if (file.exists(outfile) & (overwt==FALSE)) { # 因此差异表达分析较慢，因此如果文件存在，在不覆盖的情况下（overwt=F）不再次计算差异表达
+      cat(k, ":", compname, "exists and skipped;\n")
+      next
+    }
+  
+    saminfo <- data.frame("Type"=tmp[samples],"SampleID"=samples,stringsAsFactors = F)
+    
+    group=factor(saminfo$Type,levels = c("control","treatment"))    
+    
+    design <- model.matrix(~group) # 设计矩阵仅包含亚型信息，若有批次效应请修改，例如design <- model.matrix(~group+treat)
+    rownames(design) <- samples
+    
+    # 差异表达过程，具体参数细节及输出结果解释，请参阅相关document
+    y <- DGEList(counts=countsTable[,samples],group=saminfo$Type)
+    y <- calcNormFactors(y)
+    y <- estimateDisp(y, design, robust=TRUE)
+    fit <- glmFit(y, design)
+    lrt <- glmLRT(fit)
+    ordered_tags <- topTags(lrt, n=100000)
+    allDiff=ordered_tags$table
+    allDiff=allDiff[is.na(allDiff$FDR)==FALSE,]
+    diff=allDiff
+    
+    diff$id <- rownames(diff)
+    res <- diff[,c("id","logFC","logCPM","LR","PValue","FDR")]
+    colnames(res) <- c("id","log2FC","logCPM","LR","PValue","FDR")
+    write.table(res, file=outfile, row.names=F, col.names=T, sep="\t", quote=F)
+    cat(k, ",")
+  }
+  options(warn=0)
+}
+```
+
+## 输入文件
+
+```{r}
+# 读取read count表达矩阵
+expr <- read.table("easy_input_counts.txt",sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+expr[1:3, 1:3]
+
+# 读取亚型信息
+subt <- read.table("easy_input_subtype.txt", sep = "\t", check.names = F, stringsAsFactors = F, header = T, row.names = 1)
+head(subt)
+n.sub.label <- unique(subt$TCGA_Subtype) # 亚型名称
+n.sub.label
+n.sub <- length(table(subt$TCGA_Subtype)) # 亚型个数
+n.sub
+```
+
+## 开始分析
+
+```{r}
+### 创建配对比较的列表信息 ###
+group <- subt$TCGA_Subtype
+names(group) <- rownames(subt) 
+complist <- createList(group=group)
+
+### 执行配对DESeq2差异表达 ###
+
+var <- apply(expr,1,sd)
+# 差异表达分析过程比较慢请耐心等待，这里为了加速分析过程，只选取方差top25%的基因
+index <- var > quantile(var)[4] 
+
+twoclassedgeR(res.path = ".", #所有配对差异表达结果都会输出在res.path路径下
+              countsTable = expr[index,intersect(colnames(expr),rownames(subt))],
+              # 如果不取方差top25%，而是计算全部基因，就删掉上面那行，改为运行下面这行：
+              #countsTable = expr,
+              prefix = "SKCM", #文件名以SKCM开头
+              complist = complist,
+              overwt = F)
+```
+
+在当前文件夹会生成3个文件，可以作为FigureYa116supervisedCluster的输入：
+
+- SKCM_edgeR_test_result.immune_vs_Others.txt
+- SKCM_edgeR_test_result.keratin_vs_Others.txt
+- SKCM_edgeR_test_result.MITF-low_vs_Others.txt
+
+如果想跟FigureYa109SubtypeGSEA无缝对接，就继续运行下面这段，生成degs.list，然后从FigureYa109SubtypeGSEA里的“自定义分析函数”开始运行，手动把“自定义分析函数”里第160行的`geneList <- degs$log2FoldChange`改为`geneList <- degs$log2FC`：
+
+```{r}
+DEfiles <- c("SKCM_edgeR_test_result.immune_vs_Others.txt",
+             "SKCM_edgeR_test_result.keratin_vs_Others.txt",
+             "SKCM_edgeR_test_result.MITF-low_vs_Others.txt")
+
+degs.list <- list()
+for (i in 1:n.sub) {
+  degs <- read.table(DEfiles[i],sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+  head(degs)
+  degs.list[[n.sub.label[i]]] <- as.data.frame(na.omit(degs))
+}
+```
+
+```{r}
+sessionInfo()
+```

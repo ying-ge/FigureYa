@@ -1,0 +1,276 @@
+---
+title: "Annotate Cell Type"
+author: "Jarning"
+date: "2020/4/25"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r, eval=TRUE}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+```{r, eval=TRUE}
+library(ggplot2)
+library(dplyr)
+library(SingleCellExperiment, lib.loc = newpath)
+library(Seurat, lib.loc = newpath)
+library(scmap, lib.loc = newpath)
+```
+
+导入第三部分的结果
+```{r}
+if (!exists("seu.CCA")) {
+  seu.CCA <- readRDS("tmp/s3.2-seu_CCA_clustering.rds")
+}
+```
+
+> Cluster annotation to heart cell types. 
+To identify specifc markers for each cluster and consequently annotate them with the respective heart cell type, we applied Seurat “FindAllMarkers” function using the AUCbased scoring classifer with default parameters. We used the default Wilcoxon’s rank-sum test for the specifc cell type analysis.
+
+计算cell markers
+```{r}
+all.markers <- FindAllMarkers(seu.CCA, test.use = "roc")
+saveRDS(all.markers, "tmp/s4.1-all_markers.rds")
+```
+
+```{r, include=FALSE, eval=TRUE}
+all.markers <- readRDS("tmp/s4.1-all_markers.rds")
+seu.CCA <- readRDS("tmp/s4.2-seu_CCA_clustering_cellAnnotation.rds")
+```
+
+```{r, eval=TRUE}
+all.markers %>% group_by(cluster) %>% top_n(n = 3, wt = myAUC)
+```
+
+
+利用已知marker注释细胞类型<br>
+B-Cells => Cd79a <br>
+Pericytes => Kcnj8 <br>
+Macrophages => Dab2 <br>
+Fibroblasts => Lamc1 <br>
+Endothelial => Ly6c1 <br>
+
+```{r, fig.width=12, fig.height=8, eval=TRUE}
+known.markers <- c("Cd79a", "Kcnj8", "Dab2", "Lamc1", "Ly6c1")
+names(known.markers) <- c("B-Cells", "Pericytes", "Macrophages", "Fibroblasts", "Endothelial")
+tsne.emb <- GetDimReduction(seu.CCA, reduction.type = "tsne", slot = "cell.embeddings")
+tsne.emb <- cbind(tsne.emb, FetchData(seu.CCA, vars.all = known.markers))
+tsne.emb <- as.data.frame(tsne.emb)
+
+plot.list <- lapply(seq_along(known.markers), function(i) {
+  ggplot(data = tsne.emb, aes(x=tSNE_1, y=tSNE_2, color=get(known.markers[i]))) + 
+  geom_point(size = .1) +
+  scale_color_gradient(low = "grey", high = "red") + 
+  ggtitle(label = names(known.markers)[i], subtitle = known.markers[i]) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = .5),
+        plot.subtitle = element_text(hjust = .5),
+        strip.text = element_text(size = 15, face = "bold"))
+})
+cowplot::plot_grid(plotlist = plot.list, ncol = 3)
+```
+
+
+利用public标注数据集对注释细胞类型(scmap)
+
+> The assignment of each cluster to a specifc cell type was done manually by making use of published
+gene expression data and by single-cell profle projection using scmap. We projected single heart cells from
+the Tabula Muris consortium set onto our single nuclei to identify the similar cell types and show the
+reproducibility from both approaches. All default parameters were used; the numbers of selected features
+were defned as the top 40.
+
+
+导入公共数据<br>
+Heart cell type annotation derived from data of the [Tabula Muris consortium](https://tabula-muris.ds.czbiohub.org/)
+
+```{r, fig.width=5, fig.height=4, eval=TRUE}
+load("../ref/droplet_Heart_and_Aorta_seurat_tiss.Robj")
+tiss
+DimPlot(tiss, reduction.use = "tsne", 
+        do.label = TRUE, 
+        group.by = "cell_ontology_class", 
+        label.size = 5,
+        no.legend = TRUE)
+```
+
+scmap是基于SingleCellExperiment这个数据结构进行计算的。<br>
+我们首先构建SingleCellExperiment对象
+
+```{r, eval=TRUE}
+sce.heart <- SingleCellExperiment(assays = list(logcounts = as.matrix(tiss@data)),
+                                  colData = tiss@meta.data)
+rowData(sce.heart)$feature_symbol <- rownames(sce.heart)
+sce.heart
+```
+
+选择特征基因
+
+> the numbers of selected features were defned as the top 40.
+
+```{r, fig.width=4, fig.height=3, eval=TRUE}
+sce.heart <- selectFeatures(sce.heart, n_features = 40, suppress_plot = FALSE)
+table(rowData(sce.heart)$scmap_features)
+```
+
+构建query data
+```{r, eval=TRUE}
+sce.query <- SingleCellExperiment(assays = list(logcounts = as.matrix(seu.CCA@data)),
+                                  colData = seu.CCA@meta.data)
+rowData(sce.query)$feature_symbol <- rownames(sce.query)
+```
+
+类映射
+```{r, eval=TRUE}
+head(colData(sce.heart))
+sce.heart <- indexCluster(sce.heart, cluster_col = "cell_ontology_class")
+head(metadata(sce.heart)$scmap_cluster_index)
+```
+
+```{r}
+scmapCluster_results <- scmapCluster(projection = sce.query, 
+                                     index_list = list(
+                                       ref1 = metadata(sce.heart)$scmap_cluster_index
+                                       )
+                                     )
+```
+
+```{r}
+seu.CCA@meta.data$scmap_cluster <- scmapCluster_results$combined_labs
+```
+
+查看scmap的结果
+```{r, fig.width=7, fig.height=5, eval=TRUE}
+tsne.emb <- GetDimReduction(seu.CCA, reduction.type = "tsne", slot = "cell.embeddings")
+tsne.emb <- as.data.frame(tsne.emb)
+tsne.emb$scmap_cluster <- seu.CCA@meta.data$scmap_cluster
+
+tsne.emb <- subset(tsne.emb, scmap_cluster != "unassigned")
+
+p1 <- ggplot(data = tsne.emb, aes(x=tSNE_1, y=tSNE_2, color=scmap_cluster)) + 
+  geom_point(size = .1) +
+  guides(colour = guide_legend(title = "scmap cluster", 
+                               title.hjust=0.5, 
+                               keyheight = 1.5, 
+                               override.aes = list(size=6))) + 
+  theme_bw() + 
+  theme(strip.text = element_text(size = 15, face = "bold"))
+```
+
+```{r}
+seu.CCA@meta.data$tree.ident.new <- factor(as.character(seu.CCA@ident), levels = levels(seu.CCA@ident))
+```
+
+```{r, fig.width=6, fig.height=5, eval=TRUE}
+p2 <- DimPlot(seu.CCA, reduction.use = "tsne", group.by = "tree.ident.new",
+              do.label = TRUE, label.size = 5, pt.size = .1, no.legend = TRUE,
+              do.return = TRUE)
+```
+
+```{r, fig.width=12, fig.height=5, eval=TRUE}
+cowplot::plot_grid(p1, p2, ncol = 2, rel_widths = c(7,5))
+```
+
+用桑基图查看细胞注释的结果，图像利用google_vis在网页显示
+```{r}
+plot(
+  getSankey(
+    colData(sce.query)$tree.ident, 
+    scmapCluster_results$combined_labs,
+    plot_width = 800,
+    plot_height = 600
+  )
+)
+```
+
+细胞注释的结果<br>
+
+- 1 => B Cell(marker annotation) | ("immune cells" in paper)
+- 2 => Skap1  | ("immune cells" in paper)
+- 3,13,14 => cardiac muscle cell | ("cardio myocytes" in paper)
+- 4 => low quanlity, high mitochondrial transcripts  | ("low quanlity cells" in paper)
+- 5 => Car3 | ("adipocytes" in paper)
+- 6 => unknown | "epicardial cells" in paper
+- 8,9 => NA(cell annotation) / macrophage(marker annotation) | ("immune cells" in paper)
+- 10 => Ccl21a | ("endothelial cell(C)" in paper)
+- 11 => endocardial cell | ("endothelial cell" in paper)
+- 12 => endothelial cell | ("endothelial cell" in paper)
+- 15,16 => fibroblast | ("fibroblasts" in paper)
+- 17,18 => unassigned(cell annotation) / pericyte(marker annotation) | ("pericytes" in paper)
+- 7 => unknown
+
+```{r}
+cluster_annotations <- c(
+  "immune cells(B cell)", # 1
+  "immune cells", #2
+  "cardio myocytes", #3
+  "low quanlity cells", #4
+  "adipocytes", #5
+  "epicardial cells", #6
+  "unknown", #7
+  "immune cells(macrophage)", #8
+  "immune cells(macrophage)", #9
+  "endothelial cell(C)", #10
+  "endothelial cell", #11
+  "endothelial cell", #12
+  "cardio myocytes", #13
+  "cardio myocytes", #14
+  "fibroblasts", #15
+  "fibroblasts", #16
+  "pericytes", #17
+  "pericytes"  #18
+)
+
+cluster_annotations_label <- c(
+  "immune cells\n(B cell)", # 1
+  "immune cells", #2
+  "cardio\nmyocytes", #3
+  "low quanlity\ncells", #4
+  "adipocytes", #5
+  "epicardial cells", #6
+  "unknown", #7
+  "immune cells(macrophage)", #8
+  "immune cells(macrophage)", #9
+  "endothelial\n(C)", #10
+  "endothelial", #11
+  "endothelial", #12
+  "cardio\nmyocytes", #13
+  "cardio\nmyocytes", #14
+  "fibroblasts", #15
+  "fibroblasts", #16
+  "pericytes", #17
+  "pericytes"  #18
+)
+
+seu.CCA@meta.data$cell_type <- plyr::mapvalues(
+  x = seu.CCA@ident,
+  from = levels(seu.CCA@ident),
+  to = cluster_annotations
+)
+
+seu.CCA@meta.data$cell_type_label <- plyr::mapvalues(
+  x = seu.CCA@ident,
+  from = levels(seu.CCA@ident),
+  to = cluster_annotations_label
+)
+
+seu.CCA@meta.data$cell_type <- as.character(seu.CCA@meta.data$cell_type)
+seu.CCA@meta.data$cell_type_label <- as.character(seu.CCA@meta.data$cell_type_label)
+```
+
+```{r, fig.width=6, fig.height=5, eval=TRUE}
+DimPlot(seu.CCA, reduction.use = "tsne", group.by = "cell_type_label",
+        do.label = TRUE, label.size = 4, 
+        pt.size = .1, no.legend = TRUE)
+```
+
+保存结果
+```{r, eval=FALSE}
+saveRDS(seu.CCA, "tmp/s4.2-seu_CCA_clustering_cellAnnotation.rds")
+```
+

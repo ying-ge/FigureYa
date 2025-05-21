@@ -1,0 +1,269 @@
+---
+title: "FigureYa185swimmerplot"
+author: "小丫画图出品"
+date: "2020-7-19"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+画swimmer plot，草图如下：
+
+![](draft.png)
+
+类似的文章里的图
+
+![](example.png)
+
+出自<https://ascopubs.org/doi/full/10.1200/JCO.2017.76.9901>
+
+# 应用场景
+
+根据预后或治疗特点绘制带有记号的时间柱状图。
+
+通常跟waterfall plot一起用，画法可参考FigureYa39bar。
+
+这里用base plot画，还可以尝试用ggplot2来画。
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(shape) #用于画箭头
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+easy_input.csv，每行一个patient，至少包含三列时间，及其对应的状态。
+
+```{r}
+# 读取数据
+dat <- read.table("easy_input.txt",sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+head(dat)
+
+# 根据生存时间排序，以便图例可显示在右下角
+dat <- dat[order(dat$OS.time,decreasing = F),]
+```
+
+# 开始画图
+
+选择哪些配色，特殊符号选什么形状（用?pch查看可选的形状），全凭个人/期刊的喜好了。看注释调整参数，就可以修改成自己喜欢的样子。
+
+这里分别以需求者提供的草图和例文example为例。**两者主要区别**在于细节的参数调整：坐标轴、颜色、线条粗细、特殊符号的形状，以及特殊符号跟bar之间的间距。
+
+用base plot来画图，优点是自由，想画啥就画啥。
+
+> 如果你想分段运行，就从plot开始到你要看的代码为止来运行。一定要从plot开始。
+
+## 按需求者提供的草图draft来画
+
+```{r}
+# 设置颜色
+orange <- "#fa7921"
+darkred   <- "#F2042C"
+darkblue  <- "#1d00ff"
+peach  <- "#E43889"
+
+# 1. 张开画布
+par(bty = "o", mgp = c(1.5,.33,0), mar = c(3,3,1,2),las = 1, tcl = -.25)
+plot(NULL,NULL,
+     xlim = c(0,max(dat$OS.time)) + max(dat$OS.time)/10,
+     ylim = c(1,nrow(dat)),
+     xlab = "Time (Years)",
+     ylab = "",
+     yaxt = "n")
+axis(side = 2,at = seq(1,nrow(dat)),labels = rownames(dat))
+
+# 2. 主时间轴：overall survival（时间最长）
+for (p in 1:nrow(dat)) {
+  lines(c(0,dat[p,"OS.time"]),
+        c(p,p),
+        lwd = 5,
+        col = orange)
+  
+  # 如果病人有新治疗并且时间可得
+  if(dat[p,"New_therapy"] == "Yes") {
+    lines(c(dat[p,"Therapy_time"],dat[p,"OS.time"]),
+          c(p,p),
+          lwd = 3,
+          col = peach)}
+  
+  # 如果病人活着添加箭头
+  if(dat[p,"OS"] == "Alive") {
+    Arrowhead(dat[p,"OS.time"],p,lcol = darkred,arr.type = "triangle")
+  } else if(dat[p,"OS"] == "Dead") { # 如果病人死亡添加方块
+    points(dat[p,"OS.time"],p,col = darkblue,pch = 15,cex = 2)
+  } else if(dat[p,"OS"] == "Missing") { # 如果病人失访添加星星（六芒星）
+    points(dat[p,"OS.time"],p,col = "black",pch = 24,cex = 1.5,bg = "black") # 上三角
+    points(dat[p,"OS.time"],p,col = "black",pch = 25,cex = 1.5,bg = "black") # 下三角
+  }
+}
+
+# 3. 次时间轴：progression free survival（时间落在OS区间内）
+for (p in 1:nrow(dat)) {
+  # 如果病人疾病进展添加圆圈
+  if(dat[p,"PFS"] == "DP") {
+    points(dat[p,"PFS.time"],p,col = darkred,pch = 19, cex = 2)
+  } else {next()}
+}
+
+# 4. 绘制图例（这里要根据图片大小调整的，或者后期AI更加方便）
+# 4.1 存活
+Arrowhead(25,3.75,
+          lcol = darkred,arr.type = "triangle")
+text(26,3.75,"Alive",pos = 4)
+
+# 4.2 死亡
+filledrectangle(mid = c(25,3),
+                wx = 0.2,wy = 1,
+                col = darkblue,
+                angle = 270)
+text(26,3,"Dead",pos = 4)
+
+# 4.3 疾病进展
+points(25,2.25,col = darkred,pch = 19, cex = 2)
+text(26,2.25,"DS",pos = 4)
+
+# 4.4 失访
+points(25,1.5,col = "black",pch = 24,cex = 1.5,bg = "black")
+points(25,1.5,col = "black",pch = 25,cex = 1.5,bg = "black")
+text(26,1.5,"Missing",pos = 4)
+
+dev.copy2pdf(file = "swimmer_draft.pdf",width = 6,height = 3)
+```
+
+## 按例文example来画
+
+```{r}
+# 设置颜色
+jcoBlue <- "#248EC9"
+jcoYellow <- "#EDC622"
+jcoRed <- "#BE5D54"
+
+# 1. 张开画布
+par(bty = "o", mgp = c(1.5,.33,0), mar = c(3,3,1,2),las = 1, tcl = -.25)
+plot(NULL,NULL,
+     xlim = c(0,max(dat$OS.time)) + max(dat$OS.time)/10,
+     ylim = c(1,nrow(dat)),
+     xlab = "Time (Years)",
+     ylab = "Patients With Response",
+     yaxt = "n")
+axis(side = 2,tck = 0, #不显示刻度线
+     at = seq(1,nrow(dat)),
+     labels = rep("", nrow(dat))) #y轴不显示patient编号
+
+# 2. 主时间轴：overall survival（时间最长）
+for (p in 1:nrow(dat)) {
+  lines(c(0,dat[p,"OS.time"]),
+        c(p,p),
+        lwd = 10, #泳道的粗细
+        col = jcoBlue)
+  
+  # 如果病人有新治疗并且时间可得
+  if(dat[p,"New_therapy"] == "Yes") {
+    lines(c(dat[p,"Therapy_time"],dat[p,"OS.time"]),
+          c(p,p),
+          lwd = 10,
+          col = jcoYellow)}
+  
+  # 如果病人活着添加箭头
+  if(dat[p,"OS"] == "Alive") {
+    Arrows(dat[p,"OS.time"] + .5, #想留个空白就+0.5，根据自己喜好调整 
+              p, dat[p,"OS.time"] + 1.5, p, #带尾的箭头需要x0, y0, x1, y1
+           lcol = jcoRed, arr.col = jcoRed, #颜色
+           lwd = 5, arr.lwd = 1, #粗细
+           arr.length = .2, arr.width = .3, 
+           arr.type = "triangle") # ?Arrows查看用法
+  } else if(dat[p,"OS"] == "Dead") { # 如果病人死亡添加十字架
+    points(dat[p,"OS.time"] + 1,
+       p,col = jcoRed, pch = 3,
+       cex = 1, #大小
+       lwd = 5, #粗细
+       bg = jcoRed) 
+  } else if(dat[p,"OS"] == "Missing") { # 如果病人失访添加雪花
+    points(dat[p,"OS.time"] + 1, 
+           p, col = jcoRed, pch = 8, cex = 1.5, lwd = 3)
+  }
+}
+
+# 3. 次时间轴：progression free survival（时间落在OS区间内）
+for (p in 1:nrow(dat)) {
+  # 如果病人疾病进展添加圆圈
+  if(dat[p,"PFS"] == "DP") {
+    points(dat[p,"PFS.time"], p, col = jcoRed,
+           pch = 21, lwd = 5, bg = "white",
+           cex = 2)
+  } else {next()}
+}
+
+# 4. 绘制图例（这里要根据图片大小调整的，或者后期AI更加方便）
+
+# 特殊符号的画法跟上面图中保持一致
+# 4.1 存活
+Arrows(24.7,3.75,25.5,3.75, #位置坐标
+       lcol = jcoRed, arr.col = jcoRed, #颜色
+       lwd = 5, arr.lwd = 1, #粗细
+       arr.length = .2, arr.width = .3, 
+       arr.type = "triangle")
+text(26,3.75, "Alive", pos = 4)
+
+# 4.2 死亡
+points(25, 3, #位置坐标
+       col = jcoRed, pch = 3,
+       cex = 1, #大小
+       lwd = 5, #粗细
+       bg = jcoRed)
+text(26,3, "Dead", pos = 4)
+
+# 4.3 疾病进展
+points(25, 2.25, #位置坐标
+       col = jcoRed,
+           pch = 21, lwd = 5, bg = "white",
+           cex = 2)
+text(26,2.25, "DS", pos = 4)
+
+# 4.4 失访
+points(25, 1.5, #位置坐标
+       col = jcoRed, pch = 8, cex = 1.5, lwd = 3)
+text(26,1.5, "Missing", pos = 4)
+
+
+#你可能还想标注蓝色和黄色线的图例，就这样画
+#legend(24, 5.5, #位置坐标
+#       col = c(jcoBlue, jcoYellow), 
+#       legend = c("BlueLineName", "YellowLineName"), 
+#       lty = 1, lwd = 10,
+#       bty = "n")#不显示图例边框
+
+dev.copy2pdf(file = "swimmer_example.pdf",width = 7, height = 5)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

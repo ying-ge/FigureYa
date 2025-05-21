@@ -1,0 +1,191 @@
+---
+title: "FigureYa111markerGene_step1"
+author: "小丫画图出品"
+date: "2019-6-30"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：徐洲更，欢迎关注他的简书<https://www.jianshu.com/u/9ea40b5f607a>
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用Seurat找marker基因，用scanpy画出文章里这种热图，中间顺利衔接。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41586-019-0933-9>
+
+Fig. 2d, Heat map illustrating the row-normalized mean expression of marker genes for each maturing gut cluster.
+
+## 应用场景
+
+本文档用Seurat进行单细胞上游分析，得到聚类信息和聚类注释信息，使用我写的函数保存结果，然后打开FigureYa111markerGene.ipynb文件，用Scanpy画美图。
+
+这里是前面用Seurat，后面只是用scanpy的画图功能。当然你也可以从头到尾都用Scanpy来做，这个不包含在本文档范围内。
+
+## 环境设置
+
+要求: 
+
+- 操作系统: Windows10（内存64G)的运行环境是WSL， MacOS，Linux(Ubuntu/CentOS)，
+- 电脑内存: 最低8G， 推荐16G起步，上不封顶
+- 掌握shell的基本使用方法
+
+安装Seurat包
+
+```r
+install.packages('Seurat')
+```
+
+加载包
+
+```{r}
+library(dplyr)
+library(Seurat)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+示例文件保存在当前文件夹下的filtered_gene_bc_matrices/hg19/文件夹里
+
+```{r}
+pbmc.data <- Read10X(data.dir = "filtered_gene_bc_matrices/hg19/")
+
+pbmc <- CreateSeuratObject(counts = pbmc.data, 
+                           project = "pbmc3k", 
+                           min.cells = 3, min.features = 200)
+```
+
+## Seurat聚类分析
+
+>下面的步骤是常规的单细胞数据处理流程, 主要是将细胞进行聚类分析, 从而知道每个细胞属于哪一类, 同时根据差异分析结果, 选择标记基因。
+
+数据预处理
+
+```{r}
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & 
+                 nFeature_RNA < 2500 & 
+                 percent.mt < 5)
+pbmc <- NormalizeData(pbmc, 
+                      normalization.method = "LogNormalize",
+                      scale.factor = 10000)
+pbmc <- FindVariableFeatures(pbmc, 
+                             selection.method = "vst", 
+                             nfeatures = 2000)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+```
+
+聚类分析
+
+```{r}
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+```
+
+定义cluster
+
+```{r}
+new.cluster.ids <- c("Naive CD4 T", 
+                     "Memory CD4 T", 
+                     "CD14+ Mono", 
+                     "B", 
+                     "CD8 T", 
+                     "FCGR3A+ Mono", 
+                     "NK", 
+                     "DC", 
+                     "Platelet")
+names(new.cluster.ids) <- levels(pbmc)
+pbmc <- RenameIdents(pbmc, new.cluster.ids)
+```
+
+这里可以接UMAP看聚类结果，关于UMAP的安装和详细用法，可参考FigureYa93UMAP。
+
+```r
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+DimPlot(pbmc, reduction = "umap", label = T)
+```
+
+## 开始画图
+
+用Seurat展示标记基因
+
+### 定义基因
+
+```{r}
+marker_gene <- c("IL7R", "CCR7",
+                 	"S100A4",
+                 	"CD14", "LYZ",
+                 "MS4A1",
+                 "CD8A",
+                 	"FCGR3A", "MS4A7",
+                 "GNLY", "NKG7",
+                 	"FCER1A", "CST3",
+                 "PPBP")
+```
+
+### 热图
+
+```{r}
+DoHeatmap(pbmc, features = marker_gene)
+```
+
+### 小提琴图
+
+```{r}
+VlnPlot(pbmc, 
+        features = marker_gene[1:2])
+```
+
+> 除了这两种，还能不能有更加好看的展现方式？ 
+
+Scanpy提供了许多种好看的展示方式，见<https://scanpy-tutorials.readthedocs.io/en/latest/visualizing-marker-genes.html>
+
+那么如何将Seruat的结果和Scanpy进行结合呢？我们首先需要把结果输出到文件，然后用Scanpy画美图。
+
+## 输出Seurat结果
+
+Seurat的表达量数据存放在`@assays$RNA`下,
+
+- counts: TPM或者UMI信息, 最初的输入信息
+- data: 标准化结果
+- scale.data: scale后的数据
+
+Seurat的细胞的各种元信息在`@meta.data`下
+
+Seurat定义后细胞类型的数据在`@active.ident`下,
+
+我写了一个函数`seurat2scanpy`, 将上面信息保存在同一个文件夹下
+
+```{r}
+source("seurat2scanpy.R")
+seurat2scanpy(x = pbmc)
+```
+
+后续的操作在Jupyter notebook进行。你需要：
+
+- 下载并安装Anaconda发行版，https://www.anaconda.com/distribution/#download-section
+- 用Jupyter notebook打开FigureYa111markerGene_step2_linuxMAC.ipynb或FigureYa111markerGene_step2_win10.ipynb文档继续画图。
+- ipynb文档的用法参考这篇：https://mp.weixin.qq.com/s/G-CQhNEJBmMRuDe2kxND_w
+
+## 参考资料
+
+- <https://scanpy.readthedocs.io/>
+
+```{r}
+sessionInfo()
+```

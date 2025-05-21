@@ -1,0 +1,153 @@
+---
+title: "DEG"
+author: "Jarning"
+date: "2020/4/28"
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+oldpath <- .libPaths()[1]
+newpath <- "/home/biostacs/R/backup/env_31723062"
+```
+
+```{r}
+library(DESeq2, lib.loc = newpath)
+library(Seurat, lib.loc = newpath)
+library(IHW, lib.loc = newpath)
+```
+
+> To identify DEGs between the old and the young hearts, we used
+DESeq2 (v. 1.20) to explore the statistical power of the replicates (33). Differential expression analysis was
+conducted separately for each cluster. Data were fltered for quality; for each sub cell type, we allowed only
+cells/nuclei with more than 1000 UMIs (for cardiomyocytes we used 2000 as minimum because of the high
+number of nuclei from this type), 500 detected genes, and maximum 0.05% of mitochondrial reads. Only
+clusters with more than 500 cells after fltering were analyzed. Clusters were summarized by total counts
+for each gene to generate an in silico bulk RNA-sequencing data set. This way we could assess fold changes
+and adjusted P values for DEGs between young and old samples, containing 3 replicates for each subtype.
+The test for signifcance was computed by the nbinomLRT DESeq2 function, and the signifcantly differentially expressed genes were selected using independent hypothesis weighting
+
+作者对细胞进行了更严格的筛选<br>
+在此基础上将同一样本，同一类别的细胞数据merge在一起，变成伪bulk RNA-seq数据的形式。利用DESeq2分析young and old样本的差异表达基因。
+
+导入第四部分的结果
+```{r}
+if (!exists("seu.CCA")) {
+  seu.CCA <- readRDS("tmp/s4.2-seu_CCA_clustering_cellAnnotation.rds")
+}
+```
+
+数据清洗
+
+> we allowed only cells/nuclei with more than 1000 UMIs (for cardiomyocytes we used 2000 as minimum because of the high number of nuclei from this type), 500 detected genes, and maximum 0.05% of mitochondrial reads.
+
+这里疑似作者笔误，线粒体基因的表达量阈值应该是0.05或5%，从数据分布来看，不太可能是0.05%。
+```{r}
+mito.genes <- rownames(seu.CCA@raw.data)[grep("^mt-", rownames(seu.CCA@raw.data))]
+mito.genes
+seu.CCA@meta.data$mito_percent <- colSums(seu.CCA@raw.data[mito.genes, ]) / seu.CCA@meta.data$nUMI
+summary(seu.CCA@meta.data$mito_percent)
+kept.cells <- rownames(subset(
+  x = seu.CCA@meta.data,
+  nGene >= 500 & nUMI >= 1000 & mito_percent <= 0.05
+))
+seu.CCA <- SubsetData(seu.CCA, cells.use = kept.cells)
+seu.CCA
+
+# for cardiomyocytes we used 2000 as minimum
+kept.cells <- rownames(subset(
+  x = seu.CCA@meta.data,
+  nUMI >= 2000 | cell_type != "cardio myocytes"))
+seu.CCA <- SubsetData(seu.CCA, cells.use = kept.cells)
+seu.CCA
+table(seu.CCA@meta.data[, c("cell_type", "sample_id")])
+```
+
+我们只分析细胞数量超过500个细胞的类
+
+> Only clusters with more than 500 cells after fltering were analyzed.
+
+```{r}
+cell_type.ncells <- table(seu.CCA@meta.data[, c("cell_type")])
+cell_types.forDEG <- names(cell_type.ncells)[cell_type.ncells > 500] 
+cell_types.forDEG
+```
+
+构建伪bulk RNA-seq data
+```{r}
+dat.list <- lapply(cell_types.forDEG, function(x) {
+  dat.matrix <- lapply(levels(seu.CCA@meta.data$sample_id), function(y) {
+    cells <- rownames(subset(seu.CCA@meta.data, cell_type == x & sample_id == y))
+    rowSums(seu.CCA@raw.data[, cells])
+  })
+  dat.matrix <- do.call(cbind, dat.matrix)
+  colnames(dat.matrix) <- levels(seu.CCA@meta.data$sample_id)
+  dat.matrix
+})
+names(dat.list) <- cell_types.forDEG
+```
+
+```{r, eval=FALSE}
+saveRDS(dat.list, "tmp/s5.1-dat_forDEG.list.rds")
+```
+
+
+差异表达分析，这里我们只分析 fibroblasts
+构建dds对象
+```{r}
+count.data <- dat.list$fibroblasts
+col.data <- data.frame(
+  row.names = colnames(count.data),
+  age = sub("[0-9]+", "", colnames(count.data))
+)
+dds <- DESeqDataSetFromMatrix(countData = count.data,
+                              colData = col.data,
+                              design= ~ age)
+dds$condition <- relevel(dds$age, ref = "young")
+```
+
+> The test for signifcance was computed by the nbinomLRT DESeq2 function
+
+```{r}
+dds <- DESeq(dds, test = "LRT", reduced = ~1)
+res <- as.data.frame(results(dds))
+```
+
+> the signifcantly differentially expressed genes were selected using independent hypothesis weighting
+
+weighted pvalue相对于DESeq2的adjusted pvalue来说检测差异基因的敏感性更好（控制假阴性）
+```{r}
+ihwRes <- ihw(pvalue ~ baseMean,  data = res, alpha = 0.1)
+res$weighted_pvalue <- ihwRes@df$weighted_pvalue
+res$significant_change <- res$weighted_pvalue < 0.01
+res$change <- ifelse(res$significant_change, 
+                     ifelse(res$log2FoldChange < 0, "up in old", "up in young"), 
+                     "no change")
+table(res[, c("significant_change", "change")])
+```
+
+获得差异表达基因
+```{r}
+## sort res by weighted_pvalue
+res <- res[order(res$weighted_pvalue),]
+## get the DEG
+fib.DEG <- rownames(subset(res, significant_change))
+fib.DEG
+```
+
+查看差异基因在样本中的表达量(C4b)
+```{r, fig.width=4, fig.height=3}
+p1 <- VlnPlot(seu.CCA, features.plot = fib.DEG[1], 
+              group.by = "sample_id", point.size.use = .1, do.return = TRUE)
+p1 + ylab("ln(CPM/10+1)") + xlab("Sample") + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+```{r, eval=FALSE}
+saveRDS(res, "tmp/s5.2-DEG_fibroblast.rds")
+```
+
+

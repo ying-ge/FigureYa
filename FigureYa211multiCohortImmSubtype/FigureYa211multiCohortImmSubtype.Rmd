@@ -1,0 +1,310 @@
+---
+title: "FigureYa211multiCohortImmSubtype"
+author: "小丫画图出品"
+date: "2020-12-18"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：中国药科大学国家天然药物重点实验室，生物统计与计算药学研究中心
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+以往的分子分型都是基于基因表达来做的，这有一个是基于多数据集免疫细胞的，能众筹吗？输出Fig.1 A和B。
+
+![](example.png)
+
+出自<https://www.cell.com/molecular-therapy-family/nucleic-acids/fulltext/S2162-2531(20)30259-6>
+
+Figure 1. The Landscape of Immuno-cell Infiltration in the TME of HNSC
+(A) Unsupervised clustering of tumor-infiltrating immune cells in five independent HNSC cohorts. Rows represent tumor-infiltrating immune cells, and columns represent samples. 
+(B) Kaplan-Meier curves for overall survival (OS) of all HNSC patients with immune cell-infiltrating classes. Log rank test showed an overall p = 0.018. 
+
+跟FigureYa201ClusterCorrelation、FigureYa203ComBat、FigureYa204PCAscore出自同一篇文章。
+
+# 应用场景
+
+不同平台的表达谱，去除批次效应后，计算免疫富集，并进行分子分型与生存分析。
+
+原文：We performed the CIBERSORT and ESTIMATE algorithms to quantify the activity or enrichment levels of immune cells in HNSC tumor tissues.
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("estimate", repos="http://r-forge.r-project.org", dependencies=TRUE)
+```
+
+加载包
+
+```{r}
+library(sva)
+library(ConsensusClusterPlus)
+library(survminer)
+library(survival)
+library(estimate)
+library(pheatmap)
+source("CIBERSORT.R")
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+自定义函数，用于数据标准化并截断极端值
+
+```{r}
+standarize.fun <- function(indata=NULL, halfwidth=NULL, centerFlag=T, scaleFlag=T) {  
+  outdata=t(scale(t(indata), center=centerFlag, scale=scaleFlag))
+  if (!is.null(halfwidth)) {
+    outdata[outdata>halfwidth]=halfwidth
+    outdata[outdata<(-halfwidth)]= -halfwidth
+  }
+  return(outdata)
+}
+```
+
+# 输入文件
+
+表达矩阵文件较大，已上传微云<https://share.weiyun.com/kvInGjRq>，数据下载和预处理可参考FigureYa203ComBat。
+
+TCGA hnsc的表达数据和生存信息：tcga_hnsc.expr.txt和tcga_hnsc.surv.txt。可以用TCGAbiolinks下载，或从[xena](https://xenabrowser.net/datapages/)下载。
+
+来自GEO的芯片数据和生存信息：gse41613.expr.txt和gse41613.surv.txt，gse65858.expr.txt和gse65858.surv.txt
+
+## 加载不同平台的表达谱、去除批次效应
+
+```{r}
+# 加载预处理过的表达谱
+tcga.expr <- read.csv("tcga_hnsc.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse41613.expr <- read.table("gse41613.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse65858.expr <- read.table("gse65858.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 检查数据量级
+range(tcga.expr) # 量级很大取对数
+tcga.expr <- log2(tcga.expr + 1)
+range(tcga.expr) # 量级在0-20
+range(gse41613.expr) # 量级在0-20
+range(gse65858.expr) # 量级在0-20
+
+# 合并数据集检查批次效应
+comgene <- intersect(intersect(rownames(tcga.expr), rownames(gse41613.expr)), rownames(gse65858.expr))
+combined.expr <- cbind.data.frame(tcga.expr[comgene,],
+                                  gse41613.expr[comgene,],
+                                  gse65858.expr[comgene,])
+
+# combat去除批次再次检查
+batch <- data.frame(batch = rep(c("TCGA","GSE41613","GSE65858"), times = c(ncol(tcga.expr),ncol(gse41613.expr),ncol(gse65858.expr))))
+modcombat = model.matrix(~1, data = batch)
+combined.expr.combat <- as.data.frame(ComBat(dat=as.matrix(combined.expr), batch=batch$batch, mod=modcombat))
+
+# 保存到txt格式的文件
+write.table(combined.expr.combat,"output_combined_expr.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+## 加载生存数据，用于生存分析
+
+```{r}
+tcga.surv <- read.table("tcga_hnsc.surv.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tcga.surv <- as.data.frame(na.omit(tcga.surv)) # 去除空值
+rownames(tcga.surv) <- paste0(rownames(tcga.surv),"-01")
+gse41613.surv <- read.table("gse41613.surv.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse65858.surv <- read.table("gse65858.surv.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 根据数据将时间转化为月份
+tcga.surv$OS.time <- tcga.surv$OS.time/30.5
+gse65858.surv$OS.time <- gse65858.surv$OS.time/30.5
+
+# 合并生存时间
+tcga.surv$Project <- "TCGA"
+gse41613.surv$Project <- "GSE41613"
+gse65858.surv$Project <- "GSE65858"
+combined.surv <- rbind.data.frame(tcga.surv[,c("OS","OS.time","Project")],
+                                  gse41613.surv[,c("OS","OS.time","Project")],
+                                  gse65858.surv[,c("OS","OS.time","Project")])
+```
+
+# 计算ESTIMATE得分
+
+output_combined_expr.csv，上一步整合好的表达矩阵和生存信息。
+
+```{r}
+filterCommonGenes(input.f = "output_combined_expr.txt", output.f = "output_combined_expr.gct", id = "GeneSymbol")
+estimateScore("output_combined_expr.gct", "output_combined_expr_estimate_score.txt", platform="affymetrix")
+```
+
+# 运行CIBERSORT
+
+原文：Infiltration levels for distinct immune cells in HNSC were quantified by using “CIBERSORT” R package and employing the LM22 signature and 1,000 permutations. 
+
+使用CIBERSORT前，请先注册<https://cibersort.stanford.edu>，查看教程<http://cibersort.stanford.edu/tutorial.php>
+
+- LM22.txt，注册后即可下载。
+
+![](WhatIsLM22.png)
+
+- output_combined_expr.txt，上一步整合好的表达矩阵和生存信息。
+
+```{r eval=FALSE}
+#这步运行时间较长
+ciber.res <- CIBERSORT(sig_matrix = "LM22.txt",
+                       mixture_file = "output_combined_expr.txt",
+                       perm = 100,
+                       QN = TRUE)
+# 保存到文件
+write.table(ciber.res,"CIBERSORT result.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# 共识PAM聚类
+
+原文：The unsupervised clustering “Pam” method based on Euclidean and Ward’s linkage was used in this analysis, executed by using the “ConsensuClusterPlus” R package,23 and repeated 1,000 times to ensure the classification stability.
+
+```{r}
+est <- read.table("output_combined_estimate_score.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+est <- est[,-1]; colnames(est) <- est[1,]; est <- est[-1,]
+colnames(est) <- colnames(combined.expr.combat)
+
+ciber.res <- read.table("CIBERSORT result.txt", sep = "\t", row.names = 1, header = T, check.names = F)
+head(ciber.res)
+
+# 合并ESTIMATE获得的activity of immune cells(est)和CIBERSORT获得的enrichment levels of immune cells(ciber.res)
+ciber.res <- ciber.res[,1:22]
+ciber.res <- ciber.res[,colSums(ciber.res) > 0] # 去除丰度均为0的细胞
+input_data <- cbind.data.frame(ciber.res, 
+                               ImmuneScore = as.numeric(est["ImmuneScore",rownames(ciber.res)]), # 添加免疫富集
+                               StromalScore = as.numeric(est["StromalScore",rownames(ciber.res)])) # 添加基质富集
+
+indata <- t(scale(input_data))
+
+# 这一步，我运行了 < 10 min
+cc <- ConsensusClusterPlus(d = indata, 
+                           maxK = 3, # 三类
+                           reps = 1000, # 重抽样次数，可修改
+                           pItem = 0.8, # 列维度抽样概率，可修改
+                           pFeature = 1, # 行维度抽样概率，可修改
+                           clusterAlg = "pam", # 聚类算法，可修改
+                           innerLinkage = "ward.D", # 内部链接函数，可修改
+                           finalLinkage = "ward.D", # 最终链接函数，可修改
+                           distance = "euclidean", # 距离测度，可修改
+                           seed = 19991018,
+                           title = "ConsensusCluster",
+                           plot = "pdf") 
+
+ICIcluster <- cc[[3]]$consensusClass
+
+# 为生存分析作准备
+comsam <- intersect(rownames(combined.surv),colnames(indata))
+combined.surv[comsam,"ICIcluster"] <- ifelse(ICIcluster[comsam] == 1, "A", # 这里把有生存信息的数据的ICIcluster补上以便后面进行生存分析
+                                             ifelse(ICIcluster[comsam] == 2, "B", "C"))
+```
+
+# 开始画图
+
+## 热图
+
+```{r fig.width=5, fig.height=6}
+# 设置颜色
+blue <- "#2874C5"
+yellow <- "#EABF00"
+green <- "#008B8A"
+red <- "#E21F26"
+
+# 生成热图
+annCol <- data.frame(ICIcluster = ifelse(ICIcluster == 1,"A", ifelse(ICIcluster == 2, "B", "C")),
+                     Project = rep(c("TCGA","GSE41613","GSE65858"),c(ncol(tcga.expr),ncol(gse41613.expr),ncol(gse65858.expr))),
+                     stringsAsFactors = F)
+annCol <- annCol[order(annCol$ICIcluster,annCol$Project),] # 这里对每个ICIcluster内部的cohort进行排序，使得相同cohort的样本彼此靠近
+
+annColors <- list()
+annColors[["ICIcluster"]] <- c("A" = red,
+                               "B" = blue,
+                               "C" = yellow)
+
+annColors[["Project"]] <- c("TCGA" = red,
+                            "GSE41613" = blue,
+                            "GSE65858" = yellow)
+
+plotdata <- standarize.fun(indata,halfwidth = 2) # 数据标准化并截断极端值
+pheatmap(plotdata[,rownames(annCol)],
+         cluster_cols = F,
+         color = NMF:::ccRamp(c("#282B71","white","#CF2221"),64),
+         show_rownames = T,
+         show_colnames = F,
+         annotation_col = annCol[,c("ICIcluster","Project"),drop = F],
+         annotation_colors = annColors,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         filename = "ICIcluster.pdf")
+```
+
+![](ICIcluster.pdf)
+
+## 生存分析
+
+```{r fig.width=5, fig.height=6}
+fitd <- survdiff(Surv(OS.time, OS) ~ ICIcluster,
+                 data      = combined.surv,
+                 na.action = na.exclude)
+p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+fit <- survfit(Surv(OS.time, OS)~ ICIcluster,
+               data      = combined.surv,
+               type      = "kaplan-meier",
+               error     = "greenwood",
+               conf.type = "plain",
+               na.action = na.exclude)
+
+# hack strata for better survival curve
+names(fit$strata) <- gsub("ICIcluster=", "", names(fit$strata))
+
+# kaplan-meier curve
+p <- ggsurvplot(fit               = fit,
+                conf.int          = FALSE,
+                risk.table        = TRUE,
+                risk.table.col    = "strata",
+                palette           = c(red, blue, yellow),
+                data              = combined.surv,
+                size              = 1,
+                xlim              = c(0,120),
+                break.time.by     = 20,
+                legend.title      = "",
+                pval              = FALSE, # 不计算p值，改为手动添加
+                surv.median.line  = "hv",
+                xlab              = "Time (month)",
+                ylab              = "Survival probability",
+                risk.table.y.text = FALSE)
+
+p.lab <- paste0("Log rank test P", # p值文本
+                ifelse(p.val < 0.001, " < 0.001",
+                       paste0(" = ",round(p.val, 3))))
+
+p$plot <- p$plot + annotate("text", # 手动添加例文样式的p值
+                            x = 70, 
+                            y = 0.55,
+                            hjust = 0,
+                            fontface = 4,
+                            label = p.lab)
+p$plot
+
+pdf.options(reset = TRUE, onefile = FALSE)
+pdf("km curve of ICIcluster.pdf", width = 5, height = 6)
+print(p)
+dev.off()
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

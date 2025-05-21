@@ -1,0 +1,224 @@
+---
+title: "FigureYa185sciATAC"
+author: "小丫画图出品"
+date: "2020-7-12"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：赵龙，中科院遗传所在读博士
+
+擅长：ChIP-seq，MNase-seq，ATAC-seq，HiC，ChIA-PET，GWAS分析，R语言。
+
+兴趣：单细胞RNA-seq，ATAC-seq，机器学习相关。
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用Cicero分析cis-regulation，用washu browser展示结果，搞定中间的衔接。
+
+![](example1.png)
+
+Figure 3. Cicero Constructs cis-Regulatory Models Genome-wide from Sci-ATAC-Seq Data
+(F) A summary of the Cicero co-accessibility links between the MYOG promoter and distal sites in the surrounding region. The height of connections indicates the magnitude of the Cicero co-accessibility score between the connected peaks. The top set of (red) links were constructed from cells in phase 1, while the bottom (in blue) were built from phase 2.
+See also Figures S3 and S4.
+
+![](example2.png)
+Figure 5. Co-accessible DNA Elements Linked by Cicero Are Epigenetically Co-modified
+(E) The Cicero map for the 755 kb region surrounding MYH3 along with called MYOD1 ChIP-seq peaks from (Cao et al., 2010). Sites opening in accessibility are colored by their opening pseudotime (see STAR Methods), sites not opening in accessibility are shown in gray. Inset: 60 kb region surrounding MYH3 along with MYOD1 ChIP-seq and H3K27ac ChIP-seq signal tracks from Cao et al. (2010) and the ENCODE Project Consortium (2012). Only protein-coding genes are shown.
+
+出自<https://doi.org/10.1016/j.molcel.2018.06.044>
+
+# 应用场景
+
+用单细胞ATAC-seq数据找cis-regulation，为挖掘目的基因的远距离调控机制提供线索。
+
+还可参考这篇Cell paper的Figure 5和6深入挖掘，<https://www.sciencedirect.com/science/article/pii/S0092867418308559>，需要的话，咱们再众筹。
+
+# 环境设置
+
+参考[Cicero for Monocle 3](https://cole-trapnell-lab.github.io/cicero-release/docs_m3/#loading-data-from-a-simple-sparse-matrix-format)
+
+踩了软件安装的坑。软件安装有些麻烦，一些依赖不太好解决。所以这里直接用conda安装monocle3。
+
+```bash
+conda create -n py36 python=3.6
+conda activate py36
+#conda install -c r r-base=3.6.3
+conda install -c bioconda r-monocle3
+conda install -c bioconda bioconductor-cicero -y
+```
+
+cicero直接安装github版。不用conda安装，是因为conda的cicero不是最新版本，在处理10X cell ranger的数据没问题，但是在处理稀疏矩阵的时候有问题。
+
+```{r, eval=FALSE}
+BiocManager::install(c("Gviz", "GenomicRanges", "rtracklayer"))
+#install.packages("devtools")
+devtools::install_github("cole-trapnell-lab/cicero-release", ref = "monocle3")
+#小丫用上面的命令安装不成功，改从github下载后，重新压缩，本地安装，成功
+#install.packages("cicero-release-master.tar.gz", repos = NULL, type = "source", ref = "monocle3")
+
+#MAC系统安装monocle时可能遇到问题，解决方法看这里https://cole-trapnell-lab.github.io/monocle3/docs/installation/
+devtools::install_github('cole-trapnell-lab/leidenbase')
+devtools::install_github('cole-trapnell-lab/monocle3')
+```
+
+加载包
+
+```{r, eval=FALSE}
+library(tidyverse)
+library(cicero) #单细胞ATAC-seq数据分析
+library(monocle3) #单细胞
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件
+
+需要单细胞ATAC-seq数据和基因组注释gtf文件。
+
+这些文件已上传至微云<https://share.weiyun.com/gxepYhd9>
+
+## 单细胞ATAC-seq数据
+
+从GEO下载单细胞ATAC-seq数据：<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM2970932>，以其中数据量小些的GSM2970932为例，包括两个细胞的mix，一个是HL60，另外一个是GM12878。
+
+![](download.png)
+
+- GSM2970932_sciATAC_GM12878_HL60_counts.txt.gz，每个peak的reads数量
+- GSM2970932_sciATAC_GM12878_HL60_indextable.txt.gz，index
+
+这是一种常见格式，好多文章都在GEO中提供这种格式的文件。感兴趣的小伙伴可以参考本文的方式挖掘一下自己感兴趣问题的相关数据。
+
+```{r}
+# peak read count
+cicero_data <- read.table("GSM2970932_sciATAC_GM12878_HL60_counts.txt") 
+cicero_data[1:3,]
+```
+
+## 基因组注释gtf文件
+
+人和小鼠建议用genecode<https://www.gencodegenes.org>，其他物种可以从ensembl下载<ftp://ftp.ensembl.org/pub>。
+
+这里用到的gtf文件我改过，不是原版。建议自己从以上**官网**下载。
+
+```{r}
+gene_anno <- rtracklayer::readGFF("hg19.gtf") 
+gene_anno[1:3,]
+
+gene_anno$chromosome <- gene_anno$seqid
+gene_anno$gene <- gene_anno$gene_id
+gene_anno$transcript <- gene_anno$transcript_id
+gene_anno$symbol <- gene_anno$gene_name
+```
+
+# 评估co-acessiblity打分
+
+因为单细胞ATAC的数据比较稀疏，所以一般为了评估co-acessiblity打分的时候，需要将feature比较相似的细胞汇聚到一起，再来评估。所以一般会先降维。这里用UMAP降维，也可以用其他任意的降维算法，例如t-SNE，可参考FigureYa27t-SNE。
+
+```{r, eval=FALSE}
+input_cds <- make_atac_cds(cicero_data, binarize = TRUE)
+
+set.seed(1234)
+# 对于每个细胞来说，计算有多少表达的基因（或开放的peak）在阈值之上，默认是最小表达大于0。
+# 对于每个基因（peak），计算有多少细胞中有表达水平；
+# 会在rowData或者colData中加一行或一列
+input_cds <- detect_genes(input_cds) 
+
+#计算size factor
+input_cds <- estimate_size_factors(input_cds) 
+
+#normalization：首先通过size factor和深度进行标准化。之后计算较低维度空间，作为下一步降维的输入文件。
+input_cds <- preprocess_cds(input_cds, method = "LSI") 
+
+#降维
+input_cds <- reduce_dimension(input_cds, reduction_method = 'UMAP', 
+                              preprocess_method = "LSI") 
+plot_cells(input_cds)
+```
+
+![](umap.png)
+
+因为是两个细胞的mix，所以分成两个大群，自己数据分析的时候应该注意，是否应该把两个群分开分别计算co-accessibility。这里为了方便展示，就混在一起了。
+
+降维之后可以通过make_cicero_cds来构建cell_data_set (CDS)。
+
+```{r, eval=FALSE}
+umap_coords <- reducedDims(input_cds)$UMAP 
+cicero_cds <- make_cicero_cds(input_cds, reduced_coordinates = umap_coords) #构建CDS
+
+data("human.hg19.genome")
+sample_genome <- human.hg19.genome
+conns <- run_cicero(cicero_cds, sample_genome, sample_num = 2)  #计算co-accessibility
+head(conns)
+
+# conns里面就是两个位置的co-accessibility信息
+# 保存到文件
+# write.csv(conns, "output_co-accessibility.csv", quote = F, row.names = F)
+```
+
+# 开始画图
+
+## 用cicero画图
+
+cicero自带画图函数，可以参考其说明文档来画图。
+
+```{r, eval=FALSE}
+plot_connections(conns, "chr2", 9773451,10773451,
+                 gene_model = gene_anno, 
+                 coaccess_cutoff = .25, 
+                 connection_width = .5, 
+                 collapseTranscripts = "longest" )
+```
+
+![](cicero.png)
+
+cicero会调用Gviz包，跟Gviz类似，参数找起来太麻烦。很难调到自己理想的状态。因此，下面用washu browser来展示，**重点是搞定输入文件格式转换**。
+
+## 用washu browser展示
+
+把co-accessibility信息转换为washu browser所需的格式。
+
+```{r, eval=FALSE}
+conns_selected <- filter(conns, coaccess >= 0.5 | coaccess <= -0.5)
+peak1 <- conns_selected$Peak1 %>% str_split("_",simplify=T)
+peak1_chr <- peak1[,1] %>% as.character()
+peak1_start <- peak1[,2] %>% as.numeric()
+peak1_end <- peak1[,3] %>% as.numeric()
+peak2 <- conns_selected$Peak2 %>% str_split("_",simplify=T)
+peak2_cor <- peak2[,1] %>% paste(peak2[,2],sep=":") %>% paste(peak2[,3],sep="-") %>% paste(conns_selected$coaccess*10,sep=",")
+conns_washu <- data.frame(V1=peak1_chr,V2=peak1_start,V3=peak1_end,V4=peak2_cor,V5=seq_along(peak1_chr)*2,V6=".") %>% arrange(V1,V2,V3,V4)
+write.table(conns_washu, "conns_washu.txt", sep="\t", row.names=F, col.names=F)
+```
+
+导入washu<https://epigenomegateway.wustl.edu/browser/>
+
+![](washu.png)
+
+具体方法如下：
+
+![](step1.png)
+
+![](step2.png)
+
+如果想要example2.png那样展示bw的track，也可以在这里上传
+
+![](step3.png)
+
+![](step4.png)
+
+![](step5.png)
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

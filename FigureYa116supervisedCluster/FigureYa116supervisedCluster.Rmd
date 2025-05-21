@@ -1,0 +1,218 @@
+---
+title: "FigureYa116supervisedCluster"
+author: "小丫画图出品"
+date: "2019-7-21"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+已有一个表达谱进行了聚类，找到这个表达谱的signature genes ，同时对另外一个表达谱进行样本聚类。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41586-019-0987-8>
+
+## 应用场景
+
+已有亚型的前提下（聚类得到，或者金标准亚型），寻找亚型marker后在独立数据集上做监督分析。
+
+以皮肤黑色素瘤（TCGA-SKCM）为例，采用监督层次聚类算法，用它的金标准亚型寻找marker。利用监督层次聚类在验证集（假设TCGA-SKCM本身就是验证集）上识别新亚型。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(ClassDiscovery)
+library(survival)
+library(survminer)
+library(pheatmap)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input_count.txt，表达矩阵，用于训练。采用监督聚类属于聚类分析，因此请选用聚类分析鲁棒的数据类型，例如FPKM、TPM、标准化的count值等等。
+
+easy_input_count_test.txt，表达矩阵，用于验证。可以是TCGA通过抽样出的测试集，也可以是GEO等数据库下载的，数据类型要满足聚类分析要求。此处直接假设TCGA-SKCM本身为验证集，也就是在原有数据集的基础上做监督聚类，实际处理自己的数据时另外再提供一个表达矩阵作为expr_test。
+
+easy_input_info.txt，包含样品的亚型、临床生存信息，用于做生存分析。
+
+SKCM_deseq2_test_result.*_vs_Others.txt，多组差异分析结果，用于找到这个表达谱的signature genes，即marker基因。可以用FigureYa118MulticlassDESeq2，FigureYa119MulticlassLimma，FigureYa120MulticlassedgeR中任意一个的输出作为输入。
+
+```{r}
+# 读取训练集
+expr <- read.table("easy_input_count.txt",sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+expr[1:3,1:3]
+
+# 读取验证集
+# expr_test <- read.table("easy_input_count_test.txt",sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+# 此处直接假设TCGA-SKCM本身为验证集
+expr_test <- expr 
+
+# 读取生存数据
+Sinfo <- read.table("easy_input_info.txt",sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+head(Sinfo)
+
+# 差异表达文件名，这里以DESeq2为例
+DEfiles <- c("SKCM_deseq2_test_result.immune_vs_Others.txt",
+             "SKCM_deseq2_test_result.keratin_vs_Others.txt",
+             "SKCM_deseq2_test_result.MITF-low_vs_Others.txt")
+```
+
+## 根据差异表达结果选取每种亚型特异性上调的marker
+
+```{r}
+# 设置阈值
+fdrcut <- 0.25 # FDR阈值
+#logfccut <- 2 # 理论上不需要这个阈值
+top <- 100 # 选取的topmarker数目
+
+marker <- c()
+for (filek in DEfiles) {
+  # 为了得到不重叠的marker，首先提取各亚型显著上调的全部基因（这里挑选的阈值可以自行修改）
+  tmp <- read.table(filek,sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+  marker <- c(marker,rownames(tmp[which(tmp$FDR < fdrcut & tmp$log2FC > 0),]))
+}
+
+# 去掉这些marker中会重复的
+uqmarker <- setdiff(marker,marker[duplicated(marker)])
+if(!length(uqmarker) == length(unique(uqmarker))) {cat("Error!\n")} # 检查一下还有没有重复
+
+topmarker <- list()
+for (filek in DEfiles) {
+  # 为了得到不重叠的marker，首先提取各亚型显著上调的全部基因（这里挑选的阈值可以自行修改）
+  tmp <- read.table(filek,sep = "\t",header = T,check.names = F,stringsAsFactors = F,row.names = 1)
+  tmp <- tmp[uqmarker,]
+  tmp <- tmp[which(tmp$FDR < fdrcut & tmp$log2FC > 0),]
+  tmp <- rownames(tmp[order(tmp$log2FC,decreasing = T),])[1:ifelse(nrow(tmp) > top, top, nrow(tmp))] #选出topmarker，如果marker数目不足top个，则取全部符合要求的差异表达基因
+  topmarker[[filek]] <- tmp
+}
+if(!length(unique(as.character(unlist(topmarker)))) == top * length(DEfiles)) {cat("Error!\n")} # 检查一下是否non-overlapped
+```
+
+## 监督层次聚类
+
+**注意：**理论上这里需要一个独立的验证集，可以是TCGA通过抽样出的测试集，也可以是GEO等数据库下载的，数据类型要满足聚类分析要求。此处直接假设TCGA-SKCM本身为验证集，也就是在原有数据集的基础上做监督聚类，实际处理自己的数据时另外再提供一个文件给expr_test。
+
+```{r}
+gene_sel <- lapply(topmarker, function(x){return(intersect(x, rownames(expr_test)))}) # 取marker与测试集的交集
+
+topmarker.sc <- as.character(unlist(gene_sel))
+indata <- log2(expr_test[topmarker.sc,] + 1) # 仅使用marker做聚类
+hcs <- hclust(distanceMatrix(as.matrix(indata), "pearson"), "ward.D") # 修改层次聚类参数请参阅??distanceMatrix
+scgroup <- cutree(hcs,k = 3) # 和金标准一样分成3类，sc表示supervised cluster
+scgroup <- paste0("scC",as.character(scgroup)); names(scgroup) <- colnames(indata)
+```
+
+## 画热图确定亚型对应关系 
+
+层次监督聚类法优点是很灵活，但缺陷是你不知道原本的C1是不是监督聚类后名义上的C1（可能变成了C2），因此最好是用监督聚类的marker画个热图，肉眼判断具体的亚型对应关系，并重新命名给出对应的颜色。
+
+这里简单画个热图判断具体的亚型对应关系，更复杂的外部聚类绘制热图可参考FigureYa91cluster_heatmap
+
+```{r}
+### 设置颜色 ###
+blue <- "#6C86EB"
+gold <- "#FDA810"
+red  <- "#FE5B64"
+
+annCol.sc <- data.frame(scC=as.character(scgroup),
+                        row.names = names(scgroup),
+                        stringsAsFactors = F)
+
+#顶上的annotation bar的颜色一般不能一次性给对，要根据色块来对应。
+annColors <- list("scC" = c("scC1" = gold,"scC2"=blue,"scC3"=red)) # 这个颜色需要根据下面的热图调整
+
+plotdata <- t(scale(t(indata)))
+plotdata[plotdata > 3] <- 3
+plotdata[plotdata < -3] <- -3
+
+pheatmap(plotdata,
+         annotation_col = annCol.sc,
+         annotation_colors = annColors,
+         cluster_cols = hcs,
+         cluster_rows = F,
+         show_rownames = F,
+         show_colnames = F,
+         filename = "heatmap for validation set by top markers.pdf")
+```
+
+![](heatmap for validation set by top markers.pdf)
+
+从生成的热图可以看到，topmarker中第一个marker list（immune的高表达基因）对应的高表达热图色块位于scC3下，所以它对的immune类，分配蓝色。
+
+同理，topmarker对应的第二个marker list（keratin的高表达基因）的高表达热图色块位于scC1下，所以它对应keratin，分配红色。
+
+请自行推理黄色色块。
+
+## 开始画图
+
+```{r}
+Sinfo[which(Sinfo$futime == "[Discrepancy]"), "futime"] <- NA # 数据里也非数值，预处理一下
+Sinfo$futime <- as.numeric(Sinfo$futime)
+Sinfo$scgroup <- scgroup[rownames(Sinfo)]
+```
+
+### 主分类的生存分析（金标准或训练集聚类结果）
+
+如果只是想画生存曲线，可参考FigureYa1survivalCurve。
+
+```{r}
+fitd <- survdiff(Surv(futime, fustat) ~ subtype, data=Sinfo, na.action=na.exclude)
+p.val <- 1-pchisq(fitd$chisq, length(fitd$n)-1)
+
+fit <- survfit(Surv(futime, fustat)~ subtype, data=Sinfo, type="kaplan-meier", error="greenwood", conf.type="plain", na.action=na.exclude)
+survp1 <- ggsurvplot(fit, conf.int=F,
+                    risk.table=F, risk.table.col="strata",
+                    palette=c(blue,red,gold),data=Sinfo,
+                    size=0.8,font.legend = 10,
+                    pval=paste0("Log-rank P ",ifelse(p.val < 0.001,"< 0.001",paste0("= ",round(p.val,3)))))
+ggsave("training_data.pdf")
+```
+
+![](training_data.pdf)
+
+### 验证集的生存分析
+
+```{r}
+fitd2 <- survdiff(Surv(futime, fustat) ~ scgroup, data=Sinfo, na.action=na.exclude)
+p.val2 <- 1-pchisq(fitd2$chisq, length(fitd2$n)-1)
+
+fit2 <- survfit(Surv(futime, fustat)~ scgroup, data=Sinfo, type="kaplan-meier", error="greenwood", conf.type="plain", na.action=na.exclude)
+survp2 <- ggsurvplot(fit2, conf.int=F,
+                     risk.table=F, risk.table.col="strata",
+                     palette=c(gold,blue,red),data=Sinfo, #根据前面热图中观察到的具体的亚型对应关系，手动给出对应的颜色
+                     size=0.8,font.legend = 10,
+                     pval=paste0("Log-rank P ",ifelse(p.val2 < 0.001,"< 0.001",paste0("= ",round(p.val2,3)))))
+ggsave("testing_data.pdf")
+```
+
+![](testing_data.pdf)
+
+```{r}
+sessionInfo()
+```

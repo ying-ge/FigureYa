@@ -1,0 +1,233 @@
+---
+title: "FigureYa144DiagHeatmap"
+author: "小丫画图出品"
+date: "2019-10-27"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+绘制元素对角化热图。
+
+![](example.png)
+
+出自<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-019-1066-3>
+
+Fig. 1 Pan-cancer genetic and expression alterations of m6A regulators. d The CNV alteration frequency of m6A regulators across cancer types. **The upper part of each grid shows the deletion frequency, and the bottom part shows the amplification frequency**. 
+
+## 应用场景
+
+倘若同一对象的某一因素存在对立的两个水平，用经典热图展示这样的结构可能要画两次；那不如试试这幅对角热图，每个元素都分割成上下两块，完美展示对立水平哦～
+
+例如像例文这种展示某癌症的某基因存在拷贝数扩增和缺失的对立水平；
+
+或者同时展示基因在多个样品中的表达量（激活）和DNA甲基化水平（抑制）等等。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+```{r}
+library(reshape2)
+library(RColorBrewer)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input_amp.txt和easy_input_del.txt，两个矩阵。分别对应热图中的左上角（amplification）和右下角（deletion）。例文是突变数据，每行一个基因，每列一种癌症类型，两个文件一一对应。还可以是基因表达量等数值。数据来源：例文的Additional file 1<https://static-content.springer.com/esm/art%3A10.1186%2Fs12943-019-1066-3/MediaObjects/12943_2019_1066_MOESM1_ESM.xlsx>
+
+总之，把你自己的数据按照这两个文件的格式替换就好。
+
+```{r}
+# 左上角的数据
+up <- read.table("easy_input_amp.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+up[1:3, 1:3]
+
+# 右下角的数据
+dn <- read.table("easy_input_del.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+dn[1:3, 1:3]
+
+# 检验两个矩阵是否一致
+identical(dim(up),dim(dn))
+```
+
+## 把数据转换成画图所需的格式
+
+```{r}
+### 设置颜色 ###
+red  <- "#AB221F"
+blue <- "#3878C1"
+nake <- "#FFFADD"
+
+# 行名
+gene.level <- as.character(up[,1]) 
+# 列名
+cancer.level <- as.character(colnames(up)[-1])
+
+# 把行转为列
+up.long <- setNames(melt(up), c('Gene', 'Cancer', 'Frequency'))
+up.long$Categrory <- "UP"
+head(up.long)
+dn.long <- setNames(melt(dn), c('Gene', 'Cancer', 'Frequency'))
+dn.long$Categrory <- "DN"
+head(dn.long)
+
+# generate color for up and dn seperately
+# 坐上角颜色
+up.long$range <- cut(up.long$Frequency, 
+                     breaks = seq(floor(min(up.long$Frequency)),
+                                  ceiling(max(up.long$Frequency)),0.01)) # 分割富集得分，步长为0.01（如果希望颜色更加细腻可以步长缩短，但是没有必要）
+rangeMat1 <- levels(up.long$range) # 提出分割区间
+rbPal1 <- colorRampPalette(colors = c(nake,red)) # 产生和例文一致的颜色区间函数
+col.vec1 <- rbPal1(length(rangeMat1)); names(col.vec1) <- rangeMat1 # 产生配对的颜色向量
+up.long$color <- col.vec1[as.character(up.long$range)] # 匹配每个区间对应的颜色
+head(up.long)
+
+# 右下角颜色
+dn.long$range <- cut(dn.long$Frequency, breaks = seq(floor(min(dn.long$Frequency)),ceiling(max(dn.long$Frequency)),0.01)) 
+rangeMat2 <- levels(dn.long$range)
+rbPal2 <- colorRampPalette(colors = c(nake,blue))
+col.vec2 <- rbPal2(length(rangeMat2)); names(col.vec2) <- rangeMat2
+dn.long$color <- col.vec2[as.character(dn.long$range)]
+
+# combine up and dn cells
+heatmat <- rbind.data.frame(up.long,dn.long) # 汇总热图矩阵
+head(heatmat)
+tail(heatmat)
+```
+
+## 开始画图
+
+用base plot一笔一笔画图
+
+```{r}
+pdf("Diagonally cut heat map.pdf",width = 8,height = 6)
+layout(matrix(c(rep(rep(c(1,2),c(1,length(cancer.level))),length(gene.level)),
+                rep(3,11),rep(4,6),rep(5,6),rep(6,11),
+                rep(3,11),rep(4,6),rep(5,6),rep(6,11)),
+              byrow = T,nrow = length(gene.level)+2))
+
+#------------------------#
+# 画布区域1：左侧柱状注释#
+#------------------------#
+
+#如果不画左侧分类，就不运行这段，直接跳到“画布区域2：主要热图区域”
+par(bty="n", mgp = c(2,0.5,0),mar = c(4.1,0.1,2.1,0.1),tcl=-.25,xpd = T) # 和热图保持一致，但左右间隔变小
+b <- barplot(matrix(c(2,7,11)), # 堆叠柱状图，这里对应三种m6A regulator分类，实际应用时根据自己的分类数量决定
+             col = c("#5AC9FA","#FAC67A","#51B743"), # 柱子颜色  
+             border = NA, ylim = c(0,length(gene.level)),
+             xaxs="i", yaxs="i", # 取消坐标轴与实际画图区域的间隙
+             yaxt = "n")
+# 添加块名，实际应用时根据自己的分类数量调整
+text(b,2/2,"E",cex = 2) 
+text(b,2+7/2,"W",cex = 2)
+text(b,2+7+11/2,"R",cex = 2)
+
+#-------------------------#
+# 画布区域2：主要热图区域 #
+#-------------------------#
+
+par(bty="n", mgp = c(2,0.5,0), mar = c(4.1,0.1,2.1,6.1),tcl=-.25,xpd = T)
+x=as.numeric(factor(heatmat$Cancer,levels = cancer.level))
+y=as.numeric(factor(heatmat$Gene,levels = gene.level))
+
+# 创建空白画布
+plot(1,
+     xlim=c(1,length(unique(x))+1),
+     ylim=c(1,length(unique(y))+1),
+     xaxs="i", yaxs="i",
+     xaxt="n",yaxt="n",
+     type="n",bty="n",
+     xlab="",ylab="",
+     main = "Copy number variation across cancer types")
+# 填充颜色
+for(i in 1:nrow(heatmat)) {
+  if(heatmat$Categrory[i]=="UP") polygon(x[i]+c(0,1,1),y[i]+c(0,0,1),col=heatmat$color[i]) # 填充上三角
+  if(heatmat$Categrory[i]=="DN") polygon(x[i]+c(0,1,0),y[i]+c(0,1,1),col=heatmat$color[i]) # 填充下三角
+}
+# 基因名和癌症名
+axis(1,at = sort(unique(x)) + 0.5,labels = cancer.level,lty = 0,las = 2) # 添加x轴坐标并垂直
+axis(4,at = sort(unique(y)) + 0.5,labels = gene.level,lty = 0,las = 1) # 添加y轴坐标并水平
+mtext("Cancer types",side = 1,line = 3) # 在大约第三行的位置补x轴名称
+
+#---------------#
+# 画布区域3：空 #
+#---------------#
+
+par(mar=c(0,0,0,0),xpd = T)
+plot(0,0,
+     col = "white", # 点设置为白色
+     xlab = "",xaxt = "n", # 不显示x坐标轴
+     ylab = "",yaxt = "n") # 不显示y坐标轴
+
+#---------------------#
+# 画布区域4：Gain图例 #
+#---------------------#
+
+#当样品数量增加或减少时，需要自己尝试调整图例的位置
+par(mar=c(3.1,0,0,0),xpd = T) #图例的位置，四个数字分别对应bottom, left, top, right
+barplot(rep(1,length(col.vec1)),border = "NA", space = 0, # 生成条形图图例
+        ylab="",
+        xlab="",
+        xlim=c(1,length(col.vec1)),
+        axes = F, col=col.vec1) # 颜色区间
+text(par("usr")[1]+10,par("usr")[3]-0.5,"0", adj=0.55,cex = 1.2) # 富集得分-0.5
+text(length(col.vec1)/2,par("usr")[3]-0.5,"Gain", adj=0.55,cex = 1.2) # 富集得分0
+text(par("usr")[2]-10,par("usr")[3]-0.5,"0.9", adj=0.55,cex = 1.2) # 富集得分0.5
+
+#---------------------#
+# 画布区域5：Loss图例 #
+#---------------------#
+
+par(mar=c(3.1,0,0,0),xpd = T)
+barplot(rep(1,length(col.vec2)),border = "NA", space = 0, # 生成条形图图例
+        ylab="",
+        xlab="",
+        xlim=c(1,length(col.vec2)),
+        axes = F, col=col.vec2) # 颜色区间
+text(par("usr")[1]+10,par("usr")[3]-0.5,"0", adj=0.55,cex = 1.2) # 富集得分-0.5
+text(length(col.vec2)/2,par("usr")[3]-0.5,"Loss", adj=0.55,cex = 1.2) # 富集得分0
+text(par("usr")[2]-10,par("usr")[3]-0.5,"0.9", adj=0.55,cex = 1.2) # 富集得分0.5
+
+#---------------#
+# 画布区域6：空 #
+#---------------#
+
+par(mar=c(0,0,0,0),xpd = T)
+plot(0,0,
+     col = "white", # 点设置为白色
+     xlab = "",xaxt = "n", # 不显示x坐标轴
+     ylab = "",yaxt = "n") # 不显示y坐标轴
+
+# 关闭图像句柄
+invisible(dev.off())
+```
+
+![](Diagonally cut heat map.pdf)
+
+```{r}
+sessionInfo()
+```

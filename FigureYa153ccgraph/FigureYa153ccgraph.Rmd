@@ -1,0 +1,389 @@
+---
+title: "FigureYa153ccgraph"
+author: "小丫画图出品"
+date: "2019-12-15"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：热心肠研究院 高春辉<https://github.com/gaospecial>
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用R从形式上复现原图。
+
+![](example.png)
+
+出自<https://academic.oup.com/jnci/article-lookup/doi/10.1093/jnci/djy156>
+
+Figure 1. Plot of all alterations detected by plasma next-generation sequencing (n=210). Size of circles represents number of patients identified with an alteration.
+
+**图的解析**
+
+例文用来展示基因上的 SNP/Indel/CNV 突变（多态性差异）。 例如，在TP53基因中发现了最多的多态性，包括 CNV 差异 SPLICE 8 个，单核苷酸位点差异 R273H 5个等。用点的大小表示差异，所以很容易发现常见的多态性差异。
+
+稍作观察便可发现，本图是一个“圆环套圆环”的布局，中心处在中央，下一级的项目分别处在外环。图中只有二环，如果要扩展成五环，多显示几个层次应该也不错。
+
+**原文用的是在线工具**
+
+推测原文是用这个工具画的：FuncTree<https://bioviz.tokyo/functree/>，能画出类似的图，用来展示基因组数据的关系。
+
+缺点：输入数据格式复杂非常复杂。需要针对每一个点做有针对性的设置。感兴趣的小伙伴去尝试一下吧～
+
+**如何用R实现**
+
+小丫发现[tidytuesday](https://github.com/rfordatascience/tidytuesday)2019-11-12的图跟原图很像，代码<https://github.com/spren9er/tidytuesday/blob/master/tidytuesday_201946_cran_packages.r>，输入数据<https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-11-12/loc_cran_packages.csv>。
+
+参考这套代码，用 `ggraph` 来画这个图。为此，花了几天时间仔细研究了`ggraph`包，写下了一篇长文：[一文读懂 ggraph
+的使用](https://mp.weixin.qq.com/s/XYVW7wzJIPaHCpBR7j3coQ)
+
+# 应用场景
+
+展示层级结构。例如：
+
+- 基因跟突变的关系，像例文那样；
+- 上游调控因子调控下游基因的层级和强度；
+- 宏基因组测序中发现的物种的丰度等信息。
+
+**注：**
+
+- 周围点的大小只能对应正值或绝对值，不能展示正负区别；
+- 不仅限于2层关系，还支持更多层级。
+
+# 环境设置
+
+加载R包
+
+```{r}
+library(clusterProfiler)
+library(GOplot)
+library(tidyverse)
+library(data.table)
+library(ggraph)
+library(tidygraph)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+加载自定义函数
+
+```{r}
+source(file = "gather_graph_node.R")
+source(file = "gather_graph_edge.R")
+```
+
+# 输入文件的获得
+
+如果你的数据已经整理成`very_easy_input.csv`的格式，就可以跳过这步，直接进入“输入文件预处理”。
+
+先用clusterProfiler做KEGG的GSEA，然后用例图的形式展示结果。
+
+```{r, eval=FALSE}
+gsym.fc <- read.table("easy_input_rnk.txt", header = T)
+dim(gsym.fc)
+head(gsym.fc)
+
+#把gene symbol转换为ENTREZ ID
+#此处物种是人，其他物种的ID转换方法，请参考FigureYa52GOplot
+gsym.id <- bitr(gsym.fc$SYMBOL, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = "org.Hs.eg.db")
+
+#让基因名、ENTREZID、foldchange对应起来
+gsym.fc.id <- merge(gsym.fc, gsym.id, by="SYMBOL", all=F)
+
+#按照foldchange排序
+gsym.fc.id.sorted <- gsym.fc.id[order(gsym.fc.id$logFC, decreasing = T),]
+
+#获得ENTREZID、foldchange列表，做为GSEA的输入
+id.fc <- gsym.fc.id.sorted$logFC
+names(id.fc) <- gsym.fc.id.sorted$ENTREZID
+
+#这一条语句就做完了KEGG的GSEA分析
+kk <- gseKEGG(id.fc, organism = "hsa")
+dim(kk)
+
+#把ENTREZ ID转为gene symbol，便于查看通路里的基因
+kk.gsym <- setReadable(kk, 'org.Hs.eg.db', #物种
+                    'ENTREZID')
+
+#可以用kk.gsym作为输入，用clusterProfiler画图
+#用法看这里https://yulab-smu.github.io/clusterProfiler-book/chapter12.html
+#gsym.fc.l <- gsym.fc$logFC
+#names(gsym.fc.l) <- gsym.fc$SYMBOL
+#cnetplot(sortkk, foldChange = gsym.fc.l, circular = TRUE)
+
+#按照enrichment score从高到低排序，取前5（up）和后5（down）
+#sortkk <- kk.gsym[order(kk.gsym@result$enrichmentScore, decreasing = T),][c(1:5, (nrow(kk.gsym)-5):nrow(kk.gsym)),]
+#这里提取感兴趣的3个通路，数量太多拥挤的话不好看基因名
+sortkk <- kk.gsym[kk.gsym@result$Description %like% "DNA" | 
+                    kk.gsym@result$Description %like% "cycle" | 
+                    kk.gsym@result$Description %like% "p53",]
+
+#把富集分析结果整理为GOplot所需的格式
+go <- data.frame(Category = "KEGG",
+                 ID = sortkk$ID,
+                 Term = sortkk$Description, 
+                 Genes = gsub("/", ", ", sortkk$core_enrichment), 
+                 adj_pval = sortkk$p.adjust)
+
+#基因变化倍数
+genelist <- data.frame(ID = gsym.fc.id$SYMBOL, logFC = gsym.fc.id$logFC)
+
+#把富集分析和倍数整合在一起
+circ <- circle_dat(go, genelist)
+head(circ)
+#可以用circ作为输入，用GOplot画图
+#用法看这里https://wencke.github.io/
+#GOCircle(circ)
+
+#保存到文件
+write.csv(circ[,c(3,5,6)],"very_easy_input.csv", quote = F, row.names = F)
+```
+
+# 输入文件预处理
+
+very_easy_input.csv，这里以上面的富集分析结果为例，展示通路和通路里的基因变化倍数FC。三列依次是通路-基因-倍数，可以自由替换成“应用场景”里其他需要展示的信息。
+
+gene_special.txt，要突出显示的基因。第一列是基因名，第二列是类型（例如基因家族信息）。
+
+```{r}
+df <- read.csv("very_easy_input.csv")
+head(df)
+
+geneSpecial <- read.table("gene_special.txt", header = T)
+geneCol <- geneSpecial$Type
+names(geneCol) <- geneSpecial$Gene
+geneCol
+```
+
+图由两个部分组成，节点（node）和边（edge）。
+
+要从上面的数据框中采集节点和边的信息。
+
+为此，我分别写了两个函数：`gather_graph_node()` 和 `gather_graph_edge()` 来完成这一个任务（前面已加载）。
+
+这两个函数的参数设置借鉴了 `treemap()` 的实现方式。
+
+  - `df`：一个数据框
+  - `index`：一个索引项（分组项）
+  - `value`：要采集的数值
+
+为了确保 `node.name` 的唯一性，在图中使用了长名，而把原有的名字放在 `node.short_name` 中去了。
+
+`node.level` 则用来指示节点应该处于第几个圆环。
+
+节点的属性统一以 `node` 作为前缀，而边的属性则以 `edge` 作为前缀。
+
+```{r}
+nodes <- gather_graph_node(df, index = c("term", "genes"), value = "logFC", root="all")
+edges <- gather_graph_edge(df, index = c("term", "genes"), root = "all")
+nodes <- nodes %>% mutate_at(c("node.level","node.branch"),as.character)
+head(nodes, 10)
+head(edges, 10)
+
+# 把要突出显示的基因类型信息加到nodes里
+nodes$color <- "normal"
+nodes[nodes$node.short_name %in% geneSpecial$Gene,]$color <- geneCol[nodes[nodes$node.short_name %in% geneSpecial$Gene,]$node.short_name]
+nodes[nodes$node.short_name %in% geneSpecial$Gene,]
+nodes$color <- factor(nodes$color, levels = unique(nodes$color))
+
+# 有了节点和边的数据，使用 `tbl_graph()` 便可以得到一个图。
+graph <- tbl_graph(nodes, edges)
+```
+
+# 开始画图
+
+## 自定义配色，直接出图
+
+```{r, fig.width=14, fig.height=14}
+# 用 `ggraph` 出图
+gc <- ggraph(graph, layout = 'dendrogram', circular = TRUE) + 
+  # 使用 filter 参数去掉 root（前面设置为"all"）节点及与其相连的边
+  geom_edge_diagonal(aes(color = node1.node.branch,
+                         filter=node1.node.level!="all"), 
+                     alpha = 1/3,edge_width=1) + 
+  geom_node_point(aes(size = node.size, 
+                      color = node.branch,
+                      filter=node.level!="all"), alpha = 1/3) + 
+  scale_size(range = c(0.5,80)) + #做均一化处理，让点的大小介于range之间
+  theme(legend.position = "none") + #不画图例
+  
+  # 点和边的配色
+  # 如果要改变边的配色，需要同时给边和点变色，否则会对应不上
+  scale_edge_color_brewer(palette = "Set1") + #用?scale_color_brewer查看更多配色方案
+  scale_color_brewer(palette = "Set1") +
+  
+  # 添加周围注释文字，此处是基因名gene
+  geom_node_text(
+    aes(
+      x = 1.048 * x, #控制字跟点的距离
+      y = 1.048 * y, #控制字跟点的距离
+      label = node.short_name,
+      angle = -((-node_angle(x, y) + 90) %% 180) + 90,
+      filter = leaf,
+      color = node.branch
+      ),
+    size = 6, hjust = 'outward') +
+  
+  # 添加内环文字，此处是通路名term
+  geom_node_text(
+    aes(label=node.short_name,
+        filter = !leaf & (node.level != "all"),
+        color = node.branch),
+    fontface="bold",
+    size=6,
+    family="sans"
+  ) + 
+  theme(panel.background = element_rect(fill = NA)) +
+  coord_cartesian(xlim=c(-1.3,1.3),ylim = c(-1.3,1.3)) #扩大坐标系
+
+gc
+ggsave("ccgraph_color.pdf", width = 14, height = 14)
+```
+在上面的图形中，线条的颜色由 ` geom_edge_diagonal(aes(color = node1.node.branch)) ` 指定。 
+
+`node1.node.branch` 指的是出发点（`node1`）的 `node.branch` 属性。如果要改变线条颜色，可以修改 nodes 表，添加一个属性（如 `color`） ，然后在 `geom_edge_diagonal()` 中将其映射到 `color` 上即可。
+
+## 按例文配色，然后后期加背景色
+
+```{r, fig.width=14, fig.height=14}
+gc1 <- ggraph(graph, layout = 'dendrogram', circular = TRUE) + 
+  #画连线
+  geom_edge_diagonal(aes(color = node2.color,
+                         filter=node1.node.level!="all"), 
+                     alpha = 0.5, #透明度
+                     edge_width=2.5) + #连线的粗细
+  scale_edge_color_manual(values = c("#61C3ED","red","purple","darkgreen")) + #自定义颜色
+
+  #画点
+  geom_node_point(aes(size = node.size,
+                      filter=node.level!="all"), 
+                  #alpha = 1/3,
+                  color = "#61C3ED") + #统一为淡蓝色
+  scale_size(range = c(0.5,80)) + #做均一化处理，让点的大小介于range之间
+  theme(legend.position = "none") + #不画图例
+  
+  # 添加周围注释文字，此处是基因名gene
+  geom_node_text(
+    aes(
+      x = 1.05 * x, #控制字跟点的距离
+      y = 1.05 * y, #控制字跟点的距离
+      label = node.short_name,
+      angle = -((-node_angle(x, y) + 90) %% 180) + 90,
+      filter = leaf
+      ),
+    color="black", #统一为黑色字
+    size = 6, hjust = 'outward') +
+  
+  # 添加内环文字，此处是通路名term
+  geom_node_text(
+    aes(label=node.short_name,
+        filter = !leaf & (node.level != "all")
+        ),
+    color="black", #统一为黑色字
+    fontface="bold",
+    size=6,
+    family="sans"
+  ) + 
+  theme(panel.background = element_rect(fill = NA)) + #背景透明色
+  coord_cartesian(xlim=c(-1.3,1.3),ylim = c(-1.3,1.3)) #扩大坐标系
+
+gc1
+```
+
+# 后期处理
+
+保存到pdf文件，是矢量图，可以用Illustrator等软件编辑图形、文字和背景
+
+```{r, fig.width=12, fig.height=12}
+ggsave("ccgraph.pdf",width = 14,height = 14)
+```
+
+# 多层嵌套
+
+这套代码不仅可以画两层的图，理论上支持更多层（要不然怎么叫“圆环套圆环”呢？）。
+
+下面是一个例子，这里使用了常见的微生物组数据集（这是一个随机生成的 OTU 表）。
+
+```{r, eval=FALSE}
+#随机生成一套数据
+n <- 1000
+microbiome <- data.frame(
+  otu = paste("OTU",1:n,sep="_"),
+  phylum = sample(paste("phylum",1:5,sep="_"),n,replace = T),
+  class = sample(paste("class",6:30,sep="_"),n,replace=T),
+  order = sample(paste("order",31:80,sep="_"),n,replace = T),
+  value = runif(n,min=1,max=1000)
+)
+head(microbiome)
+
+#保存到文件，便于小白套用格式
+write.csv(microbiome, "microbiome.csv", quote = F, row.names = F)
+```
+
+加载输入数据
+
+microbiome.csv，想画几层就给几+1列。这里前4列对应4层，最后一列是最底层节点对应的数值。
+
+```{r}
+microbiome <- read.csv("microbiome.csv", header = T)
+index_micro <- c("phylum","class","order") #除了最低层以外的列名
+nodes_micro <- gather_graph_node(microbiome,index=index_micro,
+                                  root = "bacteria") #root名字自己随便取
+edges_micro <- gather_graph_edge(microbiome,index=index_micro,root = "bacteria")
+```
+
+画图
+
+```{r,fig.width=16,fig.asp=1}
+graph_micro <- tbl_graph(nodes_micro,edges_micro)
+ggraph(graph_micro,layout = "dendrogram",circular=T) +
+  geom_edge_diagonal(aes(color = node1.node.branch,filter=node1.node.level!="bacteria", alpha = node1.node.level),edge_width=1) + 
+  geom_node_point(aes(size = node.size, color = node.branch,filter=node.level!="bacteria"), alpha = 1/3) + 
+  scale_size(range = c(0.5,80)) + #做均一化处理，让点的大小介于range之间
+  theme(legend.position = "none")+ #不画图例
+  
+  scale_edge_color_brewer(palette = "Set1") + #用?scale_color_brewer查看更多配色方案
+  scale_color_brewer(palette = "Set1") +
+
+  # 添加周围注释文字，此处是基因名gene
+  geom_node_text(
+    aes(
+      x = 1.058 * x, #控制字跟点的距离
+      y = 1.058 * y, #控制字跟点的距离
+      label = node.short_name,
+      angle = -((-node_angle(x, y) + 90) %% 180) + 90,
+      filter = leaf,
+      color = node.branch
+      ),
+    size = 1, hjust = 'outward') +
+  
+  # 添加内环文字，此处是通路名term
+  geom_node_text(
+    aes(label=node.short_name,
+        filter = !leaf & (node.level == "phylum"),
+        color = node.branch),
+    fontface="bold",
+    size=6,
+    family="sans"
+  ) + 
+  theme(panel.background = element_rect(fill = NA)) +
+  coord_cartesian(xlim=c(-1.3,1.3),ylim = c(-1.3,1.3)) #扩大坐标系
+
+ggsave("ccgraph_microbiome.pdf", width = 14, height = 14)
+```
+
+# 参考资料
+
+搞大你的点<https://mp.weixin.qq.com/s/JNIncz3W-59yjGk2ibJWUw>
+
+```{r}
+sessionInfo()
+```
