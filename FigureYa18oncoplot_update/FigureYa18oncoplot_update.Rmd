@@ -1,0 +1,203 @@
+---
+title: "FigureYa18oncoplot_update"
+author: "小丫画图出品"
+date: "2020-1-3"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+用R代码画出paper里的这种瀑布图。
+
+![](example.png)
+
+出自<https://www.cell.com/cell/abstract/S0092-8674(17)30639-6>
+
+# 使用场景
+
+展示多个样本中多个基因的突变情况，包括但不限于SNP、indel、CNV。
+
+尤其是几十上百的大样本量的情况下，一目了然，看出哪个基因在哪个人群里突变多，以及多种突变类型的分布。
+
+- 场景一：作为全基因组测序或全外显子组测序文章的第一个图。
+- 场景二：展示感兴趣的癌症类型里，某一个通路的基因突变情况。
+
+这里用TCGAbiolinks下载数据，用maftools画图。如果要更灵活的定制，可参考FigureYa42oncoprint，用complexheatmap画图。
+
+maftools功能丰富，浏览一下<https://bioconductor.org/packages/release/bioc/vignettes/maftools/inst/doc/maftools.html>，知道用它能画哪些图，需要时就知道过来找啦～
+
+# 环境设置
+
+使用国内镜像安装包
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("TCGAbiolinks")
+BiocManager::install("maftools")
+```
+
+加载包
+
+```{r}
+library(TCGAbiolinks)
+library(maftools)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+# 输入文件下载
+
+需要下载突变信息和临床信息，作为输入数据。
+
+```{r,message=FALSE,warning=FALSE}
+#查看癌症项目名缩写
+cancerName <- data.frame(id = TCGAbiolinks:::getGDCprojects()$project_id, name = TCGAbiolinks:::getGDCprojects()$name)
+head(cancerName)
+```
+
+## 下载临床信息
+
+参数`project = `后面写你要看的癌症名称缩写
+
+```{r,message=FALSE}
+clinical <- GDCquery(project = "TCGA-LIHC", 
+                  data.category = "Clinical", 
+                  file.type = "xml")
+
+GDCdownload(clinical)
+
+cliquery <- GDCprepare_clinic(clinical, clinical.info = "patient")
+colnames(cliquery)[1] <- "Tumor_Sample_Barcode"
+# 用View查看临床数据里有哪些项，不同癌症不一样，每个人感兴趣的性状也不同，根据自己的需要来选择感兴趣的列
+# 理论上，每一列都可以作为分类信息画出来。
+View(cliquery)
+
+# 加载自定义分组，例如risk高低等信息，后面就可以像其他临床信息一样，按risk分组了
+#group <- read.table("group.txt")
+#cliquery <- merge(group, cliquery, by.x = "sample", by.y = "Tumor_Sample_Barcode")
+```
+
+![](group.png)
+
+这里history_hepato_carcinoma_risk_factors列有50种类型，按照例图，只提取其中的Hepatitis B、Hepatitis C和cirrhosis。
+
+```{r}
+cliquery$HBV <- 0
+cliquery$HBV[grep(pattern = "Hepatitis B",cliquery$history_hepato_carcinoma_risk_factors)] <- 1
+
+cliquery$HCV <- 0
+cliquery$HCV[grep(pattern = "Hepatitis C",cliquery$history_hepato_carcinoma_risk_factors)] <- 1
+
+cliquery$cirrhosis <- 0
+cliquery$cirrhosis[grep(pattern = "cirrhosis",cliquery$history_hepato_carcinoma_risk_factors)] <- 1
+```
+
+后面我们将以`neoplasm_histologic_grade`，`gender`，`race_list`，`HCV`，`HBV`，`cirrhosis`作为分类画图。
+
+## 下载突变数据
+
+4种找mutation的pipeline任选其一：`muse`, `varscan2`, `somaticsniper`, `mutect2`，此处选mutect2。
+
+```{r,message=FALSE}
+mut <- GDCquery_Maf(tumor = "LIHC", pipelines = "mutect2")
+maf <- read.maf(maf = mut, clinicalData = cliquery, isTCGA = T)
+```
+
+# 开始画图
+
+oncoplot画法：<https://bioconductor.org/packages/release/bioc/vignettes/maftools/inst/doc/oncoplots.html>
+
+## 展示突变频率排名前20的基因
+
+```{r}
+pdf("oncoplotTop20.pdf",width = 15,height = 10)
+oncoplot(maf = maf,
+         top = 20,
+         clinicalFeatures = c("race_list", "neoplasm_histologic_grade", "gender", "HCV", "HBV", "cirrhosis")
+         )
+dev.off()
+```
+
+![](oncoplotTop20.pdf)
+
+## 用默认配色方案展示一个列表里的基因
+
+把你感兴趣的基因名存到`easy_input.txt`文件里，每个基因为一行。就可以只画这几个基因，其中没发生突变的基因会被忽略。
+
+```{r}
+geneName <- read.table("easy_input.txt",header = F,as.is = T)
+genelist <- geneName$V1
+
+pdf("oncoplotLIST.pdf",width = 12,height = 6)
+oncoplot(maf = maf,
+         genes = genelist,
+         clinicalFeatures = c("race_list","neoplasm_histologic_grade","gender","HCV","HBV","cirrhosis")
+         )
+dev.off()
+```
+
+![](oncoplotLIST.pdf)
+
+## 重新配色展示突变频率排名前20的基因
+
+默认的颜色不够好看，还可以改配色
+
+```{r}
+#突变
+col = RColorBrewer::brewer.pal(n = 10, name = 'Paired')
+names(col) = c('Frame_Shift_Del','Missense_Mutation', 'Nonsense_Mutation', 'Frame_Shift_Ins','In_Frame_Ins', 'Splice_Site', 'In_Frame_Del','Nonstop_Mutation','Translation_Start_Site','Multi_Hit')
+
+#人种
+racecolors = RColorBrewer::brewer.pal(n = 4,name = 'Spectral')
+names(racecolors) = c("ASIAN", "WHITE", "BLACK_OR_AFRICAN_AMERICAN",  "AMERICAN_INDIAN_OR_ALASKA_NATIVE")
+
+#病毒、肝硬化
+factcolors = c("grey","black")
+names(factcolors) = c("0","1")
+annocolors = list(race_list = racecolors, 
+                  HCV = factcolors, 
+                  HBV = factcolors, 
+                  cirrhosis = factcolors)
+
+#画图
+pdf("oncoplotTop20_col.pdf",width = 15,height = 10)
+oncoplot(maf = maf,
+         colors = col,#给突变配色
+         annotationColor = annocolors, #给临床信息配色
+         top = 20,
+         clinicalFeatures = c("race_list","HCV","HBV","cirrhosis"),
+         writeMatrix =T)
+dev.off()
+```
+
+![](oncoplotTop20_col.pdf)
+
+还可以按样本信息来分组。这里按人种来分组，你还可以按照其他感兴趣的特征来分组，例如是否有病毒感染、基因型、生存信息等
+
+```{r}
+#png("oncoplotGroup.png",width = 1000,height = 500)
+pdf("oncoplotGroup.pdf",width = 15,height = 10)
+oncoplot(maf = maf,
+         colors = col,#给突变配色
+         annotationColor = annocolors, #给临床信息配色
+         top = 20,
+         clinicalFeatures = c("race_list","HCV","HBV","cirrhosis"), # 分组依据排在第一位
+         sortByAnnotation = TRUE,
+         writeMatrix =T)
+dev.off()
+```
+
+![](oncoplotGroup.pdf)
+
+```{r}
+sessionInfo()
+```

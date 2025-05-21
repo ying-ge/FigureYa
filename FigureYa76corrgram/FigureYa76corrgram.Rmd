@@ -1,0 +1,111 @@
+---
+title: "FigureYa76corrgram"
+author: "小丫画图出品"
+date: "2019-2-17"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用R复现原图的形式。
+
+![](example.png)
+
+出自<https://www.cell.com/cell/fulltext/S0092-8674(17)30815-2?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS0092867417308152%3Fshowall%3Dtrue>
+
+## 应用场景
+
+同时展示相关系数和原始数据分布。
+
+相关系数参考资料：<https://uc-r.github.io/correlations>。里面提到两个展示相关性的好用的画图工具：corrplot和corrgram。corrplot的用法可参考FigureYa70mutationEvents；corrgram基于pairs，包装进了几个现成的函数，这里借鉴了其中的panel.fill函数，corrgram的更多用法举例：<https://rawgit.com/kwstat/corrgram/master/vignettes/corrgram_examples.html>，<https://rstudio-pubs-static.s3.amazonaws.com/6382_886fbab74fd5499ba455f11360f78de7.html>，<http://www.datavis.ca/papers/corrgram.pdf>
+
+## 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+easy_input.csv，将计算并展示每两列之间的相关性。每列一个特征，每行一个sample。
+
+```{r}
+df <- read.csv("easy_input.csv", row.names = 1)
+head(df)
+```
+
+## 开始画图
+
+这个包的关键是写好画小图的函数，然后用pairs组合成最终的效果。
+
+```{r, fig.width=6, fig.height=6}
+par(bg = "#fdfdfd")
+
+# 左下角
+panel.raters <- function (x, y, corr = NULL, ...) {
+  if (!is.null(corr)) 
+    return()
+  plot.xy(xy.coords(x, y), type = "p", 
+          pch = 20, #点形状
+          cex = .5, #点大小
+          ...)
+  abline(lm(y ~ x), lwd = 2) #画拟合线
+  box(col = "black", lwd = 2) #黑色粗边框
+}
+
+# 对角线
+textPanel <- function (x = 0.5, y = 0.5, txt, cex, font) {
+  text(x, y, txt, cex = cex, font = font)
+  box(col = "black", lwd = 2)
+}
+
+# 右上角
+panel.fill.cor <- function (x, y, corr = NULL, ...) 
+{
+    # 计算相关系数
+    corr <- round(cor(x, y, use = "pairwise", method = "pearson"),2) # 可以换成"kendall"或 "spearman"
+    
+    # 自定义背景颜色
+    ncol <- 14
+    col.regions <- colorRampPalette(c('darkslateblue', 'navy', 'white', 'firebrick3', 'red'))
+    pal <- col.regions(ncol)
+    col.ind <- as.numeric(cut(corr, breaks = seq(from = -1, to = 1, length.out = ncol + 1), include.lowest = TRUE))
+    
+    # 画背景
+    par(new=TRUE)
+    plot(0, type='n', xlim=c(-1,1), ylim=c(-1,1), axes=FALSE, asp=1)
+    usr <- par("usr")
+    rect(usr[1], usr[3], usr[2], usr[4], col = pal[col.ind], 
+        border = NA)
+    
+    # 写相关系数
+    text(0, 0, labels = corr, cex = 2.5, col = ifelse(corr > 0, "black", "white"))
+    box(col = "black") #黑色窄边框
+}
+
+# 画图并保存到pdf文件
+pdf("corrgram.pdf",8,8)
+pairs(df[1:5], 
+      gap = .5, #小图之间的空隙
+      text.panel = textPanel, #对角线
+      lower.panel = panel.raters, #左下角
+      upper.panel = panel.fill.cor) #右上角
+
+dev.off()
+```
+
+![](corrgram.pdf)
+
+```{r}
+sessionInfo()
+```

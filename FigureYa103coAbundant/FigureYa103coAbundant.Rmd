@@ -1,0 +1,248 @@
+---
+title: "FigureYa103coAbundant"
+author: "小丫画图出品"
+date: "2019-6-13"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+这个图，想知道怎么聚类的。WGCNA这个方法不会做，输入的是代谢化合物在各个sample里的浓度。
+
+![](example.png)
+
+出自<https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-019-0683-9>
+
+Clusters of co-abundant serum metabolites were identified using the R package WGCNA [65]. Signed, weighted metabolite co-abundance correlation networks were calculated for all examined individuals. A scale-free topology criterion was used to choose the soft threshold β = 14 for serum metabolites correlations. Clusters were identified with the dynamic hybrid tree-cutting algorithm using a deepSplit of 4 [66]. The serum polar metabolite and serum molecular lipid clusters (labelled P01???P42 and L01???L30, respectively) were collectively termed metabolite clusters.
+
+**图的解读：**利用hybrid dynamic branch-cutting法构建加权共表达网络，构建方法跟FigureYa15WGCNA不一样，采用的是mannually而不是automatically构建网络。需要对网络模块和其他变量的相关性进行分析、筛选、外部聚类和热图绘制（展示显著性）。
+
+## 应用场景
+
+计算并用热图展示WGCNA找出的共表达模块跟表型数据（数量性状）之间的相关性。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("impute")
+BiocManager::install("preprocessCore")
+BiocManager::install("GO.db")
+BiocManager::install("AnnotationDbi")
+BiocManager::install("WGCNA") #MAC系统，可能需要手动下载WGCNA后本地安装，下载链接：https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/WGCNA_1.67.tgz
+```
+
+加载包
+
+```{r}
+library(WGCNA)
+library(ClassDiscovery)
+library(gplots)
+library(pheatmap)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+需要两种输入文件，两个的文件的行要一一对应：
+
+- easy_input_data.txt，表达矩阵，用于构建加权共表达网络。每行一个sample，每列一个基因。
+- easy_input_anno.txt，表型信息，用于计算module score跟它的相关性分析及聚类热图绘制。每行一个sample，每列一种表型，这里的列是代谢物浓度，还可以是其他数量性状、临床指标等等。如果只想构建共表达网络，就不需要这个文件。
+
+```{r}
+### 读取表达数据
+example.data <- read.table("easy_input_data.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+example.data[1:3,1:3]
+example.data <- as.data.frame(t(example.data))
+# 是否需要测试样本或特征质量，或是否需要移除离群点，不属于本需求的目的，可参考FigureYa15WGCNA了解更多预处理工作
+
+### 读取表型数据（其他变量）
+example.anno <- read.table("easy_input_anno.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+example.anno <- example.anno[rownames(example.data),]
+head(example.anno)
+```
+
+## 共表达网络构建
+
+### 自定义函数用于共表达网络构建（manually）
+
+这里根据例文的方法写了一个自定义函数，后面将调用这个函数来构建共表达网络。可调整的参数如下：
+
+- indata为输入矩阵，行为样本，列为特征
+- TOMType为构建TOM相似性时是否考虑符号，一般为"unsigned"，可选用"none", "unsigned", "signed", "signed Nowick", "unsigned 2", "signed 2" and "signed Nowick 2"
+- clusterMethod为距离测度方法，默认为"average"，可选用其他"ward.D", "ward.D2", "single", "complete", "average"
+- deepSplit为选用hybrid树切割方法时的参数，值为0-4，越大则产生越多的module，默认为1
+- minClusterSize是每个module里的最少特征数，默认30
+- isprefix为逻辑变量，指示是否修改module名的前缀，若不修改，则将module映射到颜色上
+- prefix为当isprefix为TRUE时，生成module的前缀，默认为"P"，如例文。
+
+另外，如果你想用WGCNA自带的函数构建共表达网络（automatically），可参考FigureYa15WGCNA。
+
+```{r}
+netconstruct <- function(indata=NULL, power=NULL, TOMType="unsigned",clustMethod="average",cutHeight=0.995,deepSplit=1,minClusterSize=30,isprefix=F,prefix="P") {
+  adj = adjacency(indata, power = power)
+  TOM = TOMsimilarity(adj, TOMType = TOMType) 
+  dissTOM = 1 - TOM; dimnames(dissTOM) <- list(colnames(indata),colnames(indata))
+  hierTOM=hclust(as.dist(dissTOM),clustMethod)
+  
+  # 原文提到使用 hybrid dynamic branch-cutting
+  dynamicMods=cutreeDynamic(hierTOM,
+                            distM=dissTOM,
+                            method = "hybrid",
+                            cutHeight=cutHeight,
+                            deepSplit=deepSplit, 
+                            pamRespectsDendro=FALSE,
+                            minClusterSize=minClusterSize)
+  
+  if(!isprefix) {
+    dynamicLabels <-  labels2colors(dynamicMods) # 转为颜色
+  } else {
+    dynamicLabels=paste0(prefix,sprintf("%03d",dynamicMods)) # 按照例文修改module名字
+  }
+  
+  print(table(dynamicLabels))# 显示各module中的feature数目
+  
+  # 计算eigengenes
+  MEList = moduleEigengenes(indata, colors = dynamicLabels)
+  MEs = MEList$eigengenes
+  colnames(MEs) <- gsub("ME","",colnames(MEs))
+  
+  return(list(dissTOM=dissTOM, hierTOM=hierTOM, dynamicMods=dynamicMods, dynamicLabels=dynamicLabels, MEs=MEs))
+}
+```
+
+### 选择构建网络的合适阈值
+
+原文提到：A scale-free topology criterion was used to choose the soft threshold
+
+```{r}
+powers=c(c(1:10),seq(from=12,to=20,by=2))
+sft=pickSoftThreshold(example.data,powerVector=powers)
+
+pdf("picksoftthreshold.pdf")
+par(mfrow=c(1,2))
+plot(sft$fitIndices[,1],
+     -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit, signed R??2",type="n",main=paste("Scale independence"))
+text(sft$fitIndices[,1],
+     -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,col="red")
+abline(h=0.90,col="red")
+
+plot(sft$fitIndices[,1],sft$fitIndices[,5],type="n",
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity",
+     main=paste("Mean connectivity"))
+text(sft$fitIndices[,1],sft$fitIndices[,5],labels=powers,
+     col="red")
+invisible(dev.off())
+
+# 从示例数据可以看到，从6开始进入“平台期”，因此设置power为6
+softPower = 6
+```
+
+![](picksoftthreshold.pdf)
+
+### 构建共表达网络
+
+```{r}
+wgcna.res <- netconstruct(indata = example.data,
+                    power = softPower,
+                    TOMType = "signed", # 原文提到构建 Signed, weighted network
+                    deepSplit = 4, # 根据原文设置为4，可设置为1-4，值越大module越多
+                    isprefix = T,
+                    prefix = "P") 
+
+wgcna.res$MEs[1:3,1:3]
+```
+
+### module score 与其他变量的相关性分析
+
+```{r,warning=FALSE}
+# 检查样本是否顺序完全一致
+if(!identical(rownames(wgcna.res$MEs),rownames(example.anno))) {
+  cat("Mismatch! Please check if annotation shared the same samples (order) with WGCNA input matrix!\n")
+} else {cat("Sample matches correct!\n")}
+
+# 配对相关性检验
+r.res <- NULL
+for (i in colnames(example.anno)) {
+  for (j in colnames(wgcna.res$MEs)) {
+    tmp <- cor.test(example.anno[,i], wgcna.res$MEs[,j], method = "spearman")
+    cat(paste0("Pairwise correlation between ", j, " and ", i, ": ","rho = ",round(tmp$p.value,3),"; p = ",round(tmp$estimate,3),"\n"))
+    r.res <- rbind.data.frame(r.res,data.frame(corA=i,corB=j,rho=tmp$estimate,p.value=tmp$p.value,stringsAsFactors = F,row.names = NULL))
+  }
+}
+r.res$FDR <- p.adjust(r.res$p.value, method = "fdr") # FDR校正p值
+r.res$star <- ifelse(r.res$FDR < 0.05, "*", ifelse(r.res$FDR < 0.01, "**", "")) #显著性转*
+write.table(r.res,"output_pairwiseCorrelationResults.txt",sep = "\t",row.names = F,quote = F)
+
+# 生成绘制热图的输入矩阵
+cor.matrix <- matrix(0, nrow = ncol(example.anno), ncol = ncol(wgcna.res$MEs), dimnames = list(colnames(example.anno),colnames(wgcna.res$MEs)))
+cor.star <- matrix("", nrow = ncol(example.anno), ncol = ncol(wgcna.res$MEs), dimnames = list(colnames(example.anno),colnames(wgcna.res$MEs)))
+
+for (i in colnames(example.anno)) {
+  for (j in colnames(wgcna.res$MEs)) {
+    cor.matrix[i,j] <- as.numeric(r.res[which(r.res$corA == i & r.res$corB == j),"rho"])
+    tmp <- as.numeric(r.res[which(r.res$corA == i & r.res$corB == j),"FDR"])
+    cor.star[i,j] <- ifelse(tmp < 0.05, "*",ifelse(tmp < 0.01, "**",""))
+  }
+}
+#输出到文件
+write.table(cor.matrix,"output_correlation matrix.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(cor.star,"output_correlation star.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+## 开始画图
+
+对WGCNA得到的module维度进行聚类，用热图展示，显著的标*。
+
+注意：这里纯粹模仿需求例文中的聚类热图，如需DIY展示多种聚类结果或自行排序，可参考FigureYa91cluster_heatmap。
+
+```{r}
+# 如果你不需要前面的计算过程，只是想要画带显著性的热图，就按output_correlation matrix.txt和output_correlation star.txt文件整理你的数据。从这里读入，然后画图。
+cor.matrix <- read.table("output_correlation matrix.txt", sep = "\t", row.names = 1, header = T)
+head(cor.matrix)
+cor.star <- read.table("output_correlation star.txt", sep = "\t", row.names = 1, header = T)
+cor.star[is.na(cor.star)] <- ""
+head(cor.star)
+
+sigcut <- 1 # 显著性计数cutoff，当某module和>=sigcut个的变量显著相关时，该module被保留。可根据实际情况调整该cutoff。
+#如果不筛选，就设为：sigcut <- 0
+starcount <- apply(t(cor.star), 1, function(x) {sum(x != "")}) >= sigcut # module的显著性计数
+head(starcount)
+hcs <- hclust(distanceMatrix(as.matrix(cor.matrix[,starcount]), "euclidean"), "ward.D") # 请阅读distanceMatrix()以及hclust()，了解更多distance测度和linkage方法
+
+pheatmap(t(cor.matrix)[starcount,], # 转置数据，行为module，列为其他相关变量，并只取显著性计数>=sigcut的module
+         scale = "none", # 相关性矩阵可比，不需要标准化
+         color = bluered(64),
+         cellwidth = 15,cellheight = 10, # 调整热图中每个cell的大小
+         cluster_cols = F,
+         cluster_rows = hcs, # 外部聚类的树结构赋予行
+         display_numbers = t(cor.star)[starcount,], # 用*显示统计显著性，显著性矩阵必须和输入矩阵维度完全一致
+         filename = "wgcnamodule_and_variables_correlation_heatmap.pdf")
+```
+
+![](wgcnamodule_and_variables_correlation_heatmap.pdf)
+
+```{r}
+sessionInfo()
+```

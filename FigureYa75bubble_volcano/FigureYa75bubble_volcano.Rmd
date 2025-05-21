@@ -1,0 +1,155 @@
+---
+title: "FigureYa75base_volcano"
+author: "小丫画图出品"
+date: "2019-2-17"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Haitao Wang
+
+Dr. Haitao Wang: JNU,Guagnzhou => GIBH-CAS,Guagnzhou => BNU,Beijing => IMCB,Singapore => UMAC,Macao => NCCS,Singapore
+
+Email: ht.wang@yahoo.com; wang.haitao@nccs.com.sg
+
+小丫注释、校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用base plot画美美的火山图
+
+## 应用场景
+
+同时展示多个特征，同时展示P value、ajust P value、分组、size、score等。
+
+例如基因的火山图
+
+![](example1.png)
+
+出自<https://www.nature.com/articles/s41467-018-06944-1>
+
+或展示富集分析结果
+
+![](example2.png)
+
+出自<http://dx.doi.org/10.1016/j.neuron.2017.09.008>
+
+想用ggplot2来画火山图，请参考FigureYa59Volcano，在“小丫画图”公众号回复“火山”了解详情。
+
+## 环境设置
+
+```{r}
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+第一列是gene名，后面包含列5列特征值。
+
+可以换成其他值，例如富集分析结果。
+
+```{R}
+dat <- read.csv("easy_input.csv", header = T, row.names = 1, check.names = F)
+head(dat)
+dim(dat)
+```
+
+## 把各列数据整理成画图所需的格式
+
+```{r, fig.width=3, fig.height=3}
+### Score列 ###
+fc <- dat$score
+names(fc) <- rownames(dat)
+
+### -log10P列 ###
+p <- dat$`-log10P`
+names(p) <- rownames(dat)
+
+### group列 ###
+# 给每个pathway的泡泡一种颜色
+# 先自定义足够多的颜色
+mycol <- c("#B2DF8A","#FB9A99","#33A02C","#E31A1C","#B15928","#6A3D9A","#CAB2D6","#A6CEE3","#1F78B4","#FDBF6F","#999999","#FF7F00")
+cols.names <- unique(dat$group)
+cols.code <- mycol[1:length(cols.names)]
+names(cols.code) <- cols.names
+col <- paste(cols.code[as.character(dat$group)],"BB", sep="")
+# Highlight your favor
+i <- dat$group %in% c("PathwayA","PathwayC","PathwayH","PathwayE")
+
+### size列 ###
+sizes <- dat$size
+names(sizes) <- rownames(dat)
+
+### pval列 ###
+pp <- dat$pval
+names(pp) <- rownames(dat)
+```
+
+## 开始画图
+
+```{r}
+pdf("base_volcano.pdf", 7, 6)
+par(xpd = F, #all plotting is clipped to the plot region
+    mar = par()$mar + c(0,0,0,6)) #在右侧留出画图例的地方
+
+# base volcano plot
+plot(fc, p, log='y',
+     col=paste(cols.code[as.character(dat$group)], "BB", sep=""),
+     pch=16, #实心圆点
+     ylab=bquote(~-Log[10]~"P value"), xlab="Enrich score",
+     cex=ifelse(i, sizes, 1), # 用小泡泡画不感兴趣的pathway
+     xlim=range(fc * 1.2))
+
+# 添加横线
+abline(h=1/0.05, lty=2, lwd=1)
+abline(h=1/max(pp[which(p.adjust(pp, "bonf") < 0.001)]), lty=3, lwd=1) #标黑圈和文字的阈值
+
+# 添加竖线
+abline(v=-0.5, col="blue", lty=2, lwd=1)
+abline(v=0.5, col="red", lty=2, lwd=1)
+
+## 此处用pval列计算adjusted pval来画黑圈和标文字，你还可以另外提供其他信息来画
+# 给bonferroni correction pval < 0.001的泡泡标上半透明的文字
+w <- which(p.adjust(pp,"bonf") < 0.001) #bonferroni correction
+points(fc[w], p[w], pch=1, cex=ifelse(i[w], dat[w,"size"],1))
+## Add an alpha value to a colour
+add.alpha <- function(col, alpha=1){
+  if(missing(col))
+    stop("Please provide a vector of colours.")
+  apply(sapply(col, col2rgb)/255, 2, 
+        function(x) 
+          rgb(x[1], x[2], x[3], alpha=alpha))  
+}
+cols.alpha <- add.alpha(cols.code[dat[w,]$group], alpha=0.6)
+text(fc[w], p[w], names(fc[w]), 
+     pos=4, #1, 2, 3 and 4, respectively indicate positions below, to the left of, above and to the right of the specified coordinates.
+     col=cols.alpha)
+
+# 添加size的图例
+par(xpd = TRUE) #all plotting is clipped to the figure region
+f <- c(0.01,0.05,0.1,0.25)
+s <- sqrt(f*50)
+legend("topright",
+       inset=c(-0.2,0), #把图例画到图外
+       legend=f, pch=16, pt.cex=s, bty='n', col=paste("#88888888"))
+
+# 添加pathway颜色的图例
+legend("bottomright", 
+       inset=c(-0.25,0), #把图例画到图外
+       pch=16, col=cols.code, legend=cols.names, bty="n")
+
+dev.off()
+```
+
+![](base_volcano.pdf)
+
+```{r}
+sessionInfo()
+```

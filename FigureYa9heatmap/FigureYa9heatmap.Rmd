@@ -1,0 +1,144 @@
+---
+title: "FigureYa9 heatmap"
+author: "小丫画图出品"
+date: "2018-5-27"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+用R代码画出paper里的热图heatmap
+
+## 使用场景
+场景一：sample间的相关性，用来评价生物学重复之间的重复性，或者体现不同组的差异
+
+场景二：基因的表达变化聚类、sample聚类
+
+## 输入数据
+```{r}
+df<-read.table("mRNA.txt",row.names = 1,header = T,as.is = T)
+df[1:3,1:3]
+#查看一共有多少个基因，多少个sample
+dim(df)
+```
+
+## 开始画图
+### 场景一：sample间的相关性，用来评价生物学重复之间的重复性，或者不同组的差异
+```{r,fig.height=8,fig.width=9}
+#计算每两个sample之间的相关系数，method可选"pearson" (default), "kendall", or "spearman"
+cormat<-round(cor(df,method = "spearman"),2)
+
+#install.packages("pheatmap")
+library(pheatmap)
+pheatmap(cormat,cellwidth = 8, cellheight = 8,fontsize = 8,
+         color = colorRampPalette(c("#3C7DAF", "#EAF4F1","#FFFCBA", "#E83140"))(20),
+         show_colnames=T,show_rownames =T,#显示sample的名字
+         #border_color = "NA",#默认有边框，不要边框的话就加这行
+         treeheight_row = "0",treeheight_col = "0")#不画树
+```
+
+输出pdf文件，只需加一行：filename="文件名"
+
+```{r}
+pheatmap(cormat,cellwidth = 8, cellheight = 8,fontsize = 8,
+         #可以用下面这行自定义颜色
+         #color = colorRampPalette(c("#3C7DAF", "#EAF4F1","#FFFCBA", "#E83140"))(20),
+         show_colnames=T,show_rownames =T,
+         #border_color = "NA",#默认有边框，不要边框的话就加这行
+         treeheight_row = "0",treeheight_col = "0",
+         filename="Correlation.pdf")
+```
+
+如果sample数量少，还可以在热图里显示数字
+
+只需加一行：display_numbers = TRUE
+
+此处用20个sample展示效果
+```{r,fig.height=6,fig.width=9}
+pheatmap(cormat[4:24,4:24],cellwidth = 15, cellheight = 15,fontsize = 8,
+         #color = colorRampPalette(c("#3C7DAF", "#EAF4F1","#FFFCBA", "#E83140"))(20),
+         show_colnames=T,show_rownames =T,
+         display_numbers = TRUE,#显示数字
+         treeheight_row = "0",treeheight_col = "0")#不画树
+```
+
+有些热图，同组sample用同一个颜色表示，那些色块也是同时画出来的
+
+要为每组设置颜色
+
+```{r,fig.height=8,fig.width=9}
+#先查看有哪些sample，顺序是怎样的
+colnames(df)
+#按照sample的顺序，告诉R，它是属于哪个组的
+annotation_col = data.frame(
+  type = factor(rep(c("DG","PFC","PCC","CA1","CB","OC","TC","PC"),c(8,8,8,8,8,8,8,8))))
+rownames(annotation_col) = colnames(df)
+
+annotation_row = data.frame(
+  type = factor(rep(c("DG","PFC","PCC","CA1","CB","OC","TC","PC"),c(8,8,8,8,8,8,8,8))))
+rownames(annotation_row) = colnames(df)
+
+#然后给每个组设置颜色
+ann_colors = list(
+  type = c(DG = "blue", PFC = "green", PCC = "red", CA1 = "black",
+  CB = "pink", OC = "grey", TC = "yellow", PC = "purple")
+)
+
+pheatmap(cormat,cellwidth = 8, cellheight = 8,
+         fontsize = 8,
+         #display_numbers = TRUE,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(20),
+         show_colnames=F,show_rownames =F,#不显示sample的名字
+         annotation_col = annotation_col, annotation_row = annotation_row,
+         annotation_colors = ann_colors,
+         treeheight_row = "0",treeheight_col = "0",#不画树
+         border_color = "NA")#不显示边框
+```
+
+### 场景二：基因的表达变化聚类、sample聚类
+```{r,fig.height=15,fig.width=9}
+library(pheatmap)
+#有时会有多种分组方式，那就分别告诉R，此处增加一个性别组
+annotation_col <- data.frame(
+  Gender = factor(rep(c("F","M"),32)),#按性别分组
+  type = factor(rep(c("DG","PFC","PCC","CA1","CB","OC","TC","PC"),c(8,8,8,8,8,8,8,8))))
+rownames(annotation_col) = colnames(df)
+
+ann_colors = list(
+  Gender = c(F = "#FFA42D", M = "#A9D9DF"),#给性别分组设置颜色
+  type = c(DG = "blue", PFC = "green", PCC = "red", CA1 = "black",
+  CB = "pink", OC = "grey", TC = "yellow", PC = "purple")
+)
+
+#此处用前1000行基因画图
+#实际作图时，先筛差异基因，再用差异基因画图；或者用变化大的Top几千个基因画图
+deg <- df[1:1000,]
+pheatmap(deg, cellwidth = 8, cellheight = 1, fontsize = 8,
+         method="spearman", #计算gene或sample之间的相关性的方法，可选"pearson" (default), "kendall", or "spearman"
+         scale="row", #为基因做scale
+         cluster_rows=T, #为基因做聚类
+         cluster_cols=T, #为sample做聚类
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(20), #自定义颜色
+         show_colnames=F, #显示样品名称就改为T
+         show_rownames =F, #显示基因名就改为T
+         annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         #如果想显示树状结构，就删掉下面这行前面的#
+         #treeheight_row = "0",treeheight_col = "0",#不画树
+         filename = "pheatmap.pdf", #直接保存到pdf文件
+         border_color = "NA") #不给每个小格子画边框，如果画边框，可以把NA改为你想要的颜色
+```
+
+![](pheatmap.pdf)
+
+```{r}
+sessionInfo()
+```

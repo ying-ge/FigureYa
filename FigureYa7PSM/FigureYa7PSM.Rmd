@@ -1,0 +1,113 @@
+---
+title: "FigureYa7 PSM"
+author: "小丫画图出品"
+date: "2018-5-15"
+output: html_document
+---
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+主要目的是在病例组数据集和对照组数据集里面进行快速的1:1匹配。要求性别相同，年龄不超过两岁。。虽然不是作图的。但估计群里好多临床的人肯定也特别想用的。如果CASE1和CONTROL1匹配后，那么就算CASE3和CONTROL1也可以匹配，但是也不能匹配了。
+
+实质上，需求者是想做倾向得分匹配。倾向得分匹配（PSM）是一种用来评估处置效应的统计方法。广义说来，它将样本根据其特性分类，而不同类样本间的差异就可以看作处置效应的无偏估计。因此，PSM不仅仅是随机试验的一种替代方法，它也是流行病研究中进行样本比较的重要方法之一。
+
+有R包已经把各种情况考虑进去，帮助我们轻松的完成倾向得分匹配。
+
+## 使用场景
+与健康相关的生活质量（HRQOL）被认为是癌症治疗的重要结果之一。对癌症患者而言，最常用的HRQOL测度是通过欧洲癌症研究与治疗中心的调查问卷计算得出的。EORTC QLD-C30是一个由30个项目组成，包括5个功能量表，9个症状量表和一个全球生活质量量表的的问卷。所有量表都会给出一个0-100之间的得分。症状量表得分越高代表被调查人生活压力越大，其余两个量表得分越高代表生活质量越高。
+
+然而，如果没有任何参照，直接对数据进行解释是很困难的。幸运的是，EORTC QLQ-C30问卷也在一些一般人群调查中使用，我们可以对比患者的得分和一般人群的得分差异，从而判断患者的负担症状和一些功能障碍是否能归因于癌症治疗。PSM在这里可以以年龄和性别等特征，将相似的患者和一般人群进行匹配。
+
+代码和说明信息来源于以下资料，小丫重新编辑整理：
+
+原文：https://datascienceplus.com/how-to-use-r-for-matching-samples-propensity-score/
+
+译文：http://www.ituring.com.cn/article/260460
+
+## 生成输入数据
+如果你自己有数据，保存成easy_input.txt那样的格式，就可以跳过“生成输入数据”这步，直接进入“倾向得分匹配”；
+
+### 生成患者人群
+创建一个名为df.patients的数据框，我希望它包含250个病人的年龄和性别数据，所有病人的年龄都要在30-78岁之间，并且70%的病人被设定为男性。
+```{r}
+#install.packages("wakefield")
+library(wakefield)
+set.seed(1234)
+df.patients <- r_data_frame(n = 250, 
+                            age(x = 30:78, 
+                                name = 'Age'), 
+                            sex(x = c("Male", "Female"), 
+                                prob = c(0.70, 0.30), 
+                                name = "Sex"))
+df.patients$Sample <- as.factor('CASE')
+df.patients$ID<-paste("CASE",rownames(df.patients),sep = "")
+summary(df.patients)
+```
+
+### 生成正常对照人群
+创建一个名为df.population的数据框。我希望这个数据集的数据和患者的有些不同，因此正常人群的年龄区间被设定为18-80岁，并且男女各占一半。
+```{r}
+set.seed(1234)
+df.population <- r_data_frame(n = 1000, 
+                              age(x = 18:80, 
+                                  name = 'Age'), 
+                              sex(x = c("Male", "Female"), 
+                                  prob = c(0.50, 0.50), 
+                                  name = "Sex"))
+df.population$Sample <- as.factor('CONTROL')
+df.population$ID<-paste("CONTROL",rownames(df.population),sep = "")
+summary(df.population)
+```
+
+### 合并人群
+把上面这两个数据框合并，也就是把患者混进正常人群，这样就模拟出一个自然人群，完成了全部的准备工作。
+```{r}
+mydata <- rbind(df.patients, df.population)
+mydata$Group <- as.logical(mydata$Sample == 'CASE')
+head(mydata)
+tail(mydata)
+write.table(mydata,"easy_input.txt",row.names = F,quote = F,sep = "\t")
+```
+
+## 倾向得分匹配
+生成匹配的病例组数据集和对照组数据集
+
+用MatchIT包中的matchit函数来匹配两类样本
+```{r}
+#install.packages("MatchIt")
+library(MatchIt)
+#要找年龄最接近的，因此选用method=‘nearest’。
+#ratio=1意味着这是一一配对
+#同时也请注意Group变量需要是逻辑型变量
+set.seed(1234)
+match.it <- matchit(Group ~ Age + Sex, data = mydata, method="nearest", ratio=1)
+plot(match.it, type = 'jitter', interactive = FALSE)
+```
+
+## 生成CASE-CONTROL一一配对的格式
+```{r}
+df.match <- match.data(match.it)[1:ncol(mydata)]
+df<-df.match[order(df.match$Age),]#按年龄排序
+df<-df[order(df$Sex),]#按性别排序
+df<-df[order(df$Group),]#按组排序
+#配对
+dfpairinfo<-data.frame(df$ID[1:250],df$Age[1:250],df$Sex[1:250],df$ID[251:500],df$Age[251:500],df$Sex[251:500])
+colnames(dfpairinfo)<-c("CASEID","CASEage","CASEgender","CONTROLID","CONTROLage","CONTROLgender")
+head(dfpairinfo)
+write.table(dfpairinfo,"pair_info.txt",quote = F,sep = "\t",row.names = F )
+
+dfpair<-data.frame(df$ID[1:250],df$ID[251:500])
+colnames(dfpair)<-c("CASEID","CONTROLID")
+head(dfpair)
+write.table(dfpair,"pair_ID.txt",quote = F,sep = "\t",row.names = F )
+
+sessionInfo()
+```
+
+

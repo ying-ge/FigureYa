@@ -1,0 +1,182 @@
+---
+title: "FigureYa78gganatogram"
+author: "小丫画图出品"
+date: "2019-2-24"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用FigureYa55panCancer输出的基因在TCGA + GTEx的表达量TPM值（easy_input.csv文件）作为输入，用gganatogram画出感兴趣的基因在各个器官里的表达分布。
+
+## 应用场景
+
+gganatogramR包介绍：<https://github.com/jespermaag/gganatogram>，<https://mp.weixin.qq.com/s/BlRT8I0RB1o-Mi4TEWhFrQ>
+
+文章里类似的图举例：<https://mp.weixin.qq.com/s/Uc6syOjFTOduxZfVaZRPqw>
+
+在小丫画图公众号回复“器官”，查看更多介绍。
+
+## 环境设置
+
+```{r}
+#devtools::install_github("jespermaag/gganatogram")
+library(gganatogram)
+library(stringr)
+library(gridExtra)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件预处理
+
+如果你的数据已经整理成very_easy_input.csv的格式，就可以跳过这步，进入“开始画图”。
+
+此处以FigureYa55panCancer输出的的基因在TCGA + GTEx的表达量TPM值（easy_input.csv文件）为例，需要把TCGA的癌症名称跟包里的organ对应上。
+
+参照GEPIA help的Differential analysis：<http://gepia.cancer-pku.cn/help.html>，在此基础上添加gganatogram包的organ，整理成TCGA_organ.txt文件，欢迎来小丫画图群里探讨这些对应关系。
+
+```{r}
+# TCGA和GTEx的tumor和normal的TPM
+df <- read.csv("easy_input.csv", row.names = 1)
+head(df)
+df$tt <- paste(df$tissue, df$type2, sep = "_")
+df.median <- aggregate(.~tt, df[,3:4], median)
+df.median$TCGA <- str_split_fixed(df.median$tt, "_",2)[,1]
+df.median$type <- str_split_fixed(df.median$tt, "_",2)[,2]
+df.median$tt <- NULL
+
+### 把TCGA癌症名称缩写换成gganatogram包里的organ
+#根据背景知识，已整理成TCGA_organ
+#Name列来源：https://cn.bing.com/translator
+TCGA.organ <- read.table("TCGA_organ.txt", sep = "\t", header = T)
+TCGA.organ[,c(1:2,4)]
+
+TCGA.organ.tpm <- merge(TCGA.organ[,c(1,4)], df.median, by = "TCGA")
+TCGA.organ.tpm$TCGA <- NULL
+TCGA.organ.tpm <- TCGA.organ.tpm[TCGA.organ.tpm$organ != "",]
+# 男人
+hgMale_key_tpm <- merge(hgMale_key, TCGA.organ.tpm, by = "organ")
+hgMale_key_tpm$value <- hgMale_key_tpm$tpm #替换掉原来的value
+hgMale_key_tpm$tpm <- NULL
+write.csv(hgMale_key_tpm,"very_easy_input_Male.csv", quote = F, row.names = F)
+# 女人
+hgFemale_key_tpm <- merge(hgFemale_key, TCGA.organ.tpm, by = "organ")
+hgFemale_key_tpm$value <- hgFemale_key_tpm$tpm
+hgFemale_key_tpm$tpm <- NULL
+write.csv(hgFemale_key_tpm,"very_easy_input_Female.csv", quote = F, row.names = F)
+```
+
+**附：** 查看gganatogram包里的organ：
+
+```{r}
+#男人
+hgMale_key$organ
+#女人
+#hgFemale_key$organ
+#男女差异
+setdiff(hgMale_key$organ, hgFemale_key$organ)
+
+#雄鼠
+#mmMale_key$organ
+#雌鼠
+#mmFemale_key$organ
+
+#细胞
+#cell_key[['cell']]$organ
+
+#支持的其他物种
+names(other_key)
+#以拟南芥为例查看organ
+#other_key[["arabidopsis_thaliana"]]$organ
+```
+
+## 开始画图
+
+very_easy_input.csv，organ对应的数值。
+
+- 第一列是组织器官名，必须跟包里的organ一致
+- 第二列color，每种organ给一种颜色
+- 第三列组织所在的系统
+- 第四列数值，可以是基因表达量，或者其他临床指标。
+- 第五列tumor和normal
+
+其中第一列和第四列为必需
+
+此处以人类为例，分别画男人和女人，对比tumor和normal。
+
+还可以男女都画，然后ps成一半男一半女。
+
+其他物种按照very_easy_input_*.csv的格式整理好数据，就可以套用了
+
+```{r, fig.width=8, fig.height=4}
+#画女人
+hgFemale_tpm <- read.csv("very_easy_input_Female.csv")
+head(hgFemale_tpm)
+hgFemale_tpm$type <- hgFemale_tpm$type.y #或对比不同的系统，换成type.x
+
+#注意：
+#fill里要么是color，要么是value，你自己数据的列名要跟它一致
+#facet_wrap里的type，必须是type，你自己数据的列名要跟它一致
+hgFemale <- gganatogram(data=hgFemale_tpm, 
+                        fillOutline='white', #没有organ的位置用白色填充
+                        #human、mouse或cell，其他物种拉丁名用names(other_key)查看
+                        organism='human', 
+                        sex='female', #性别
+                        fill="value") + #还可以用color列填充
+  facet_wrap(~type) + #对比tumor和normal
+  #用value填充时，可以设置渐变色
+  scale_fill_gradient(low = "white", high = "red") + 
+  labs(fill = "Log2(TPM + 1)") + 
+  coord_cartesian(ylim = c(-120, 0))+ #不画小腿，如果想画到脚，就去掉这行
+  theme_void() #不画坐标轴
+
+hgFemale
+
+#画男人
+hgMale_tpm <- read.csv("very_easy_input_Male.csv")
+head(hgMale_tpm)
+hgMale_tpm$type <- hgMale_tpm$type.y
+hgMale <- gganatogram(data=hgMale_tpm, fillOutline='white', organism='human', sex='male', fill="value") + 
+  facet_wrap(~type) +
+  scale_fill_gradient(low = "white", high = "green") +
+  labs(fill = "Log2(TPM + 1)") + 
+  coord_cartesian(ylim = c(-120, 0)) +
+  theme_void()
+
+hgMale
+
+#组图并保存到pdf文件
+pdf("gganatogram.pdf")
+grid.arrange(hgFemale, hgMale, ncol=1)
+dev.off()
+```
+
+![](gganatogram.pdf)
+
+上图有些组织被盖住了，分开画更清晰。
+
+```{r}
+hgFemale_tpm$type <- hgFemale_tpm$type.x #换成type.x
+gganatogram(data=hgFemale_tpm, 
+            fillOutline='white',
+            organism='human', 
+            sex='female', 
+            fill="color") + #用color列的颜色填充
+  facet_wrap(~type) + 
+  theme_void()
+```
+
+```{r}
+sessionInfo()
+```

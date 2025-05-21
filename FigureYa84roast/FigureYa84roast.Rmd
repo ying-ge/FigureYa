@@ -1,0 +1,159 @@
+---
+title: "FigureYa84roast"
+author: "小丫画图出品"
+date: "2019-3-24"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：小丫
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+我要用自己的gene set做富集分析，像paper里那样用ROAST-barcode plot的方法来实现。
+
+**扩展阅读：**“小丫画图群”对富集分析的讨论记录：https://mp.weixin.qq.com/s/O1xd5l5h33fXUWOvX3UBGw
+
+![](example1.png)
+
+出自<http://genesdev.cshlp.org/content/28/12/1337.long>
+
+Figure 5. Pax5 restoration causes rapid repression of Myc and DNA replication factors. (F) Gene set analysis barcode plot. The RNA-seq differential gene expression data set upon Pax5 restoration in STAT5-CA;Vav-tTA;TRE-GFP-shPax5 leukemia cells in vivo is shown as a shaded rectangle, with genes horizontally ranked by moderated t statistic; genes up-regulated upon Pax5 restoration are shaded pink (t > 1), and down-regulated genes are shaded blue (t < 1). Overlaid are a set of previously described genes induced (red bars) or repressed (blue bars) upon the transition from large cycling pre-B cells to small resting pre-B cells during normal B-cell development in the bone marrow (Hoffmann et al. 2002). Red/blue traces above/below the bar represent relative enrichment.
+
+**Pathway analysis**
+
+Gene expression signatures were tested used ROAST rotation gene set testing (Smyth 2004; Wu et al. 2010). ROAST is a hypothesis driven test that takes into account the directionality (up or down) and strength (log2 fold change) of the genes in the gene set. Gene set barcode plots were generated using the barcodeplot function of the limma package as described previously (Lim et al. 2009). 
+
+![](example1_result.png)
+
+![](example2.png)
+
+出自<https://www.nature.com/articles/leu201527>
+
+Figure 2. Inducible Ikaros restoration in T-ALL in vivo. (e) Gene set analysis barcode plot, with RNA-seq differential gene expression from combined analysis of Ikaros restoration in ALL65, ALL101 and ALL211 in vivo shown as a shaded rectangle with genes horizontally ranked by moderated t-statistic. Genes upregulated upon Ikaros restoration are shaded pink (z41) and downregulated genes are shaded blue (zo1). Overlaid are a previously described set of genes induced (red bars) or repressed (blue bars) upon Notch inhibition in a murine T-ALL cell line.7 Red and blue traces above and below the barcode represent relative enrichment. P-value was computed by the roast method54 using both up- and downregulated genes. (f) Gene set analysis barcode plot as for (e) but with blue bars indicating 81 Rbpj-bound, Notch-activated genes recently identified in a murine T-cell leukemia cell line.
+
+![](example2_method.png)
+
+![](example2_result.png)
+
+## 应用场景
+
+roast和barcode分别用来做什么？
+
+简单讲就是：用roast来判断上/下调基因是否显著富集目标基因集，用barcode plot来展示上/下调基因在目标基因集中的分布。roast检验一个gene set，mroast做multiple roast tests。原文：
+
+- ROAST: The result here tells us that the immune response genes are significantly down-regulated, and additionally, mixed up and down. 出自：<https://genomicsclass.github.io/book/pages/gene_set_analysis_in_R.html>
+- barcode plot: a barcode enrichment plot highlighting **a particular gene signature in a DE analysis ranked by moderated t-statistics**. 出自： <https://academic.oup.com/nar/article/43/7/e47/2414268>
+
+适用性：适用于microarray、RNA-seq的表达矩阵，用limma给全部基因做差异表达分析，不需要筛差异表达基因。
+
+## 环境设置
+
+使用国内镜像安装包
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("statmod")
+```
+
+加载包
+
+```{r}
+library(limma)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入文件
+
+需要三种输入文件：
+
+- easy_input_set1.csv和easy_input_set2.csv，一个或两个。自己感兴趣的gene set/signature，例如某个通路、某个GO term、别人文章里发现的某一条件下的应答基因、跟目标蛋白有相互作用的蛋白等等。总之是你能讲出意义的gene set/signature就可以。
+
+- easy_input_count.csv，基因表达矩阵，已经过均一化等预处理
+
+- easy_input_sample.txt，样品分组信息
+
+用后两个文件做差异表达分析
+
+```{r}
+#表达矩阵
+expr <- read.csv("easy_input_expr.csv", row.names = 1)
+head(expr)
+
+#样品信息
+Targets <- read.table("easy_input_pheno.txt", sep = "\t", header = T)
+Targets
+design <- model.matrix(~ 0 + condition, data = Targets)
+design
+
+#Transform RNA-Seq Data Ready for Linear Modelling
+expr <- voom(expr, design, plot = TRUE)
+
+#两个基因集
+geneSet1 <- read.csv("easy_input_set1.csv")
+head(geneSet1)
+geneSet2 <- read.csv("easy_input_set2.csv")
+
+#基因集里的基因所在的行号
+Set1index <- rownames(expr) %in% geneSet1$Gene
+Set2index <- rownames(expr) %in% geneSet2$Gene
+
+#用roast分析一个gene set
+roast(expr, Set1index, design)
+
+#或者用mroast做multiple roast tests
+mroast(expr, list(Set1index,Set2index), design, 2)
+```
+
+**题外话：**如果你感兴趣的比较多，还可以写成循环，挑出pvalue较小的gene set用来画图。
+
+## 开始画图
+
+```{r}
+# 差异表达分析
+fit <- lmFit(expr, design)
+fit <- eBayes(fit)
+
+# 只画gene set 1
+pdf("rosta1.pdf", 7, 4)
+barcodeplot(fit$t[,2], Set1index, 
+            labels=c("negative statistics","positive statistics"), 
+            xlab = "gene set 1",
+            col.bars = "red")
+dev.off()
+
+# 同时画gene set 1和gene set 2，适合对比一个富集在up，另一个富集在down的情况
+# 一个图上最多画两个；如果有更多gene set，就一次画一个，组图吧！
+pdf("rosta2.pdf", 7, 6)
+barcodeplot(fit$t[,2], Set1index, Set2index, 
+            labels=c("low statistics or negative statistics","high or positive statistics"),
+            col.bars = c("red","blue"), xlab = "")
+dev.off()
+```
+
+![](rosta1.pdf)
+
+![](rosta2.pdf)
+
+## 附
+
+小伙伴对rosta富集分析比较陌生，附相关资料：
+
+RNA-seq为例：<https://bioconductor.org/packages/release/bioc/vignettes/limma/inst/doc/usersguide.pdf>，看“18.1 Profiles of Yoruba HapMap Individuals”，尤其是“Gene set testing”部分。
+
+microarray为例：<http://genomicsclass.github.io/book/pages/gene_set_analysis_in_R.html>
+
+limma包里的更多富集分析方法：<http://web.mit.edu/~r/current/arch/i386_linux26/lib/R/library/limma/html/10GeneSetTests.html>
+
+```{r}
+sessionInfo()
+```

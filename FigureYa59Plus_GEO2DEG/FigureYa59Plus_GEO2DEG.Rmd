@@ -1,0 +1,253 @@
+---
+title: "FigureYa59Plus_GEO2DEG"
+author: "小丫画图出品"
+date: "2019-12-18"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：Haitao Wang, Jianming Zeng and Dapeng Hao
+
+Dr. Haitao Wang: JNU,Guagnzhou => GIBH-CAS,Guagnzhou => BNU,Beijing => IMCB,Singapore => UMAC,Macao => NCCS,Singapore
+
+Email: ht.wang@yahoo.com; wang.haitao@nccs.com.sg
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+从GEO数据库下载芯片数据，筛选差异表达基因，无缝对接FigureYa59volcano画火山图。
+
+## 应用场景
+
+适用于GEO数据库里的芯片数据。
+
+## 环境设置
+
+加载包
+
+```{r}
+library(GEOquery)
+library(limma)
+library(ggplot2)
+library(ggrepel)
+library(ggthemes)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息
+options(stringsAsFactors = FALSE) #禁止chr转成factor
+```
+
+## 输入数据的获得
+
+如果你的数据已经整理成“easy_input_expr.csv”和“easy_input_pheno.csv”的格式，包含所有基因的表达矩阵，每行一个基因，每列一个sample，就可以跳过这步，直接进入“输入数据预处理”；
+
+如果已经整理成“easy_input_limma.csv”的格式，包含所有基因的差异表达分析结果，每行一个基因，第一列是基因名，后面包含log2foldchange、P.value或adj.Pvalue，就直接跳到“开始画图”。
+
+### 从GEO下载表达矩阵和芯片注释文件
+
+此处以GSE17215<https://www.ncbi.nlm.nih.gov/gds/?term=GSE17215>为例，用芯片平台自带的探针组和gene symbol对应关系：Affymetrix HT Human Genome U133A Array: GPL3921<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GPL3921>。如果芯片平台自带的注释信息不符合你的要求，需要重注释，请使用FigureYa58lncRNAreannotation，获得探针ID跟gene symbol的对应关系。
+
+First, let’s start by opening an R session and creating a function to return the eset<https://www.amazon.com/ESET-SMART-Security-3U-2016/dp/B01723PG10>(ExpressionSet) object or the original list object downloaded by the getGEO() function in R
+
+把下載的步驟寫成一個小的function `getGEOdata`，每次load function之後就可以簡單通過修改GSE ID拿到自己想要的data進行分析了
+
+```{r}
+getGEOdata <- function(x, GSE.id=FALSE){
+  # Use the getGEO() function to download the GEO data for the id stored in x
+  GSEdata <- getGEO(x, GSEMatrix=T, AnnotGPL=FALSE)
+  # check the data: printing a summary of the expression values for the first 2 columns
+  print(summary(exprs(GSEdata[[1]])[,1:2]))
+  # Get the eset object
+  eset <- GSEdata[[1]]
+  # Save the objects generated for future use in the current working directory
+  save(GSEdata, eset, file=paste(x, ".RData", sep=""))
+  # check whether we want to return the list object we downloaded on GEO or
+  # just the eset object with the getGSEobject argument
+  if(GSE.id) return(GSEdata) else return(eset)
+}
+
+# Store the dataset ids in a vector GEO_dataset just in case you want to loop through several GEO ids
+GEO_dataset <- c("GSE17215") #芯片数据在GEO数据库里的ID
+
+# 获得表达矩阵
+eset <- getGEOdata(GEO_dataset[1])
+exprSet <- as.data.frame(exprs(eset))
+# 提取GSM ID作为样品名
+GSMID <- pData(eset)[,c(1,2,8,10,12)]
+colnames(exprSet) <- GSMID$geo_accession
+
+# 获得探針组跟gene symbol的对应关系
+gpl <- getGEO(eset$platform_id[1])
+dim(Table(gpl)) #查看一共有多少行探针组
+
+# 到此為止，所需要的表达矩阵和芯片平台注释已經下載成功
+```
+
+### 整理芯片平台注释信息
+
+此处使用芯片平台自带的探针组和gene symbol对应关系。
+
+如果芯片平台自带的注释信息不符合你的要求，需要重注释，使用FigureYa58lncRNAreannotation，获得探针ID跟gene symbol的对应关系“gplTOgene.csv”文件，就跳过这步，直接进入“Transfer ID to Gene Symbol”。
+
+```{r}
+colnames(Table(gpl)) #查看列名
+#head(Table(gpl))
+
+# 提取自己想要的信息，此处第1、11、12列，分别是行名ID和其对应的Gene Symbol和ENTREZ_GENE_ID
+annotation <- Table(gpl)[,c(1,11,12)]
+i <- sapply(annotation, is.factor) # Change factor to character
+annotation[i] <- lapply(annotation[i], as.character)
+
+# 有些探针组对应多個基因，使用“///”分割，當然你可以選擇保留，我的習慣是保留第一個，所以這裡對於其他的冗余信息進行clean
+annotation[,2] <- data.frame(sapply(annotation[,2], function(x) unlist(strsplit(x,'///'))[1]),stringsAsFactors = F)[,1]
+annotation[,3] <- data.frame(sapply(annotation[,3], function(x) unlist(strsplit(x,'///'))[1]),stringsAsFactors = F)[,1]
+# 或者宁缺毋滥，删除对应多个基因的探针组，用下面两行代替上面两行
+#annotation <- annotation[!grepl("///", annotation$`Gene Symbol`),]
+#dim(annotation)
+
+# 把整理好的探针组ID、gene symbol、ENTREZ ID对应关系保存到文件里
+colnames(annotation) <- c("probe_id", "gsym", "entrez_id")
+write.csv(annotation, "gplTOgene.csv", row.names = F)
+```
+
+### 把表达矩阵的探针组ID换成Gene Symbol
+
+需要用到前面整理好的芯片自带的注释，或重注释获得的“gplTOgene.csv”文件。
+
+```{r, message=FALSE, warning=FALSE}
+annotation <- read.csv("gplTOgene.csv")
+head(annotation)
+
+exprSet$probe_id <- rownames(exprSet)
+express <- merge(x = exprSet, y = annotation[,c(1:2)], by = "probe_id", all.x = T) 
+#如果想轉換成ENTREZ_GENE_ID，就用下面这行
+#express <- merge(x = exprSet, y = annotation[,c(1:3)], by = "probe_id", all.x = T) 
+express$probe_id <- NULL
+
+# 有些gene对应多个探针组，此处保留其中表达量最大值
+dim(express)
+rowMeans <- apply(express, 1, function(x) mean(as.numeric(x), na.rm = T))
+express <- express[order(rowMeans, decreasing =T),]
+express <- express[!duplicated(express[, dim(express)[2]]),]  #express的最后一列为gene name
+express <- na.omit(express)
+dim(express)
+
+rownames(express) <- express[,dim(express)[2]]
+express <- express[,-(dim(express)[2])]
+head(express)
+# 至此，表达矩阵（express）已构建好，保存到文件
+write.csv(express, "easy_input_expr.csv", quote = F)
+```
+
+### 按照实验设计整理分组信息
+
+```{r}
+# 获得样品信息
+pdata <- pData(eset)
+i <- sapply(pdata, is.factor)
+pdata[i] <- lapply(pdata[i], as.character)
+
+# 按照实验设计，构建分组矩阵
+group_list <- subset(pdata, select = title) # Sample的分组信息
+group_list$condition = rep(c("a","b"), each = 3)
+group_list
+
+# 至此，分组矩阵（design）已构建好
+write.table(group_list, "easy_input_pheno.txt", quote = F, sep = "\t", row.names = F)
+```
+
+## 输入数据预处理
+
+输入数据：
+
+- easy_input_expr.csv，基因表达矩阵，每行一个基因，以gene symbol命名，每列一个sample
+- easy_input_pheno.txt，样品分组，第一列是sample ID，第二列是分组
+
+### 均一化处理
+
+如果你的数据已经进行过均一化处理，就直接运行下面这段的最后一行
+
+```{r, fig.width=10, fig.height=10}
+express <- read.csv("easy_input_expr.csv", row.names = 1)
+
+# Have to check whether this matrix is log2 based
+# usually, log2 value should be in between 0 - 18
+range(express)
+# if yes no need to log transfer, if above this range, have to do log transfer.
+express <- log2(express)
+
+par(mfrow=c(2,1))
+boxplot(express,outline = F) #均一化前
+
+# Normalise data quantiles
+library(preprocessCore)
+express.norm <- normalize.quantiles(as.matrix(express))
+
+colnames(express.norm) <- colnames(express)
+rownames(express.norm) <- rownames(express)
+boxplot(express.norm, outline=F) #均一化后
+
+#不需要再做均一化处理，就只运行这一行：
+#express.norm <- express
+```
+
+### 离群sample的处理
+
+如果不需要处理离群sample，就只运行下面这段的第一行。
+
+```{r}
+group_list <- read.table("easy_input_pheno.txt", sep = "\t", header = T)
+group_list
+
+# Correlation between the samples
+heatmap(cor(express.norm), scale = "none")
+round(cor(express.norm), 2)
+
+# 通過correlation，可能会發現某个sample与同一組其他sample之间距離很遠，需要删除。
+# 此处删除GSM431123
+group_list <- group_list[c(-3),] #删除第3个sample
+express.norm <- express.norm[,c(-3)] #删除第3列
+
+# Correlation between the samples again
+heatmap(cor(express.norm),scale="none")
+round(cor(express.norm),2)
+```
+
+### Differential expression analysis
+
+Limma for differential expression gene analysis (DEG) ([limma powers differential expression analyses](https://academic.oup.com/nar/article/43/7/e47/2414268/limma-powers-differential-expression-analyses-for))**
+
+```{r}
+design <- model.matrix(~ 0 + factor(group_list$condition))
+colnames(design) <- levels(factor(group_list$condition))
+rownames(design) <- colnames(express.norm)
+design
+
+# 构建差异比较矩阵
+contrast.matrix <- makeContrasts(b-a, levels = design)
+# 至此，差异表达矩阵已构建好
+
+fit <- lmFit(express.norm,design)
+fit2 <- contrasts.fit(fit,contrast.matrix)
+fit2 <- eBayes(fit2)
+# 得到两两差异表达的结果
+# b vs. a
+x <- topTable(fit2, coef = 1, n = Inf, adjust.method = "BH", sort.by = "P")
+
+#把全部基因的limma分析结果保存到文件
+write.csv(x, "easy_input_limma.csv", quote = F)
+```
+
+## 开始画图
+
+用上面获得的`easy_input_limma.csv`作为输入文件，继续运行FigureYa59volcano里的代码，即可画最美火山图。
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<omf:tcga_bcr xsi:schemaLocation="http://tcga.nci/bcr/xml/clinical/omf/2.7 https://raw.githubusercontent.com/nchbcr/xsd/2.7/tcga.nci/bcr/xml/clinical/omf/2.7/TCGA_BCR.Other_Malignancies.xsd" schemaVersion="2.7" xmlns:omf="http://tcga.nci/bcr/xml/clinical/omf/2.7" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:admin="http://tcga.nci/bcr/xml/administration/2.7" xmlns:shared="http://tcga.nci/bcr/xml/shared/2.7" xmlns:omf_v4.0="http://tcga.nci/bcr/xml/clinical/omf/2.7/4.0" xmlns:omf_shared="http://tcga.nci/bcr/xml/clinical/shared/omf/2.7" xmlns:rx="http://tcga.nci/bcr/xml/clinical/pharmaceutical/2.7" xmlns:rad="http://tcga.nci/bcr/xml/clinical/radiation/2.7" xmlns:shared_stage="http://tcga.nci/bcr/xml/clinical/shared/stage/2.7" xmlns:clin_shared="http://tcga.nci/bcr/xml/clinical/shared/2.7">
+    <admin:admin>
+        <admin:bcr xsd_ver="1.17">Nationwide Children's Hospital</admin:bcr>
+        <admin:file_uuid xsd_ver="2.6">F527668D-ECB4-4754-AD4C-E1973D4267FA</admin:file_uuid>
+        <admin:batch_number xsd_ver="1.17">405.45.0</admin:batch_number>
+        <admin:project_code xsd_ver="2.7">TCGA</admin:project_code>
+        <admin:disease_code xsd_ver="2.6">LIHC</admin:disease_code>
+        <admin:day_of_dcc_upload xsd_ver="1.17">22</admin:day_of_dcc_upload>
+        <admin:month_of_dcc_upload xsd_ver="1.17">12</admin:month_of_dcc_upload>
+        <admin:year_of_dcc_upload xsd_ver="1.17">2016</admin:year_of_dcc_upload>
+        <admin:patient_withdrawal>
+            <admin:withdrawn>false</admin:withdrawn>
+        </admin:patient_withdrawal>
+        <admin:program xsi:nil="true" xsd_ver="2.7"/>
+        <admin:dbgap_registration_code xsi:nil="true" xsd_ver="2.7"/>
+    </admin:admin>
+    <omf:patient>
+        <admin:additional_studies/>
+        <shared:tissue_source_site cde="" cde_ver="" xsd_ver="2.4" owner="TSS" procurement_status="Completed" restricted="false">2Y</shared:tissue_source_site>
+        <shared:patient_id cde="" cde_ver="" xsd_ver="2.4" owner="TSS" procurement_status="Completed" restricted="false">A9H6</shared:patient_id>
+        <shared:bcr_patient_barcode preferred_name="" display_order="9999" cde="2003301" cde_ver="" xsd_ver="1.8" owner="TSS" procurement_status="Completed" restricted="false">TCGA-2Y-A9H6</shared:bcr_patient_barcode>
+        <shared:bcr_patient_uuid preferred_name="" display_order="9999" cde="" cde_ver="" xsd_ver="2.3" owner="TSS" procurement_status="Completed" restricted="false">BC3502BC-BBF6-44F2-A1F4-D1567819AEFB</shared:bcr_patient_uuid>
+        <omf:omfs>
+            <omf_v4.0:omf>
+                <omf_shared:bcr_omf_barcode xsd_ver="2.6" owner="TSS" procurement_status="Completed" restricted="false">TCGA-2Y-A9H6-O68656</omf_shared:bcr_omf_barcode>
+                <omf_shared:bcr_omf_uuid preferred_name="" display_order="9999" cde="" cde_ver="" xsd_ver="2.6" owner="TSS" procurement_status="Completed" restricted="false">32EF199B-ACE8-44E6-90E8-41CA2F42E09D</omf_shared:bcr_omf_uuid>
+                <omf_shared:malignancy_type preferred_name="malignancy_type" display_order="4" cde="3182890" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018449">Prior Malignancy</omf_shared:malignancy_type>
+                <omf_shared:other_malignancy_anatomic_site preferred_name="" display_order="9999" cde="4122351" cde_ver="" xsd_ver="2.6" tier="" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018450">Uterus</omf_shared:other_malignancy_anatomic_site>
+                <omf_shared:other_malignancy_anatomic_site_text preferred_name="" display_order="9999" cde="4122371" cde_ver="" xsd_ver="2.6" tier="2" owner="TSS" procurement_status="Not Applicable" restricted="false" source_system_identifier="4018451" xsi:nil="true"/>
+                <omf_shared:other_malignancy_laterality preferred_name="" display_order="9999" cde="4122391" cde_ver="" xsd_ver="2.6" tier="" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018452"/>
+                <omf_shared:other_malignancy_histological_type preferred_name="" display_order="9999" cde="4122411" cde_ver="" xsd_ver="2.6" tier="" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018453">Other, specify</omf_shared:other_malignancy_histological_type>
+                <omf_shared:other_malignancy_histological_type_text preferred_name="" display_order="9999" cde="4122431" cde_ver="" xsd_ver="2.6" tier="2" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018454">Endometerial</omf_shared:other_malignancy_histological_type_text>
+                <omf_shared:days_to_other_malignancy_dx precision="day" xsd_ver="2.6" tier="2" cde="3462301" owner="TSS" procurement_status="Completed" preferred_name="other_malignancy_dx_days_to" display_order="13" cde_ver="1.000">-2114</omf_shared:days_to_other_malignancy_dx>
+                <omf_shared:surgery>
+                    <shared:surgery_indicator preferred_name="surgery_indicator" display_order="14" cde="3186538" cde_ver="2.000" xsd_ver="2.6" tier="2" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018459">YES</shared:surgery_indicator>
+                    <omf_shared:surgery_type preferred_name="other_malignancy_surgery_type" display_order="15" cde="3462300" cde_ver="1.000" xsd_ver="2.6" tier="2" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018460">TAH/BSO</omf_shared:surgery_type>
+                    <omf_shared:days_to_surgical_resection precision="day" xsd_ver="2.6" tier="2" cde="3462302" owner="TSS" procurement_status="Completed" preferred_name="other_malignancy_surgery_days_to" display_order="19" cde_ver="1.000">-2114</omf_shared:days_to_surgical_resection>
+                </omf_shared:surgery>
+                <omf_shared:drug_tx>
+                    <shared:drug_tx_indicator preferred_name="pharmaceutical_therapy_indicator" display_order="20" cde="3178327" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018465">NO</shared:drug_tx_indicator>
+                    <omf_shared:drug_tx_extent preferred_name="pharmaceutical_therapy_extent" display_order="21" cde="3178365" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018466"/>
+                    <rx:days_to_drug_therapy_start precision="day" xsd_ver="1.12" tier="2" cde="3392465" owner="TSS" procurement_status="Not Available" preferred_name="pharmaceutical_tx_started_days_to" display_order="26" cde_ver="1.000"/>
+                    <omf_shared:administered_drug>
+                        <rx:drug_name preferred_name="pharmaceutical_therapy_drug_name" display_order="80" cde="2975232" cde_ver="1.000" xsd_ver="1.10" tier="2" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018467"/>
+                    </omf_shared:administered_drug>
+                </omf_shared:drug_tx>
+                <omf_shared:radiation_tx>
+                    <omf_shared:radiation_tx_indicator preferred_name="radiation_therapy_indicator" display_order="27" cde="3178328" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018472">NO</omf_shared:radiation_tx_indicator>
+                    <omf_shared:radiation_tx_extent preferred_name="radiation_therapy_extent" display_order="28" cde="3178353" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018473"/>
+                    <omf_shared:rad_tx_to_site_of_primary_tumor preferred_name="history_rt_tx_to_site_of_tcga_tumor" display_order="29" cde="2865132" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018474"/>
+                    <rad:days_to_radiation_therapy_start precision="day" xsd_ver="1.12" tier="2" cde="3008313" owner="TSS" procurement_status="Not Available" preferred_name="radiation_therapy_started_days_to" display_order="33" cde_ver="1.000"/>
+                </omf_shared:radiation_tx>
+                <omf_shared:omf_staging>
+                    <shared_stage:system_version preferred_name="ajcc_staging_edition" display_order="45" cde="2722309" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018481">6th</shared_stage:system_version>
+                    <shared_stage:clinical_stage preferred_name="figo_clinical_tumor_stage" display_order="9999" cde="3225684" cde_ver="1.000" xsd_ver="2.6" tier="2" owner="TSS" procurement_status="Not Applicable" restricted="false" source_system_identifier="4018480"/>
+                    <shared_stage:pathologic_stage preferred_name="ajcc_pathologic_tumor_stage" display_order="49" cde="3203222" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Completed" restricted="false" source_system_identifier="4018485">Stage I</shared_stage:pathologic_stage>
+                    <shared_stage:pathologic_categories>
+                        <shared_stage:pathologic_T preferred_name="ajcc_tumor_pathologic_pt" display_order="46" cde="3045435" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018482"/>
+                        <shared_stage:pathologic_N preferred_name="ajcc_nodes_pathologic_pn" display_order="47" cde="3203106" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018483"/>
+                        <shared_stage:pathologic_M preferred_name="ajcc_metastasis_pathologic_pm" display_order="48" cde="3045439" cde_ver="1.000" xsd_ver="2.6" tier="1" owner="TSS" procurement_status="Not Available" restricted="false" source_system_identifier="4018484"/>
+                    </shared_stage:pathologic_categories>
+                </omf_shared:omf_staging>
+                <clin_shared:day_of_form_completion preferred_name="form_completion_day" display_order="4" cde="2975716" cde_ver="1.000" xsd_ver="2.2" tier="2" owner="TSS" procurement_status="Completed" restricted="false">5</clin_shared:day_of_form_completion>
+                <clin_shared:month_of_form_completion preferred_name="form_completion_month" display_order="3" cde="2975718" cde_ver="1.000" xsd_ver="2.2" tier="2" owner="TSS" procurement_status="Completed" restricted="false">12</clin_shared:month_of_form_completion>
+                <clin_shared:year_of_form_completion preferred_name="form_completion_year" display_order="5" cde="2975720" cde_ver="1.000" xsd_ver="2.2" tier="2" owner="TSS" procurement_status="Completed" restricted="false">2014</clin_shared:year_of_form_completion>
+            </omf_v4.0:omf>
+        </omf:omfs>
+    </omf:patient>
+</omf:tcga_bcr>

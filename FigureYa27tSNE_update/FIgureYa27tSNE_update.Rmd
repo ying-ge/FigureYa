@@ -1,0 +1,376 @@
+---
+title: "FigureYa27t-SNE_update"
+author: "小丫画图出品"
+date: "2020-2-21"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，回复“小白”，看小视频，实现点鼠标跑代码。
+
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：徐洲更<https://www.jianshu.com/u/9ea40b5f607a>
+
+![](hoptop.jpg)
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用R做单细胞RNA-seq的t-SNE图。
+
+![](example.png)
+
+出自<https://www.nature.com/articles/nature22973>
+
+你可能会卡在两个问题上：R包安装和数据集的预处理。
+
+本代码带你顺利解决这两个问题，画出t-SNE图，把细胞分类和候选marker基因输出到文件。
+
+# 应用场景
+
+场景一：单细胞测序的上百个细胞，识别亚群，找到marker基因；
+
+场景二：上百个肿瘤样本，识别亚型，找到marker基因。像例图那样，用来划分甲基化亚型。
+
+# 环境设置
+
+安装R包`Seurat`。之前的版本对应2.x, 目前版本对应3.x.x.
+
+```{r, warning=FALSE,message=FALSE}
+# loading Seurat
+if (! require("Seurat")){
+  install.packages('Seurat')
+  library(Seurat)
+} else{
+  library(Seurat)
+}
+# loading plyr
+if (! require(plyr)){
+  install.packages("plyr")
+  library(plyr)
+} else{
+  library(plyr)
+}
+
+library(ggplot2)
+```
+
+**注**: Windows系统用户安装会很顺利。
+
+MacOS/Linux系统用户要有Root权限，或许会因为hdf5r安装失败而无法顺利安装，不要图省事，听报错的话，用`brew install hdf5`。
+
+因为根据hdf5的源代码，它不支持最新的hdf5 1.10.2，最高只支持hdf5 1.10.0，所以请在root权限下根据源码安装。
+
+```bash
+wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.0/src/hdf5-1.10.0.tar.gz
+tar xf hdf5-1.10.0.tar.gz
+cd hdf5-1.10.0
+./configure --prefix=/usr/local
+make && sudo make install
+```
+
+# 数据预处理
+
+请先解压当前目录的下的tung.zip, 里面存放着测试数据集
+
+输入数据是基于UMI的表达矩阵而不是count数据，其中数据集中的行表示基因，列表示细胞。
+
+出自<https://www.nature.com/articles/srep39921> 
+
+## 读取数据
+
+```{r, message=FALSE, warning=FALSE}
+molecules <- read.delim("./tung/molecules.txt",header = TRUE,
+           row.names = 1)
+dim(molecules)
+#查看前10个基因在前3个细胞中的表达量
+molecules[1:10,1:3]
+```
+
+## 创建Seurat对象
+
+数据初始化，并初步筛选
+
+```{r}
+obj <- CreateSeuratObject(counts = molecules, 
+                   min.cells = 3, #筛选至少在3个细胞中表达的基因
+                   min.features = 200) #筛选至少有200个基因表达的细胞
+```
+
+> 2.x版本是min.genes，现在改成了min.features，因为基因也是一种特征， 此外raw.data改成了counts
+
+## 增加Seurat的元信息(metadata)
+
+元信息存放在`obj@meta.data`中，可以是细胞的分组信息，所做处理等，需要自己提供。
+
+此处包含3个人，各96个细胞，各3次重复。
+
+```{r, message=FALSE}
+ann <- read.delim("./tung/annotation.txt", header = TRUE)
+rownames(ann) <- ann$sample_id
+head(ann)
+summary(ann)
+```
+
+检查样品信息跟表达量矩阵的样品是否一致
+
+```{r}
+if (all(rownames(ann) %in% colnames(obj))){
+  obj <- AddMetaData(obj, ann)
+} else{
+  warning("row names should be same to the items in object@cell.names")
+}
+```
+
+## 过滤掉低质量细胞
+
+根据具体情况来确定标准，进行QC，过滤掉低质量的细胞，此处用`VlnPlot`探索可能的离群值
+
+```{r, warning=FALSE}
+VlnPlot(obj, features = c("nCount_RNA","nFeature_RNA"), group.by = "orig.ident")
+```
+
+一般我们会过滤掉过低表达基因的细胞，上图中，你可以认为nCount_RNA低于`25000`、nFeature_RNA低于`6000`的细胞是低质量细胞。把这两个值写到下面过滤细胞的参数中：
+
+```{r}
+obj <- subset(obj, subset = nCount_RNA  > 25000 & 
+                nFeature_RNA > 6000)
+```
+
+此处所用的数据实验深度足够，10X技术单细胞数据标准会不同。
+
+## 标准化
+
+标准化这一步和混池RNA-seq类似，一般不会只使用raw count，而会用log标准化等方式降低其他干扰因素的影响。
+
+```{r, message=FALSE}
+obj <- NormalizeData(
+    object = obj, 
+    normalization.method = "LogNormalize", 
+    scale.factor = 10000
+)
+```
+
+## 寻找细胞间变化明显的基因
+
+直接使用全部基因进行后续分析对配置要求很高，而是选择那些在细胞中具有明显变化的基因。在降低资源消耗的同时还保证了结果的可靠性。
+
+```{r, message=FALSE}
+obj <- FindVariableFeatures(
+    object = obj,
+    mean.function = ExpMean, #计算x轴的值的方法
+    dispersion.function = LogVMR, #计算y轴的值的方法
+    do.plot = F,
+    x.low.cutoff = 0.0125, 
+    x.high.cutoff = 3, 
+    y.cutoff = 0.5
+)
+```
+
+## 处理混淆因子
+
+所谓的混淆因子(confounder factor) 指的就是目标因素（如实验处理）以外的因素对结果的影响， 比如说批次效应。这些因素掩盖了你真正想研究的目标，所以要尽可能排除。
+
+```{r, message=FALSE, warning=FALSE}
+obj <- ScaleData(
+    object = obj, 
+    vars.to.regress = c("nCount_RNA")
+)
+```
+
+## 线性降维（PCA）
+
+后续会对细胞进行聚类，直接使用所有特征（即基因）会出现数据挖掘中的“维度爆炸”，即维度越高反而结果越差。因此我们需要用PCA进行线性降维，使用部分主成分代替所有基因进行后续的t-SNE和细胞聚类分析。
+
+根据PCElbowPlot确定主成分个数，曲线变得平缓的横坐标。
+
+这个主成分个数将用在下一部分的`pca_to_use =`参数中
+
+```{r}
+obj <- RunPCA(
+    object = obj, 
+    pc.genes = obj@var.genes, 
+    do.print = FALSE
+)
+ElbowPlot(object = obj)
+```
+
+从图中可以看出：横坐标PC为14时，曲线趋近平缓，因此，此处定为14。
+
+## 细胞聚类
+
+细胞聚类是单细胞分析的关键一步，毕竟大部分研究是想找到新的细胞分群、以前没有发现的细胞类型
+
+```{r}
+pca_to_use <- 14 #上一步主成分的个数
+obj <- FindNeighbors(obj, reduction = "pca",
+                      dims = 1:pca_to_use)
+obj <- FindClusters(object = obj,
+                    resolution = 1.0)
+```
+
+## t-SNE非线性降维
+
+```{r}
+obj <- RunTSNE(
+    object = obj,
+    dims = 1:pca_to_use,
+    do.fast = TRUE
+)
+```
+
+# 开始画图
+
+按照细胞分群(`group.by="ident"`)进行着色
+
+设置`pt_size`修改点的大小，修改`mycol`增加自定义颜色
+
+```{r}
+#定义足够多的颜色，后面从这里选颜色
+mycol <- c("#223D6C","#D20A13","#FFD121","#088247","#11AA4D","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+```
+
+## t-SNE可视化
+
+```{r}
+pt_size = 1
+df <- obj@reductions$tsne@cell.embeddings
+df <- cbind(df, as.data.frame(obj$seurat_clusters))
+colnames(df) <- c("x", "y", "ident")
+p <- ggplot(df, aes(x=x, y=y)) + geom_point(aes(colour=ident),size=pt_size) + 
+  labs(x="t-SNE 1", y ="t-SNE 2") +
+  theme_classic()
+```
+
+## 画椭圆线
+
+用于辅助区分不同细胞类群
+
+```{r}
+obs <- p$data[,c("x","y","ident")]
+ellipse_pro <- 0.98
+theta <- c(seq(-pi, pi, length = 50), seq(pi, -pi, length = 50))
+circle <- cbind(cos(theta), sin(theta))
+
+ell <- ddply(obs, 'ident', function(x) {
+  if(nrow(x) <= 2) {
+    return(NULL)
+  }
+  sigma <- var(cbind(x$x, x$y))
+  mu <- c(mean(x$x), mean(x$y))
+  ed <- sqrt(qchisq(ellipse_pro, df = 2))
+  data.frame(sweep(circle %*% chol(sigma) * ed, 2, mu, FUN = '+'))
+})
+names(ell)[2:3] <- c('x', 'y')
+
+ell <- ddply(ell, .(ident) , function(x) x[chull(x$x, x$y), ])
+p1 <- p + geom_polygon(data = ell, aes(group = ident), 
+                       colour = "black",
+                       alpha = 1,fill = NA,
+                       linetype="dashed") 
+# linetype可选类型:
+# blank, solid, dashed, dotted, dotdash, longdash, twodash
+```
+
+## 修改图例名
+
+```{r}
+cell_nums <- as.data.frame(table(p$data$ident))
+cell_nums$Var1 <- as.roman(as.numeric(cell_nums$Var1))
+cell_labels <- paste0(cell_nums$Var1," ","(n=",cell_nums$Freq,")")
+
+p2 <- p1 + scale_discrete_manual("colour",
+                                 name = "Cell type",
+                                 labels= cell_labels,
+                                 values = mycol)
+p2
+
+ggsave("t-SNE.pdf")
+```
+
+## 突出显示某些细胞
+
+实际做图时，要结合你手中的样品信息给出这个列表，例如结合DNA测序数据挑出带有某个基因突变的细胞，或者结合DNA甲基化测序数据挑出高甲基化的细胞。
+
+```{r}
+#此处取排名前100个细胞
+mutList<-colnames(molecules)[1:100]
+
+DimPlot(obj, reduction.use = "tsne", 
+        cells.highlight = mutList,
+        cols.highlight = mycol[3], #用黄色突出显示，其余细胞是黑色
+        sizes.highlight = 1.5, #把点调大，更突出
+        group.by = "ident")
+```
+
+## 按照其他元信息的列进行着色。
+
+按照个体着色，查看来源于三个人的细胞的分布情况
+
+```{r}
+DimPlot(obj, reduction.use = "tsne", 
+        cols.use = mycol,
+        group.by = "individual")
+```
+
+# 输出分类信息
+
+## 输出marker基因
+
+获取每个分类的可能标记基因(候选分子标记)
+
+```{r}
+markers <- FindAllMarkers(obj,
+                         test.use = "wilcox",
+                         min.pct = 0.1,
+                         min.diff.pct = -Inf)
+write.csv(markers, file="cell_type_markers.csv",quote = FALSE,
+          row.names = TRUE)
+```
+
+## 展示候选marker基因的表达量
+
+可以画一个基因，也可以同时画多个基因
+
+通常会用候选marker基因画图，参考例图paper里的`Extended Data Figure 8d`
+
+从上一部分“输出marker基因”输出的`cell_type_markers.csv`文件里选出每类`p_val_adj`排名第一的基因，例如第II类(class为1)的`ENSG00000205364`。
+
+```{r,fig.width=8,fig.height=16}
+FeaturePlot(obj, reduction = "tsne",
+            features = c("ERCC-00025","ENSG00000205364","ENSG00000164265","ENSG00000154556","ENSG00000014641","ENSG00000053438","ENSG00000053438","ENSG00000131969","ENSG00000135549"), 
+            ncol  = 2, #画在2列里
+            cols = c("green","grey","red"), #用三种颜色，分别展示低表达、中表达和高表达
+            #do.return =T, #返回ggplot2对象，便于组图
+            #no.legend = F, #显示图例
+            pt.size = 1
+            ) 
+ggsave("marker.pdf")
+```
+
+## 输出分类信息及表达矩阵
+
+可用于下一步分析、作图：
+
+- 后续应用一：像例图paper的Figure4c那样，用各组样品ID提取临床信息和高频突变基因，绘制瀑布图oncoprint，见`FigureYa18 oncoprint`；
+
+- 后续应用二：用各组候选marker基因表达矩阵画heatmap，见`FigureYa17 heatmap`。
+
+输出样本ID对应的分类信息，这里输出的是所有基因的标准化、去除混淆因子的表达矩阵。
+
+```{r}
+cell_type_df <- as.data.frame(obj$seurat_clusters)
+colnames(cell_type_df) <- "CellType"
+cell_type_df <- cbind(cell_type_df, t(obj@assays$RNA@scale.data))
+write.csv(t(cell_type_df),"molecules_in_cell_types.csv")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

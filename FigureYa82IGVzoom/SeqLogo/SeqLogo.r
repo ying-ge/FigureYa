@@ -1,0 +1,7 @@
+#install.packages("seqLogo")
+library("seqLogo")
+m<-read.table("pwm.txt",sep="\t")
+motif<-makePWM(m)
+pdf("motif.pdf",width=5,height=2.5)
+seqLogo(motif,xaxis=F,yaxis=F)
+dev.off()

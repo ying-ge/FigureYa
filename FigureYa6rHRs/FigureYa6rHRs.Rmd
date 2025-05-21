@@ -1,0 +1,141 @@
+---
+title: "FigureYa6rHRs"
+author: "小丫画图出品"
+date: "2018-5-13"
+output: html_document
+---
+微信ID: epigenomics  E-mail: figureya@126.com
+
+作者：贝塔猫
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+临床的亚组分析，我想用R做出文章里的样子。
+
+这里只从形式上复现，如果需要计算过程，请参考FigureYa90subgroup。
+
+![](example.png)
+出自<https://ascopubs.org/doi/full/10.1200/JCO.2017.75.6155?url_ver=Z39.88-2003&rfr_id=ori%3Arid%3Acrossref.org&rfr_dat=cr_pub%3Dpubmed>
+
+## 使用场景
+场景一：临床的亚组分析。例如，能从参与临床试验的那么多人当中发现EGFR抑制剂唯独对亚洲非吸烟女性有效。
+
+场景二：meta分析，是经典的meta分析的图。
+
+## 输入数据
+临床数据，包括分类、样本数、风险比及置信区间(上限及下限)等
+
+## 输入数据的格式化
+测试用数据文件为easy_input.csv，分类、样本数、风险比及置信区间(上限及下限)对应的列名分别是Variable、Count、Point.Estimate、Low和High
+
+```{r,message=FALSE,warning=FALSE}
+#install.packages("forestplot")
+library("forestplot")
+
+#读取输入文件，输入数据一般包括分类、样本数、风险比及置信区间（上限及下限）等，需要注意的是输入文件的布局(包括文字缩进)将展示在最后结果中，所见即所得。
+data <- read.csv("easy_input.csv", stringsAsFactors=FALSE)
+head(data)
+np <- ifelse(!is.na(data$Count), paste(data$Count," (",data$Percent,")",sep=""), NA)#合并count和percent，这一步非必要
+head(np)
+
+#将要在图中展示的文本
+#所见即所得，想显示哪几列，就在cbind里面添加
+tabletext <- cbind(c("\nSubgroup",NA,NA,data$Variable,NA),
+                   c("No. of\nPatients (%)",NA,NA,np,NA),
+                   c("Hazard Ratio\n(95% CI)",NA,NA,ifelse(!is.na(data$Count), paste(format(data$Point.Estimate,nsmall=2)," (",format(data$Low,nsmall = 2)," to ",format(data$High,nsmall = 2),")",sep=""), NA),NA),
+                   #c("P-value", NA, NA, ifelse(data$P < 0.001, "<0.001", round(data$P,3)), NA))
+                   c("P-value", NA, NA, data$P, NA)) #如果没有pvalue，就删掉这行 
+head(tabletext)
+```
+
+## 开始画图
+用默认参数画图
+```{r,fig.height=8,fig.width=8,message=FALSE,warning=FALSE}
+forestplot(labeltext=tabletext,mean=c(NA,NA,1,data$Point.Estimate,NA),
+           lower=c(NA,NA,1,data$Low,NA),upper=c(NA,NA,1,data$High,NA))
+```
+
+仔细读说明文档，调整参数，就能画出paper里的样子
+
+**重点修改`hrzl_lines`参数里的第三行，画最下面一条黑线，""中数字为nrow(data)+5**
+
+```{r,fig.height=10,fig.width=10,message=FALSE,warning=FALSE}
+forestplot(labeltext=tabletext, #图中的文本
+           mean=c(NA,NA,1,data$Point.Estimate,NA),#HR
+           lower=c(NA,NA,1,data$Low,NA), #95%置信区间下限
+           upper=c(NA,NA,1,data$High,NA),#95%置信区间上限
+           #title="Hazard Ratio",
+           graph.pos=3,#图在表中的列位置
+           graphwidth = unit(.4,"npc"),#图在表中的宽度比例
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石
+           col=fpColors(box="steelblue", lines="black", zero = "black"),#box颜色
+           boxsize=c(NA,NA,NA,data$Percent,NA)/75,#box大小根据样本量设置
+           lwd.ci=2,ci.vertices.height = 0.1,ci.vertices=TRUE,#置信区间用线宽、高、型
+           zero=1,#zero线横坐标
+           lwd.zero=2,#zero线宽
+           grid = structure(c(data[1,]$Point.Estimate), gp = gpar(col = "black", lty=2,lwd=2)),#虚线(可多条)及其横坐标、颜色、线宽
+           xticks = c(0.5, 1,1.5, 2),#横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,#X轴线宽
+           xlab="     <-Favors A Arm      Favors B Arm->",#X轴标题
+           hrzl_lines=list("3" = gpar(lwd=2, col="black"),#第三行顶部加黑线，引号内数字标记行位置
+                           #"4" = gpar(lwd=60,lineend="butt", columns=c(1:4), col="#99999922"),#加阴影，弱项不建议使用
+                           "30" = gpar(lwd=2, col="black")),#最后一行底部加黑线,""中数字为nrow(data)+5
+           txt_gp=fpTxtGp(label=gpar(cex=1.25),#各种字体大小设置
+                          ticks=gpar(cex=1.25),
+                          xlab=gpar(cex = 1.25),
+                          title=gpar(cex = 1.25)),
+           #is.summary = c(T,rep(F,27)),#首行字体类型设置
+           lineheight = unit(.75,"cm"),#固定行高
+           #align=c("l","c","c"),#每列文字的对齐方式，偶尔会用到
+           #cex=10,
+           colgap = unit(0,"cm"),#列间隙
+           mar=unit(rep(1.25, times = 4), "cm"),#图形页边距
+           new_page = F#是否新页
+           )
+```
+
+##输出文件
+把森林图输出到pdf文件中，测试的输出文件为forestplot.pdf
+```{r}
+pdf("forestplot.pdf",width=12,height = 9)#新建PDF文件，准备写入图形
+forestplot(labeltext=tabletext, #图中的文本
+           mean=c(NA,NA,1,data$Point.Estimate,NA),#HR
+           lower=c(NA,NA,1,data$Low,NA), #95%置信区间下限
+           upper=c(NA,NA,1,data$High,NA),#95%置信区间上限
+           #title="Hazard Ratio",
+           graph.pos=3,#图在表中的列位置
+           graphwidth = unit(.4,"npc"),#图在表中的宽度比例
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石
+           col=fpColors(box="steelblue", lines="black", zero = "black"),#box颜色
+           boxsize=c(NA,NA,NA,data$Percent,NA)/75,#box大小根据样本量设置
+           lwd.ci=2,ci.vertices.height = 0.1,ci.vertices=TRUE,#置信区间用线宽、高、型
+           zero=1,#zero线横坐标
+           lwd.zero=2,#zero线宽
+           grid = structure(c(data[1,]$Point.Estimate), gp = gpar(col = "black", lty=2,lwd=2)),#虚线(可多条)及其横坐标、颜色、线宽
+           xticks = c(0.5, 1,1.5, 2),#横坐标刻度根据需要可随意设置
+           lwd.xaxis=2,#X轴线宽
+           xlab="     <-Favors A Arm      Favors B Arm->",#X轴标题
+           hrzl_lines=list("3" = gpar(lwd=2, col="black"),#第三行顶部加黑线，引号内数字标记行位置
+                           #"4" = gpar(lwd=60,lineend="butt", columns=c(1:4), col="#99999922"),#加阴影，弱项不建议使用
+                           "30" = gpar(lwd=2, col="black")),#最后一行底部加黑线,""中数字为nrow(data)+5
+           txt_gp=fpTxtGp(label=gpar(cex=1.25),#各种字体大小设置
+                          ticks=gpar(cex=1.25),
+                          xlab=gpar(cex = 1.25),
+                          title=gpar(cex = 1.25)),
+           #is.summary = c(T,rep(F,27)),#首行字体类型设置
+           lineheight = unit(.75,"cm"),#固定行高
+           #align=c("l","c","c"),#每列文字的对齐方式，偶尔会用到
+           #cex=10,
+           colgap = unit(0,"cm"),#列间隙
+           mar=unit(rep(1.25, times = 4), "cm"),#图形页边距
+           new_page = F#是否新页
+           )
+dev.off()#写入图型并关闭PDF文件
+
+sessionInfo()
+```
