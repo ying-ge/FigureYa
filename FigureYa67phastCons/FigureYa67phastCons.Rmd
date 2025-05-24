@@ -1,0 +1,399 @@
+---
+title: "FigureYa67phastCons"
+author: "王童鞋, Taojun Ye"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+## 需求描述
+
+输入ucsc上的phastCons文件、ChIP-seq的peak bed文件。用R或python计算数值，用R画出conservation profile
+
+## Requirement Description
+
+Input phastCons file on ucsc, peak bed file on ChIP-seq. Calculate values in R or python, draw conservation profile in R
+
+![](example.png)
+
+出自<https://www.nature.com/articles/ncomms7315>
+
+from<https://www.nature.com/articles/ncomms7315>
+
+## 应用场景
+
+展示特定区域的保守性。
+
+重要区域保守性往往较高，例如转录因子结合位点。
+
+## Application Scenarios
+
+Demonstrate the conserved nature of specific regions.
+
+Important regions tend to be highly conserved, such as transcription factor binding sites.
+
+## 环境设置
+
+操作系统：Linux或MAC。
+
+需要用到awk、python2.7
+
+下载bigWigSummary：
+
+## Environment settings
+
+OS: Linux or MAC.
+
+Requires awk, python2.7
+
+Download bigWigSummary:
+```r
+## choose by platform & cpu type
+## macOSX
+#download.file("http://hgdownload.soe.ucsc.edu/admin/exe/macOSX.x86_64/bigWigSummary","bigWigSummary")
+## linux x86_64
+#download.file("http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bigWigSummary","bigWigSummary")
+## linux x86_64 v369
+#download.file("http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64.v369/bigWigSummary","bigWigSummary")
+
+#Sys.chmod(c("bigWigSummary"),755)
+```
+
+## 输入文件
+
+此处对比all dsDMR、non exon dsDMR和随机序列这三个bed的phastCons
+
+- all_dsDMR.bed, non_exon_dsDMR.bed, download from <https://epigenome.wustl.edu/Zebrafish_DNAme/browse.php>
+
+- random.bed, random regions generation (randomBed -l 500 -n 8225 -seed 6666 -g danRer7.chrom.sizes > random.bed)
+
+- fish.phastCons8way.bw，保守性文件，下载的步骤：
+
+Step1.进入物种选择页面，<http://genome.ucsc.edu/>
+
+
+## Input file
+
+Here we compare the phastCons for the three beds all dsDMR, non exon dsDMR and random sequence
+
+- all_dsDMR.bed, non_exon_dsDMR.bed, download from <https://epigenome.wustl.edu/Zebrafish_DNAme/browse.php>
+
+- random.bed, random regions generation (randomBed -l 500 -n 8225 -seed 6666 -g danRer7.chrom.sizes > random.bed)
+
+- Steps to download fish.phastCons8way.bw, the conservativeness file:
+
+Step1. enter the species selection page, <http://genome.ucsc.edu/>
+
+![](Step1.png)
+
+Step2.选择物种和基因组版本
+
+Step2. Selecting species and genome versions
+
+![](Step2.png)
+
+Step3.找到保守性记录
+
+Step3. Finding the Conservative Record
+
+![](Step3.png)
+
+Step4.找到保守性文件存放文件夹
+
+Step4. Locate the folder where the conservative documents are stored.
+
+![](Step4.png)
+
+Step5.找到保守性文件
+
+Step5. Finding Conservative Documents
+
+![](Step5.png)
+
+Step6.下载保守性文件
+
+Step6.Download Conservative Documents
+
+![](Step6.png)
+
+## 参数设置
+
+## Parameter setting
+
+```{r}
+# 输出设置 / Output settings
+outputName <- "phastCons_example.pdf"  
+# 输出的PDF文件名 / Name of the output PDF file
+# 用于保存后续绘制的图形 / Used to save subsequent plots
+
+# 输入文件设置 / Input file settings
+bigWigFile <- c("fish.phastCons8way.bw")  
+# 进化保守性分数文件 / Evolutionary conservation score file (bigWig format)
+# 包含跨物种序列保守性数据 / Contains cross-species sequence conservation data
+
+bedFiles <- c("all_dsDMR.bed","non_exon_dsDMR.bed","random.bed")  
+# 需要分析的基因组区域文件 / Genomic region files to analyze:
+# 1. 所有差异甲基化区域 / All differentially methylated regions (DMRs)
+# 2. 非外显子差异甲基化区域 / Non-exonic DMRs 
+# 3. 随机区域作为对照 / Random regions as control
+
+# 图例标签设置 / Legend label settings
+labels <- c("8,225 dsDMRs","7,965 dsDMRs (non-exonic)","8,225 random regions")  
+# 将显示在图形图例中的文本 / Text to display in the plot legend:
+# 注意数字应与实际数据一致 / Note: Numbers should match actual data counts
+
+# 坐标轴标签设置 / Axis label settings
+siteType <- "dsDMR centre"  
+# X轴标题将显示为"Distance from dsDMR centre" / X-axis title will show as "Distance from..."
+# 可根据实际分析目标修改 / Can be modified based on analysis target
+
+# 分析参数设置 / Analysis parameters
+resolution <- 50  
+# 分析分辨率(碱基对) / Resolution in base pairs
+# 控制数据点密度 / Controls data point density
+
+span <- 5000  
+# 分析区域跨度(碱基对) / Analysis span in base pairs
+# 从中心点向两侧延伸的范围 / Extends this distance from center point
+
+coreNumber <- 3  
+# 并行计算使用的CPU核心数 / Number of CPU cores for parallel computing
+# 根据计算机配置调整 / Adjust based on computer configuration
+
+# 图形颜色设置 / Color settings
+colors <- c("black", "indianred3", "gray")  
+# 三条曲线的显示颜色 / Colors for the three lines:
+# 1. 所有DMRs / All DMRs (black)
+# 2. 非外显子DMRs / Non-exonic DMRs (red)
+# 3. 随机区域 / Random regions (gray)
+
+# 计算方法设置 / Computation method
+captureMethod <- "security"  
+# 信号捕获计算方法 / Signal capture calculation method
+# 其他可选方法可能包括"basic"等 / Other options may include "basic" etc.
+```
+
+## 提取信号
+
+### 先写个函数，函数里面会调用getBigWigValue.py，位于当前文件夹
+
+## Extracting signals
+
+### Write a function that calls getBigWigValue.py, located in the current folder.
+
+```{r}
+regionCapture <- function(seqname, start, end, bw, datapoints, captureMethod="security", cores=4L) {
+  # 捕获基因组区域内bigwig信号 / Capture bigwig signals in genomic regions
+  # 参数说明 / Parameters:
+  #   seqname - 染色体名称向量 / Vector of chromosome names
+  #   start - 起始位置向量 / Vector of start positions
+  #   end - 结束位置向量 / Vector of end positions  
+  #   bw - bigwig文件路径 / Path to bigwig file
+  #   datapoints - 每个区域采样点数 / Number of datapoints per region
+  #   captureMethod - 计算方法，默认"security" / Calculation method, default "security"
+  #   cores - 使用CPU核心数，默认4 / Number of CPU cores to use, default 4
+  
+  # 创建BED格式区域文件 / Create BED format region file
+  captureRegion <- data.frame(seqname=seqname, start=start, end=end)
+  write.table(captureRegion, file="captureRegion.bed", 
+              quote=FALSE, sep="\t", row.names=FALSE, col.names=FALSE)
+  
+  # 调用Python脚本处理bigwig文件 / Call Python script to process bigwig file
+  suppressMessages(
+    system(paste("python getBigWigValue.py -b", "captureRegion.bed", 
+                "-w", bw, "-n regionCapture", 
+                "-p", cores, "-s", datapoints, 
+                "-m", captureMethod))
+  )
+  
+  # 读取处理结果 / Read processed results
+  signal <- read.table(gzfile("signal_regionCapture_siteprof1.gz"))
+  
+  return(signal)
+}
+
+signal_caputer_around_sites <- function(bigWigFile, bed, resolution=50, 
+                                       span=3000, captureMethod="security", 
+                                       cores=4L) {
+  # 计算位点周围平均信号 / Calculate average signals around sites
+  # 参数说明 / Parameters:
+  #   bigWigFile - bigwig文件路径 / Path to bigwig file
+  #   bed - BED格式数据框 / BED format dataframe
+  #   resolution - 分辨率(bp)，默认50 / Resolution in bp, default 50
+  #   span - 分析区域跨度(bp)，默认3000 / Analysis span in bp, default 3000
+  #   captureMethod - 计算方法，默认"security" / Calculation method, default "security"
+  #   cores - 使用CPU核心数，默认4 / Number of CPU cores, default 4
+  
+  # 计算总数据点数 / Calculate total datapoints
+  datapoints <- span * 2 / resolution + 1  # 包括中心点 / Including center point
+  
+  # 提取染色体名称 / Extract chromosome names
+  seqname <- bed[,1]
+  
+  # 计算位点中心位置 / Calculate site center positions
+  midpoints <- as.integer((bed[,2] + bed[,3] - 1) / 2)  # BED是0-based / BED is 0-based
+  
+  # 获取链方向信息 / Get strand information
+  if(ncol(bed) > 5) { 
+    strand <- bed[,6]  # 第6列为链信息 / Column 6 contains strand info
+  } else {
+    strand <- rep(".", nrow(bed))  # 默认无链信息 / Default no strand info
+  }
+  
+  # 捕获信号 / Capture signals
+  signal <- regionCapture(seqname, 
+                         midpoints-span-resolution/2,  # 起始位置 / Start position
+                         midpoints+span+resolution/2,  # 结束位置 / End position
+                         bigWigFile, datapoints, captureMethod, cores)
+  
+  # 校正链方向并计算平均信号 / Correct strand orientation & calculate average signal
+  write.table(signal, file="temp_signal.txt", 
+             quote=FALSE, row.names=FALSE, col.names=FALSE, sep="\t")
+  write.table(strand, file="temp_strand.txt", 
+             quote=FALSE, row.names=FALSE, col.names=FALSE, sep="\t")
+  
+  # 使用awk处理反向链信号 / Use awk to process reverse strand signals
+  system(paste0("paste temp_signal.txt temp_strand.txt | awk '{if($NF==",
+               '"',"+",'"',") {for(i=1;i<NF-1;i++) printf $i",
+               '"',"\t",'"',"; print $(NF-1)} else {for(i=NF-1;i>1;i--) printf $i",
+               '"',"\t",'"',"; print $1}}' > temp_signal_rev.txt"))
+  
+  # 使用data.table高效读取 / Use data.table for efficient reading
+  signal_rev <- data.table::fread("temp_signal_rev.txt")
+  
+  # 清理临时文件 / Clean up temporary files
+  file.remove("temp_signal.txt")
+  file.remove("temp_strand.txt") 
+  file.remove("temp_signal_rev.txt")
+  
+  # 返回各位置平均信号 / Return average signals at each position
+  return(apply(signal_rev, 2, mean))
+}
+```
+
+### 提取信号
+
+### Extract the signal 
+
+```{r}
+# 初始化平均信号矩阵 / Initialize average signal matrix
+# 用于存储所有BED文件的分析结果 / To store results from all BED files
+average_signal <- c()
+
+# 循环处理每个BED文件 / Loop through each BED file
+for(i in 1:length(bedFiles)) {
+  
+  # 加载BED文件 / Load BED file
+  # bedFiles是包含多个BED文件路径的字符向量 / bedFiles is a character vector containing paths to multiple BED files
+  bed <- read.table(bedFiles[i])
+  
+  # 过滤非常规染色体 / Filter non-standard chromosomes
+  # 只保留不包含下划线的常规染色体(如chr1, chrX等) / Keep only standard chromosomes without underscores (e.g. chr1, chrX)
+  # 注意：某些基因组可能包含"chrUn_"或随机染色体等 / Note: Some genomes may contain "chrUn_" or random chromosomes
+  isNormalChrosome <- !grepl("_", bed$V1)  # V1列通常是染色体名称 / Column V1 is usually chromosome name
+  bed <- bed[isNormalChrosome, ]
+  
+  # 捕获位点周围信号并保存结果 / Capture signals around sites and store results
+  # 使用signal_caputer_around_sites函数处理每个BED文件 / Process each BED file using signal_caputer_around_sites function
+  average_signal <- rbind(average_signal, 
+                         signal_caputer_around_sites(
+                           bigWigFile = bigWigFile,  # 保守性分数文件 / Conservation score file
+                           bed = bed,                # 当前BED文件数据 / Current BED file data
+                           resolution = resolution,  # 分析分辨率 / Analysis resolution
+                           span = span,              # 分析范围 / Analysis span
+                           captureMethod = captureMethod,  # 计算方法 / Calculation method
+                           cores = as.integer(coreNumber)  # 并行计算核心数 / Number of cores for parallel computing
+                         ))
+  
+  # 可选的进度提示 / Optional progress message
+  if(i %% 1 == 0) {  # 每处理1个文件显示进度 / Show progress after each file
+    message("已完成 ", i, "/", length(bedFiles), " (", round(i/length(bedFiles)*100, 1), "%)")
+    utils::flush.console()  # 确保立即显示消息 / Ensure immediate message display
+  }
+}
+
+# 保存平均信号结果 / Save average signal results
+# 将结果写入CSV文件以便后续分析 / Write results to CSV file for subsequent analysis
+write.csv(average_signal, 
+          file = "average_signal.csv",  # 输出文件名 / Output filename
+          quote = FALSE,               # 不添加引号 / Do not add quotes
+          row.names = FALSE)           # 不保存行名 / Do not save row names
+
+# 补充说明 / Additional notes:
+# 1. 结果文件包含三类区域的保守性分数 / The output contains conservation scores for three region types
+# 2. 每行对应一个BED文件的分析结果 / Each row corresponds to a BED file's results
+# 3. 列对应基因组位置(从-span到+span) / Columns correspond to genomic positions (-span to +span)
+# 4. 建议后续使用read.csv()读取时检查维度 / Recommend checking dimensions when reading with read.csv()
+```
+
+## 开始画图
+
+## Start drawing
+
+```{r}
+# 读取保存的平均信号数据 / Load saved average signal data
+average_signal <- read.csv("average_signal.csv")
+
+# 查看数据首尾部分 / Preview beginning and end of data
+head(average_signal[,c(1:3,(ncol(average_signal)-2):ncol(average_signal))])
+# 显示前3列和最后3列 / Shows first 3 and last 3 columns
+# 帮助检查数据范围和完整性 / Helps check data range and integrity
+
+# 设置Y轴显示范围 / Set y-axis display range
+minimum <- min(average_signal) - (max(average_signal) - min(average_signal)) * 0.1
+# 最小值下扩10%范围 / Extend 10% below minimum
+maximum <- max(average_signal) + (max(average_signal) - min(average_signal)) * 0.1 * length(bedFiles)
+# 最大值上扩10%×样本数范围 / Extend 10%×number of samples above maximum
+
+# 计算数据点数量 / Calculate number of datapoints
+datapoints <- span / resolution  # 单侧数据点数 / Datapoints on one side
+
+# 创建图形输出 / Create graphic output
+# pdf(outputName, width = 6, height = 5)  # 已注释，实际使用时取消 / Commented out, uncomment for actual use
+
+# 绘制第一条线 (基准线) / Plot first line (baseline)
+plot(1:(datapoints*2+1),  # X轴位置 / X-axis positions
+     average_signal[1,],   # Y轴值 / Y-axis values
+     type="l",             # 线图 / Line plot
+     lwd = 2,              # 线宽 / Line width
+     col=colors[1],        # 颜色 / Color
+     xaxs="i", yaxs="i",   # 坐标轴紧贴数据范围 / Axes fit data range exactly
+     xaxt="n",             # 暂时关闭X轴 / Temporarily disable x-axis
+     xlab=paste("Distance from", siteType),  # X轴标签 / X-axis label
+     ylab="Average PhastCons score",         # Y轴标签 / Y-axis label
+     ylim=c(minimum, maximum))              # Y轴范围 / Y-axis range
+
+# 添加其他样本的线 / Add lines for other samples
+for(i in 2:length(bedFiles)){
+  lines(1:(datapoints*2+1), 
+        average_signal[i,], 
+        lwd = 2, 
+        col=colors[i])  # 使用预定义颜色 / Use predefined colors
+}
+
+# 添加图例 / Add legend
+legend("topright",         # 图例位置 / Legend position
+       col=colors,         # 颜色 / Colors
+       legend=labels,      # 标签文本 / Label text
+       lty=1,              # 线型 / Line type
+       lwd = 2,            # 线宽 / Line width
+       bty="n")            # 无边框 / No border
+
+# 自定义X轴 / Customize x-axis
+axis(side=1,  # 底部X轴 / Bottom x-axis
+     at=c(0, datapoints, datapoints * 2) + 1,  # 刻度位置 / Tick positions
+     labels = c(paste(-1*span/1000,"kb"),       # 左侧标签 / Left label
+               "0",                             # 中心点 / Center point
+               paste(span/1000,"kb")))          # 右侧标签 / Right label
+
+# 关闭图形设备 (与pdf()配对使用) / Close graphic device (paired with pdf())
+# dev.off()  # 已注释，实际使用时取消 / Commented out, uncomment for actual use
+```
+
+```{r}
+sessionInfo()
+```
