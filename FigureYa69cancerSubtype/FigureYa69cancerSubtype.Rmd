@@ -1,0 +1,536 @@
+---
+title: "FigureYa69 CancerSubtypes"
+author: "Jingze Gao, Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+输入TCGA数据，复现原图。
+
+## Requirement Description
+
+Input TCGA data to reproduce the original image.
+
+![](example.png)
+
+出自<https://link.springer.com/article/10.1007%2Fs00432-018-2684-7>
+
+from<https://link.springer.com/article/10.1007%2Fs00432-018-2684-7>
+
+## 应用场景
+
+Consensus Clustering for cancer subtype identification，使用SNFCC +与HC和NMF算法进行分子分型，并进行比较。
+
+CancerSubtypes包含5种计算方法对基因组数据进行癌症分子分型鉴定：
+
+1.CC 2.CNMF 3.iCluster 4.SNF 5.WSNF
+
+## Application Scenarios
+
+Consensus Clustering for cancer subtype identification using SNFCC + with HC and NMF algorithms for molecular typing and comparison.
+
+CancerSubtypes contains 5 computational methods for molecular typing identification of cancer on genomic data:
+
+1.CC 2.CNMF 3.iCluster 4.SNF 5.WSNF
+
+## 环境设置
+
+用国内镜像安装包
+
+## Environment settings
+
+Installing packages with domestic mirrors
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+install.packages("iCluster_2.1.0.tar.gz", repos = NULL, type = "source")
+BiocManager::install("CancerSubtypes", version = "3.20")
+
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载stringr包 - 用于字符串处理和操作
+# Load the stringr package - used for string processing and manipulation
+library(stringr)
+
+# 加载CancerSubtypes包 - 用于癌症亚型分析和分类
+# Load the CancerSubtypes package - used for cancer subtype analysis and classification
+library(CancerSubtypes)
+```
+
+## 输入数据预处理
+
+> 申明：
+
+- 聚类本身有随机性，对数据的呈现形式没有严格要求。当数据形式变化时（或聚类方式变化时）聚类结果即出现差异，因此要得到有生物学意义的聚类结果需要对聚类数据乃至方法反复调试，包括数据标准化类型（如FPKM、 TPM、RSEM）、特征筛选过程（取高变异、生存相关等等）、距离度量方式、聚类方法等。
+
+- 本代码不涉及具体某种类型的数据获取和统一的预处理方式。
+
+- 此外，非负矩阵分解NMF非常耗时，因此使用的数据仅包括筛选过的少量mRNA和miRNA。
+
+### 数据下载
+
+TCGA数据的多种下载渠道：
+
+- 所有的数据（组学和临床病理学）都可以通过TCGAbiolink下载获得，包括临床信息，参考FigureYa18（临床和突变），FigureYa22、23或34（表达数据read count、FPKM，或转换为TPM）
+
+- 或者在xena下载你感兴趣的癌症的，除生存信息以外的所有组学数据，下载地址：<https://xenabrowser.net/datapages/?hub=https://tcga.xenahubs.net:443>
+
+- 或者在xena下载处理好批次效应的TCGA和GTEx的pan-cancer数据，可参考FigureYa56immune_inflitration，下载Cell处理优化过的生存资料并跟RNA-seq数据对应，参考FigureYa66单因素cox。作者小高提供的下载和预处理代码见How to get easy input from xena pan-cancer file.Rmd。
+
+- 临床病理学和生存信息还可以在firehose上下载，下载地址：<http://gdac.broadinstitute.org/>
+
+- 数据也可以在cbioportal上下载，包括组学数据和临床病理学信息，下载地址：<http://www.cbioportal.org/datasets>
+
+## Input data preprocessing
+
+> Affirmation:
+
+- Clustering itself has randomness and does not have strict requirements on the form of data presentation. When the form of data changes (or when the clustering method changes), the clustering results will be different, therefore, to obtain biologically meaningful clustering results, we need to repeatedly debug the clustering data and even the method, including the type of data standardization (e.g., FPKM, TPM, RSEM), the process of feature filtering (high variance, survival correlation, etc.), the distance measure, clustering method, etc. This code does not involve the acquisition of a specific type of data and unified preprocessing methods.
+
+- This code does not deal with a specific type of data acquisition and unified preprocessing methods.
+
+- In addition, non-negative matrix factorization of NMF is very time-consuming, so the data used only includes a small amount of screened mRNAs and miRNAs.
+
+### Data download
+
+Multiple download channels for TCGA data:
+
+- All data (histology and clinicopathology) are available via TCGAbiolink downloads, including clinical information, refer to FigureYa18 (clinical and mutation), FigureYa22, 23 or 34 (expression data read count, FPKM, or converted to TPM).
+
+- Or download all histologic data for your cancer of interest, except survival information, from xena at <https://xenabrowser.net/datapages/?hub=https://tcga.xenahubs.net:443>.
+
+- Or download the pan-cancer data with TCGA and GTEx processed for batch effects at xena, see FigureYa56immune_inflitration, download Cell processed and optimized survival information and correspond to RNA-seq data, see FigureYa66 single factor cox. provided by the author, Siu Ko. Download and preprocessing code is available at How to get easy input from xena pan-cancer file.Rmd.
+
+- Clinicopathologic and survival information can also be downloaded from firehose at <http://gdac.broadinstitute.org/>
+
+- Data can also be downloaded on cbioportal, including histologic data and clinicopathologic information, at <http://www.cbioportal.org/datasets>
+
+### 数据格式要求
+
+所有组学数据保持样本一致且顺序一致即可。
+
+- 输入：列为样本，行为观测
+
+- 临床生存信息必须和组学数据样本顺序完全一致，基于生存分析的变量筛选以及KM曲线绘制，CancerSubtypes仅利用生存时间和生存状态两个变量，因此请提前检查样本是否匹配！
+
+### Data format requirements
+
+It is sufficient to keep all histologic data in the same sample and in the same order.
+
+- Inputs: listed as samples, behavioral observations
+
+- Clinical survival information must be in the exact same order as the sample of the histology data. Based on the variable screening for survival analysis and the KM curve plotting, CancerSubtypes only utilizes two variables, survival time and survival status, so please check in advance if the samples match!
+
+### 读取mRNA表达数据和miRNA表达数据
+
+### Read mRNA expression data and miRNA expression data
+
+```{r, warning=FALSE}
+# 读取mRNA表达数据
+# 参数说明:
+# file = "GeneExp.txt" - 要读取的文件路径
+# sep = "\t" - 指定制表符作为列分隔符
+# check.names = F - 不检查列名的有效性
+# stringsAsFactors = F - 不将字符串转换为因子
+# header = T - 指定文件包含列名
+# quote = "" - 不处理引号字符
+# row.names = 1 - 使用第一列作为行名
+# Read mRNA expression data
+# Parameter description:
+# file = "GeneExp.txt" - Path of the file to read
+# sep = "\t" - Specify tab as column separator
+# check.names = F - Do not check validity of column names
+# stringsAsFactors = F - Do not convert strings to factors
+# header = T - Specify that the file contains column names
+# quote = "" - Do not process quote characters
+# row.names = 1 - Use the first column as row names
+mRNA <- read.table("GeneExp.txt", sep = "\t", check.names = F, stringsAsFactors = F, header = T, quote = "", row.names = 1)
+
+# 查看mRNA数据的前3行和前3列，了解数据结构
+# View the first 3 rows and 3 columns of mRNA data to understand data structure
+mRNA[1:3, 1:3]
+
+# 读取miRNA表达数据，参数含义同上
+# Read miRNA expression data, parameter meanings are the same as above
+miRNA <- read.table("miRNAExp.txt", sep = "\t", check.names = F, stringsAsFactors = F, header = T, quote = "", row.names = 1)
+
+# 查看miRNA数据的前3行和前3列
+# View the first 3 rows and 3 columns of miRNA data
+miRNA[1:3, 1:3]
+
+# 读取临床生存信息数据，参数含义同上
+# Read clinical survival information data, parameter meanings are the same as above
+surv <- read.table("survinfo.txt", sep = "\t", check.names = F, stringsAsFactors = F, header = T, quote = "", row.names = 1)
+
+# 查看临床数据的前3行，了解数据结构
+# View the first 3 rows of clinical data to understand data structure
+surv[1:3, ]
+```
+
+### Analysis the raw data by check the data distribution.
+
+```{r, warning=FALSE}
+# 所有样本及样本顺序必须完全一致，因为cancersubtype在提取生存信息的时候不关心样本名，所以要提前检查！！！
+# All samples and their order must be exactly the same, because the cancersubtype package does not consider sample names when extracting survival information, so check in advance!!!
+
+# 检查组学数据样本名一致性
+# Check consistency of sample names across omics data
+if(!(all(colnames(mRNA)==colnames(miRNA)) & all(colnames(mRNA)==rownames(surv)))) {
+  cat("Samples mismatched! Processing now...\n")
+  
+  # 找出三种数据中共同存在的样本
+  # Find samples common to all three datasets
+  commonSam <- intersect(intersect(colnames(mRNA),colnames(miRNA)),rownames(surv))
+  
+  # 仅保留共同样本的数据，确保三个数据集样本完全一致
+  # Retain only data for common samples to ensure identical samples across datasets
+  mRNA <- mRNA[,commonSam]
+  miRNA <- miRNA[,commonSam]  
+  surv <- surv[commonSam,]
+}
+
+# 验证样本一致性处理结果
+# Verify sample consistency after processing
+if((all(colnames(mRNA)==colnames(miRNA)) & all(colnames(mRNA)==rownames(surv)))) {
+  cat("Samples successfully matched!\n") 
+}
+
+# 提取生存分析所需的时间和状态变量
+# Extract time and status variables for survival analysis
+time <- as.numeric(surv$futime)  # 生存时间或随访时间（Survival time or follow-up time）
+status <- as.numeric(surv$fustat) # 生存状态：1表示死亡，0表示存活（Survival status: 1 = dead, 0 = alive）
+# 1: dead 0: alive
+
+# 将表达矩阵转换为matrix格式，满足cancersubtype包输入要求
+# Convert expression matrices to matrix format for cancersubtype package
+mRNA <- as.matrix(mRNA)
+miRNA <- as.matrix(miRNA)
+
+### 数据分布检查
+### Data distribution check
+# 检查mRNA表达数据的分布情况，为后续分析做准备
+# Check distribution of mRNA expression data to prepare for downstream analysis
+data.checkDistribution(mRNA)
+```
+
+## Cancer subtype鉴定
+
+### 均使用Consensus Clustering
+
+build cancersubtype data set TCGA_target
+
+分子分型的具体做法还是要多看文献，中心思想就是聚类
+
+## Cancer subtype identification
+
+### Both use Consensus Clustering
+
+build cancersubtype data set TCGA_target
+
+The specifics of molecular typing should be read in the literature, and the central idea is clustering.
+
+```{r, warning=FALSE}
+# 这里通过CancerSubtypes本身的函数通过单因素cox分析筛选与生存有关的变量
+# 单因素Cox回归分析筛选与生存显著相关的基因(p值<0.05)
+# 参数说明:
+# mRNA - 基因表达矩阵
+# time - 生存时间向量
+# status - 生存状态向量(1=死亡, 0=存活)
+# cutoff=0.05 - 保留p值小于0.05的基因
+# Use CancerSubtypes package function to screen survival-related variables via univariate Cox analysis
+# Univariate Cox regression to select genes significantly associated with survival (p-value < 0.05)
+# Parameter description:
+# mRNA - Gene expression matrix
+# time - Survival time vector
+# status - Survival status vector (1=dead, 0=alive)
+# cutoff=0.05 - Retain genes with p-value < 0.05
+data1 <- FSbyCox(mRNA, time, status, cutoff=0.05)
+
+# 也可以筛选top1000高变异的变量，变量的调整会对聚类结果产生影响
+# 另一种特征选择方法：基于表达量变异系数筛选
+# 注意：特征选择方法会显著影响后续聚类结果
+# Alternatively, select top 1000 most variable genes
+# Feature selection method impacts clustering results
+# data1 <- FSbyVar(mRNA, cut.type="topk", value=1000)
+
+# 对miRNA数据执行相同的生存相关特征筛选
+# Perform survival-associated feature selection for miRNA data
+data2 <- FSbyCox(miRNA, time, status, cutoff=0.05)
+
+# 也可以通过其他方式筛选变量，例如FigureYa65SVM-RFE等，后将结果作为分型的输入数据
+# 其他可选特征选择方法：SVM-RFE、LASSO等
+# Alternative feature selection methods: SVM-RFE, LASSO, etc.
+
+# 输入文件为列表，所有感兴趣的组学数据均可作为列表成分。
+# 创建多组学数据列表，用于后续整合分析
+# Create multi-omics data list for integrative analysis
+# 注意：若使用icluster聚类，最多支持5种组学数据
+# Note: icluster method supports up to 5 omics data types
+TCGA_target <- list(GeneExp=data1, miRNAExp=data2)
+```
+
+**友情科普：**
+
+共识聚类的原理是通过重抽样的思想，对原始数据集做双维度的重抽样，在扰动子集的基础上反复聚类
+
+多次聚类结果累加求平均得到聚类共识，再在共识矩阵的基础上再聚类得最终聚类结果。
+
+**Friendship clustering:**
+
+The principle of consensus clustering is through the idea of resampling, the original dataset to do two-dimensional resampling, in the perturbation of the subset of the basis of repeated clustering
+
+Multiple clustering results are accumulated and averaged to obtain the clustering consensus, and then clustered again on the basis of the consensus matrix to get the final clustering results.
+
+### 方法1. ExecuteSNF.CC
+
+该方法是共识聚类和样本相似性网络融合的结合
+
+### Method 1. ExecuteSNF.CC
+
+This method is a combination of consensus clustering and sample similarity network fusion
+
+```{r, fig.width=12, fig.height=10}
+# 使用ExecuteSNF.CC函数执行基于相似网络融合(SNF)的共识聚类
+# 整合mRNA和miRNA表达数据进行分子亚型识别
+# 参数说明:
+# TCGA_target - 包含多组学数据的列表
+# clusterNum=3 - 指定聚类的类别数为3
+# K=20 - K近邻算法中的近邻数
+# alpha=0.5 - 相似性网络构建中的权重参数
+# t=20 - SNF算法中的扩散迭代次数
+# maxK=5 - 最大聚类数(用于内部评估)
+# pItem=0.8 - 每次迭代采样的样本比例
+# reps=500 - 共识聚类的重复次数
+# title - 输出图表的标题
+# plot="png" - 输出图表格式为PNG
+# finalLinkage="average" - 最终聚类采用平均联动方法
+# Perform consensus clustering based on Similarity Network Fusion (SNF)
+# Integrate mRNA and miRNA expression data for molecular subtyping
+# Parameter description:
+# TCGA_target - List containing multi-omics data
+# clusterNum=3 - Number of clusters to identify
+# K=20 - Number of nearest neighbors for KNN graph construction
+# alpha=0.5 - Weight parameter for similarity network construction
+# t=20 - Number of diffusion iterations in SNF algorithm
+# maxK=5 - Maximum number of clusters for internal evaluation
+# pItem=0.8 - Proportion of samples to include in each iteration
+# reps=500 - Number of iterations for consensus clustering
+# title - Title for output plots
+# plot="png" - Output plot format
+# finalLinkage="average" - Linkage method for hierarchical clustering
+result_SNFCC <- ExecuteSNF.CC(TCGA_target, clusterNum=3, K=20, alpha=0.5, t=20,
+                    maxK = 5, pItem = 0.8, reps=500, 
+                    title = "Molecular_Subtype_SNFCC", plot = "png", 
+                    finalLinkage ="average") # 基于共识矩阵的谱聚类采用平均联动方法，可换用其他如Ward.D
+                    # Spectral clustering with average linkage; alternatives include Ward.D
+
+# 提取聚类结果和距离矩阵
+# Extract clustering results and distance matrix
+SNFCC_group <- result_SNFCC$group # 得到的类可用作其他亚型表征分析，比如差异表达，GSEA等等，下同
+                                   # Clusters can be used for downstream analyses: DEG, GSEA, etc.
+SNFCC_distanceMatrix <- result_SNFCC$distanceMatrix
+
+# 执行生存分析评估聚类结果的预后价值
+# 生成不同分子亚型的生存曲线和log-rank检验p值
+# 参数说明:
+# mainTitle - 生存分析图表标题
+# time - 生存时间向量
+# status - 生存状态向量
+# SNFCC_group - 聚类分组结果
+# SNFCC_distanceMatrix - 样本间距离矩阵
+# similarity=TRUE - 使用相似性矩阵而非距离矩阵
+# Perform survival analysis to evaluate prognostic value of molecular subtypes
+# Generate Kaplan-Meier curves and log-rank test p-value
+# Parameter description:
+# mainTitle - Title for survival analysis plot
+# time - Survival time vector
+# status - Survival status vector
+# SNFCC_group - Clustering results
+# SNFCC_distanceMatrix - Sample distance matrix
+# similarity=TRUE - Use similarity matrix instead of distance matrix
+p_value <- survAnalysis(mainTitle="Molecular_Subtype_SNFCC", time, status, SNFCC_group,
+                     SNFCC_distanceMatrix, similarity=TRUE)
+
+# pdf("SNFCC.pdf") # 若要输出pdf，请允许下面的四行，下同。
+#                  # Uncomment next four lines to save output as PDF
+# p_value <- survAnalysis(mainTitle="Molecular_Subtype_SNFCC", time, status, SNFCC_group,
+#                      SNFCC_distanceMatrix, similarity=TRUE)
+# invisible(dev.off())
+```
+
+### 方法2.CC
+
+该方法是共识聚类和层次聚类的结合，默认使用pearson相关系数度量距离，average作为联动方法，均可换用其他
+
+### Method 2.
+
+This method is a combination of consensus clustering and hierarchical clustering, default use pearson correlation coefficient measure distance, average as a linkage method, both can be replaced with other
+
+```{r, fig.width=12, fig.height=10}
+# 使用ExecuteCC函数执行基于表达谱的共识聚类(Consensus Clustering)
+# 直接基于多组学表达数据进行分子亚型识别，不使用网络融合
+# 参数说明:
+# TCGA_target - 包含多组学数据的列表
+# clusterNum=3 - 指定聚类的类别数为3
+# maxK=5 - 最大聚类数(用于内部评估)
+# pItem=0.8 - 每次迭代采样的样本比例
+# reps=500 - 共识聚类的重复次数
+# distance="pearson" - 使用皮尔逊相关系数作为距离度量
+# innerLinkage="average" - 内部聚类采用平均联动方法
+# title - 输出图表的标题
+# plot="png" - 输出图表格式为PNG
+# finalLinkage="average" - 最终聚类采用平均联动方法
+# Perform consensus clustering (CC) based on expression profiles
+# Directly cluster samples using multi-omics data without network fusion
+# Parameter description:
+# TCGA_target - List containing multi-omics data
+# clusterNum=3 - Number of clusters to identify
+# maxK=5 - Maximum number of clusters for internal evaluation
+# pItem=0.8 - Proportion of samples to include in each iteration
+# reps=500 - Number of iterations for consensus clustering
+# distance="pearson" - Use Pearson correlation as distance metric
+# innerLinkage="average" - Linkage method for internal clustering
+# title - Title for output plots
+# plot="png" - Output plot format
+# finalLinkage="average" - Linkage method for final clustering
+result_CC <- ExecuteCC(TCGA_target, clusterNum=3,
+                    maxK = 5, pItem = 0.8, reps=500, 
+                    distance = "pearson", innerLinkage = "average",
+                    title = "Molecular_Subtype_CC", plot = "png", 
+                    finalLinkage ="average")
+
+# 提取聚类结果和距离矩阵
+# Extract clustering results and distance matrix
+CC_group <- result_CC$group
+CC_distanceMatrix <- result_CC$distanceMatrix
+
+# 执行生存分析评估聚类结果的预后价值
+# 生成不同分子亚型的生存曲线和log-rank检验p值
+# 参数说明:
+# mainTitle - 生存分析图表标题
+# time - 生存时间向量
+# status - 生存状态向量
+# CC_group - 聚类分组结果
+# CC_distanceMatrix - 样本间距离矩阵
+# similarity=TRUE - 使用相似性矩阵而非距离矩阵
+# Perform survival analysis to evaluate prognostic value of molecular subtypes
+# Generate Kaplan-Meier curves and log-rank test p-value
+# Parameter description:
+# mainTitle - Title for survival analysis plot
+# time - Survival time vector
+# status - Survival status vector
+# CC_group - Clustering results
+# CC_distanceMatrix - Sample distance matrix
+# similarity=TRUE - Use similarity matrix instead of distance matrix
+p_value <- survAnalysis(mainTitle="Molecular_Subtype_CC", time, status, CC_group,
+                     CC_distanceMatrix, similarity=TRUE)
+
+# pdf("CC.pdf")
+# p_value <- survAnalysis(mainTitle="Molecular_Subtype_CC", time, status, CC_group,
+#                      CC_distanceMatrix, similarity=TRUE)
+# invisible(dev.off())
+```
+
+### 方法 3.ExecuteCNMF
+
+该方法是层次聚类和非负矩阵分解的结合
+
+**注意：**NMF不允许出现负值，但是在CancerSubtype包的处理下，负值会利用Kim & Tidor’s trick 法来处理
+
+这个trick会将所有负值拉至0，所有正值扩大两倍，简单来说就是自己加上自己。
+
+NMF的方法有许多的数学要求，对于稀疏矩阵（0较多的矩阵），往往很难进行分解而报error，所以突变数据，甚至突变签名数据请尽量避免出现在多组学聚类中，可换用离散CNA数据，或甲基化数据
+
+此外，大n大p情况运行共识非负矩阵分解，请保持足够的耐心...建议先进行降维操作
+
+
+### Method 3.ExecuteCNMF
+
+This method is a combination of hierarchical clustering and non-negative matrix factorization
+
+**Note:** NMF does not allow negative values, but under the CancerSubtype package, negative values are handled by Kim & Tidor's trick.
+
+This trick pulls all negative values to 0 and doubles all positive values, simply adding themselves.
+
+NMF method has a lot of mathematical requirements, for sparse matrices (more 0's), it is often difficult to decompose and report error, so mutant data, even mutant signature data, please try to avoid appearing in the multi-homology clustering, can be replaced with discrete CNA data, or methylation data!
+
+In addition, please be patient when running consensus non-negative matrix decomposition for large n large p cases... It is recommended to run the dimensionality reduction operation first
+```{r, fig.width=12, fig.height=10}
+# 修复原始代码中的bug，重新编码并加载自定义CNMF函数
+# 参数说明:
+# 需确保ExecuteCNMF.R文件包含正确实现的共识非负矩阵分解(Consensus NMF)函数
+# Fix bug in original code, reload custom CNMF function
+# Parameter description:
+# Ensure ExecuteCNMF.R contains correct implementation of Consensus NMF function
+source("ExcuteCNMF.R")
+
+# 使用ExecuteCNMF函数执行共识非负矩阵分解(CNMF)聚类
+# 对多组学数据进行非负矩阵分解并通过共识聚类确定分子亚型
+# 参数说明:
+# TCGA_target - 包含多组学数据的列表
+# clusterNum=3 - 指定聚类的类别数为3
+# nrun=5 - 为了快速运行，共识仅运行5次(实际应用中建议>=30次以确保稳定性)
+# Perform Consensus Non-negative Matrix Factorization (CNMF) clustering
+# Decompose multi-omics data and identify molecular subtypes via consensus clustering
+# Parameter description:
+# TCGA_target - List containing multi-omics data
+# clusterNum=3 - Number of clusters to identify
+# nrun=5 - For quick demonstration, run consensus only 5 times (recommend >=30 in practice)
+result_NMF <- ExecuteCNMF(TCGA_target, clusterNum=3, nrun=5) 
+
+# 提取聚类结果和距离矩阵
+# Extract clustering results and distance matrix
+NMF_group <- result_NMF$group
+NMF_distanceMatrix <- result_NMF$distanceMatrix
+
+# 执行生存分析评估聚类结果的预后价值
+# 生成不同分子亚型的生存曲线和log-rank检验p值
+# 参数说明:
+# mainTitle - 生存分析图表标题
+# time - 生存时间向量
+# status - 生存状态向量
+# NMF_group - 聚类分组结果
+# NMF_distanceMatrix - 样本间距离矩阵
+# similarity=TRUE - 使用相似性矩阵而非距离矩阵
+# Perform survival analysis to evaluate prognostic value of molecular subtypes
+# Generate Kaplan-Meier curves and log-rank test p-value
+# Parameter description:
+# mainTitle - Title for survival analysis plot
+# time - Survival time vector
+# status - Survival status vector
+# NMF_group - Clustering results
+# NMF_distanceMatrix - Sample distance matrix
+# similarity=TRUE - Use similarity matrix instead of distance matrix
+p_value <- survAnalysis(mainTitle="Molecular_Subtype_NMF", time, status, NMF_group, NMF_distanceMatrix, similarity=TRUE)
+
+# pdf("CNMF.pdf")
+# p_value <- survAnalysis(mainTitle="Molecular_Subtype_NMF", time, status, NMF_group, NMF_distanceMatrix, similarity=TRUE)
+# invisible(dev.off())
+```
+
+## 引用文献
+
+## Reference
+
+Xu T, Le T D, Liu L, et al. CancerSubtypes: an R/Bioconductor package for molecular cancer subtype identification, validation and visualization[J]. Bioinformatics, 2017, 33(19): 3131-3133.
+
+```{r}
+sessionInfo()
+```
+
