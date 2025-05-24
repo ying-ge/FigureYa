@@ -1,0 +1,496 @@
+---
+title: "FigureYa68friendsV2"
+author: "Zhongtian Xu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+# 需求描述
+
+输入基因列表，用GO注释的相似性找它的好朋友，画出云雨图。
+
+# Requirement Description.
+
+Input a list of genes and use GO annotated similarity to find its best friends and draw a cloud and rain diagram.
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S1874391912007567>
+
+from<https://www.sciencedirect.com/science/article/pii/S1874391912007567>
+
+# 应用场景
+
+原理看这篇：<https://mp.weixin.qq.com/s/_Wt_GmC8yjcvEdXBNRUQTw>
+
+在⽣信分析中，⼀个常⻅的应⽤场景就是：从特定蛋⽩质的功能信息出发，查找与其功能相似或相关的蛋⽩质，并对这些蛋⽩质间的关联程度进⾏⽐较、量化。这是生物信息学中经常遇到的问题，GO语义相似度为这种分析提供了可能。
+
+通常认为，如果两个基因产物的功能相似，那么他们在GO中注释的术语（term），在GOtree中所处的位置就⽐较相近，反映在语义相似度上，就是他们的语义相似度比较⾼。
+
+在我们⽇常的分析实践中，经常能够拿到⼀大堆的差异表达基因，从⾥面挑选哪⼀个基因出来进行验证常常让我们感到困扰。通常我们会对差异基因的条⽬进⾏富集分析，看看是否富集在某个GOterm或者KEGG通路当中。这时候已经对结果进⾏了相当程度上的清晰化。
+
+但是如果富集到的某个我们感兴趣的通路中基因数⽬依然⽐较多，那么如何从这⼀堆基因中挑选最重要的那个就是⼀个问题。哪些基因会比较重要呢？
+
+- 第⼀个线索是基因的差异改变的程度⽐较大，但差异改变程度⼤并不一定代表重要。
+- 第⼆个线索就是该基因的产物与通路上的其它基因产物都有互作的话。简⽽言之，该基因编码蛋⽩的“朋友”⽐较多的话，那么该基因就可能⽐较重要。
+
+跳出差异基因的范畴，任何⼀个涉及到基因互作的场景，例如打质谱拉下来的⼀堆蛋⽩、酵⺟双杂交得到的⼀堆蛋⽩，都可以通过类似⽅法找到最重要的那个hub基因。
+
+# Application scenarios
+
+See this for the principle: <https://mp.weixin.qq.com/s/_Wt_GmC8yjcvEdXBNRUQTw>
+
+A common application in the analysis of growth information is to look for similar or related proteins from the functional information of a particular protein, and to compare and quantify the degree of association between these proteins. This is a frequently encountered problem in bioinformatics, and GO semantic similarity makes such analysis possible.
+
+It is generally believed that if two gene products are functionally similar, the terms they annotate in GO and their positions in the GOtree are relatively similar, which is reflected in their semantic similarity.
+
+In our daily analysis practice, we often get a large number of differentially expressed genes, and it is often a problem for us to choose which gene to verify. Often, we will perform enrichment analysis on the differentially expressed gene entries to see if they are enriched in a certain GOterm or KEGG pathway. At this point, the results have been clarified to a considerable degree.
+
+However, if the number of genes enriched for a pathway of interest is still relatively large, then it is a question of how to select the most important genes from the pile. Which genes are important?
+
+- The first clue is that the gene has a relatively large degree of differential alteration, but a large degree of differential alteration does not necessarily mean that it is important.
+- The second clue is if the gene's product interacts with the products of other genes in the pathway. In short, if the gene has more “friends” encoding protein, then the gene is likely to be more important.
+
+Going beyond differential genes, any scenario that involves gene interactions, such as a pile of egg white from mass spectrometry or a pile of egg white from a double hybrid, can be used in a similar way to find the most important hub gene.
+
+Translated with DeepL.com (free version)
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Installation of packages using domestic mirrors
+
+```{r eval=FALSE}
+# 设置CRAN镜像源为清华镜像站 / Set CRAN mirror to Tsinghua TUNA mirror
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像源为清华镜像站 / Set Bioconductor mirror to Tsinghua TUNA mirror
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+# 使用BiocManager安装人类基因注释数据库 / Install human gene annotation database using BiocManager
+BiocManager::install("org.Hs.eg.db", site_repository = "https://bioconductor.org/packages/3.18/data/annotation")
+
+# 安装基因本体语义相似度计算包 / Install GO semantic similarity calculation package
+BiocManager::install("GOSemSim")
+
+# 安装ggplot2绘图包 / Install ggplot2 plotting package
+install.packages("ggplot2")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载必要的R包 / Load required R packages
+library(org.Hs.eg.db)  # 人类基因注释数据库 / Human gene annotation database
+library(GOSemSim)      # GO语义相似性分析 / GO semantic similarity analysis
+library(reshape2)      # 数据重塑工具 / Data reshaping tools
+library(ggplot2)       # 高级绘图系统 / Advanced plotting system
+
+# 设置系统语言环境为英文（显示英文报错信息） / Set system language to English (show error messages in English)
+Sys.setenv(LANGUAGE = "en") 
+
+# 全局设置：禁止自动将字符串转换为因子 / Global option: prevent automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+
+输入的数据为基因名，第一列是ENTREZ ID, 第二列是gene symbol
+
+其中ENTREZ ID用来计算相似性，gene symbol用于画图
+
+ID转换可参考FigureYa52GOplot
+
+# Input file
+
+Input data is gene name, first column is ENTREZ ID, second column is gene symbol
+
+The first column is ENTREZ ID, the second column is gene symbol, where ENTREZ ID is used to calculate similarity and gene symbol is used for plotting.
+
+For ID conversion, please refer to FigureYa52GOplot.
+
+```{r}
+# 读取CSV文件到数据框 / Read CSV file into a dataframe
+# 参数说明:
+# "easy_input.csv" - 输入文件名，应放在工作目录或指定完整路径
+# header默认为TRUE，即第一行为列名
+# Parameters:
+# "easy_input.csv" - input filename, should be in working directory or provide full path
+# header=TRUE by default (first row as column names)
+id_gsym <- read.csv("easy_input.csv")
+
+# 将ENTREZID列转换为字符型 / Convert ENTREZID column to character type
+# 原因:
+# 1. ENTREZID虽然是数字但实质是分类变量
+# 2. 避免数值计算或科学计数法显示问题
+# Reasons:
+# 1. ENTREZID are numeric identifiers but categorical in nature
+# 2. Prevents numeric operations or scientific notation display
+id_gsym$ENTREZID <- as.character(id_gsym$ENTREZID)
+
+# 显示数据前6行 / Display first 6 rows of data
+# 功能:
+# 1. 快速检查数据结构
+# 2. 验证数据读取是否正确
+# Purpose:
+# 1. Quick check of data structure
+# 2. Verify data was read correctly
+head(id_gsym)
+```
+
+# 计算相似性
+
+原文用Molecular Function和Cellular Component的几何平均值来衡量相似度。
+
+# Calculate similarity
+
+The original article uses the geometric mean of Molecular Function and Cellular Component to measure similarity.
+
+```{r}
+# 用godata()函数来构建相应物种的Molecular Function本体的GO DATA
+# Using godata() to build GO DATA for Molecular Function ontology of the corresponding species
+# 参数说明/Parameters:
+# 'org.Hs.eg.db' - 人类基因注释数据库/Human gene annotation database
+# ont="MF" - 指定分子功能本体/Specify Molecular Function ontology
+# computeIC = FALSE - 不计算信息内容/Do not compute information content
+mf <- godata('org.Hs.eg.db', ont="MF", computeIC = FALSE)
+
+# 用godata()函数来构建相应物种的Cellular Component本体的GO DATA
+# Using godata() to build GO DATA for Cellular Component ontology of the corresponding species
+# ont="CC" - 指定细胞组分本体/Specify Cellular Component ontology
+cc <- godata('org.Hs.eg.db', ont="CC", computeIC = FALSE)
+
+# 注释掉的BP本体构建代码（可根据需要取消注释）
+# Commented BP ontology construction code (can be uncommented if needed)
+# bp <- godata('org.Hs.eg.db', ont="BP", computeIC = FALSE)
+
+
+# 用mgeneSim来计算MF本体，基因之间的语义相似度，结果为一个行列相同的矩阵
+# Using mgeneSim to calculate semantic similarity between genes for MF ontology, returns a symmetric matrix
+# 参数说明/Parameters:
+# id_gsym$ENTREZID - 输入基因的ENTREZ ID列表/Input list of ENTREZ IDs
+# semData = mf - 使用MF本体的GO DATA/Use GO DATA for MF ontology
+# measure = "Wang" - 使用Wang相似度度量方法/Use Wang similarity measure
+# drop = NULL - 不丢弃任何结果/Do not drop any results
+# combine = "BMA" - 使用最佳匹配平均法组合结果/Use Best-Match Average to combine results
+simmf <- mgeneSim(id_gsym$ENTREZID, semData = mf, measure = "Wang", drop = NULL, combine = "BMA")
+
+# 计算CC本体的基因语义相似度
+# Calculate gene semantic similarity for CC ontology
+simcc <- mgeneSim(id_gsym$ENTREZID, semData = cc, measure = "Wang", drop = NULL, combine = "BMA")
+
+# 注释掉的BP本体相似度计算代码
+# Commented BP ontology similarity calculation code
+# simbp <- mgeneSim(id_gsym$ENTREZID, semData = bp, measure = "Wang", drop = NULL, combine = "BMA")
+
+
+# 提取既有CC又有MF的基因（交集）
+# Extract genes that have both CC and MF annotations (intersection)
+comlist <- intersect(rownames(simcc), rownames(simmf))
+
+# 注释掉的BP交集代码（如果使用BP需取消注释）
+# Commented BP intersection code (uncomment if using BP)
+# comlist <- intersect(comlist, rownames(simbp))
+
+# 筛选只包含共有基因的相似度矩阵
+# Filter similarity matrices to include only common genes
+simmf <- simmf[comlist, comlist]
+simcc <- simcc[comlist, comlist]
+# simbp <- simbp[comlist, comlist]
+
+# 设置数据框的行名为ENTREZID并筛选共有基因
+# Set dataframe row names as ENTREZID and filter for common genes
+row.names(id_gsym) <- id_gsym$ENTREZID
+id_gsym <- id_gsym[comlist,]
+
+
+# 计算基因在MF和CC本体下的几何平均值
+# Calculate geometric mean of gene similarities from MF and CC ontologies
+# 这种方法可以同时考虑基因的分子功能和细胞定位信息
+# This approach combines information about molecular function and cellular localization
+fsim <- sqrt(simmf * simcc)
+
+# 注释掉的MF+CC+BP三本体几何平均值计算代码
+# Commented code for geometric mean of MF+CC+BP ontologies
+# fsim <- (simmf * simcc * simbp)^(1/3)
+```
+
+> 声明！
+由于GO注释在不断的完善，而当年Y叔发文章是2012年，本次众筹是2019年，这几年GO数据库也在不断完善。所以用现在的GO注释算出来的结果画出来图和原文会有所不同，这不是原文的错误，只是对原文进行修正。这一次算出来的结果也更加的make sense，因为用抗FMNL1抗体拉下的蛋白中，理论上FMNL1应该是“朋友”最多的那个。
+
+> Statement!
+As the GO annotation is constantly improving, and the year Uncle Y posted the article is 2012, this crowdfunding is 2019, the GO database is also constantly improving in these years. So the results calculated with the current GO annotations will be different from the original article, which is not a mistake of the original article, but just a correction of the original article. This time, the result is also more sense, because among the proteins pulled down by anti-FMNL1 antibody, theoretically FMNL1 should be the one with the most “friends”.
+
+```{r}
+# 如果想要完全重复Y叔文章里的图，请从这里导入当年计算的fsim。
+# If you want to exactly reproduce the figures from Y's paper, load the pre-calculated fsim here
+# 注意：使用预先计算的结果可确保完全重复性，但会跳过前面的计算步骤
+# Note: Using pre-computed results ensures exact reproducibility but skips previous calculation steps
+# (load("fsim.rda"))  # 此行已被注释，取消注释即可使用预先计算结果
+                      # This line is commented, uncomment to use pre-computed results
+
+# 将基因的名字由ENTREZID改为gene symbol，方便看懂。
+# Convert gene names from ENTREZID to gene symbols for better readability
+# 使用id_gsym数据框中的SYMBOL列替换行列名称
+# Replace row and column names using SYMBOL column from id_gsym dataframe
+colnames(fsim) = id_gsym$SYMBOL
+rownames(fsim) = id_gsym$SYMBOL
+
+# 将基因自己和自己的相似度设为NA，方便接下来去掉。
+# Set self-similarity scores (diagonal) to NA for subsequent removal
+# 原因：基因与自身的相似度总是1，会干扰后续分析
+# Reason: Self-similarity is always 1 and may interfere with downstream analysis
+for (i in 1:ncol(fsim)){
+  fsim[i,i] <- NA  # 将对角线元素设为NA/Set diagonal elements to NA
+}
+
+# 把宽格式数据转化成长格式，其实就是把正方形矩阵转成三列
+# Convert wide format to long format (matrix to three-column dataframe)
+# 结果包含三列：Var1(基因1), Var2(基因2), value(相似度)
+# Result contains: Var1(gene1), Var2(gene2), value(similarity)
+y <- melt(fsim) 
+
+# 删掉带NA的行（包括对角线和自己比自己的情况）
+# Remove rows with NA (including diagonal self-comparisons)
+y <- y[!is.na(y$value),]  
+
+# 把每两个基因之间的相似度保存到文件，只需要保存第一列基因名和第三列数值
+# Save pairwise gene similarities to file, keeping only gene names and similarity scores
+# 输出格式：CSV文件，包含两列（基因对和相似度值）
+# Output format: CSV file with two columns (gene pair and similarity score)
+write.csv(y[,c(1,3)],  # 选择第1列（基因1）和第3列（相似度）
+                       # Select column 1 (gene1) and 3 (similarity)
+       "very_easy_input.csv",  # 输出文件名/output filename
+       row.names = F)  # 不保存行名/exclude row names
+```
+
+# 开始画图
+
+画出原文的box plot
+
+# Start the plot
+
+Draw the original box plot
+
+```{r}
+# 读取基因相似度数据文件
+# Read gene similarity data file
+# 文件包含两列：Var1(基因1)和value(相似度值)
+# File contains two columns: Var1(gene1) and value(similarity score)
+y <- read.csv("very_easy_input.csv")
+head(y)  # 查看前几行数据/Check first few rows of data
+
+# 计算每个基因与其他基因相似度的平均值
+# Calculate mean similarity score for each gene against all others
+# aggregate()按Var1分组计算value的均值
+# aggregate() groups by Var1 and calculates mean of value
+y.mean <- aggregate(.~Var1, y, mean) 
+m <- y.mean$value  # 提取均值向量/Extract mean values
+names(m) <- y.mean$Var1  # 给均值向量命名/Name the mean vector with gene names
+
+# 按平均值给基因名排序(便于后续可视化)
+# Order gene names by mean similarity (for better visualization)
+# 将Var1转换为因子并按均值排序
+# Convert Var1 to factor ordered by mean similarity
+y$Var1 <- factor(y$Var1, levels=names(sort(m)))
+
+# 自定义统计函数用于箱线图
+# Custom statistics function for boxplot
+# 返回包含5个分位数和均值(替换中位数)的向量
+# Returns vector with 5 percentiles and mean(replacing median)
+f <- function(y) {
+  r <- quantile(y, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))  # 计算分位数/Calculate percentiles
+  r[3] <- mean(y)  # 用均值替换中位数/Replace median with mean
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")  # 命名/Naming
+  r
+}
+
+# 创建ggplot2箱线图
+# Create ggplot2 boxplot
+p1 <- ggplot(y, aes(Var1, value, fill = factor(Var1))) + 
+  # 注释掉的配色方案(可取消注释使用)
+  # Commented color scheme (can uncomment to use)
+  # scale_fill_brewer(palette="Set3") + 
+  
+  guides(fill=FALSE) +  # 隐藏图例/Hide legend
+  
+  # 使用自定义统计函数绘制箱线图
+  # Draw boxplot using custom statistics function
+  stat_summary(fun.data= f, geom='boxplot') + 
+  
+  # 添加0.75参考线
+  # Add reference line at 0.75
+  geom_hline(aes(yintercept=0.75), linetype="dashed") + 
+  
+  coord_flip() +  # 翻转坐标轴/Flip coordinates
+  xlab("") + ylab("") +  # 清空坐标轴标签/Clear axis labels
+  
+  # 设置坐标轴文本样式
+  # Set axis text style
+  theme(axis.text.x = element_text(family = "Arial", size = 16, face = "bold"),
+        axis.text.y = element_text(family = "Arial", size = 16, face = "bold")) + 
+  
+  theme_bw() +  # 使用黑白主题/Use black-and-white theme
+  theme(panel.border=element_rect(size=1))  # 设置边框粗细/Set border thickness
+
+# 显示图形/Display plot
+p1
+
+# 保存图形到PDF文件
+# Save plot to PDF file
+# 默认保存最后显示的图形
+# By default saves last displayed plot
+ggsave("friends_box.pdf",
+       width = 8,  # 宽度/width in inches
+       height = 6,  # 高度/height in inches
+       dpi = 300)  # 分辨率/resolution
+```
+
+# 附：画成云雨图
+
+有小伙伴想知道云雨图的输入数据格式，刚好用这套数据来做示例。
+
+云雨图的输入只需要两列：
+
+- 第一列是分组名称，此处是基因名，每个基因为一组
+- 第二列是组内成员的数值，此处是每个基因跟其他基因相似度的值
+
+参考资料：<https://mp.weixin.qq.com/s/kd-WbPXPrg6K2RFNydK-mQ>
+
+# Attachment: Drawing into a cloud and rain chart
+
+Some of you have wondered about the input data format for cloud and rain charts, and just used this data set as an example.
+
+There are only two columns needed for the input of the cloud rain plot:
+
+- The first column is the name of the group, here is the gene name, each gene is a group
+- The second column is the value of the members of the group, here is the value of the similarity of each gene to the other genes.
+
+Reference: <https://mp.weixin.qq.com/s/kd-WbPXPrg6K2RFNydK-mQ>
+
+```{r}
+# 加载自定义的小提琴图几何对象
+# Load custom flat violin plot geometry
+# 注：需确保geom_flat_violin.R在同一目录下
+# Note: Ensure geom_flat_violin.R is in the working directory
+source("geom_flat_violin.R")
+
+# 读取基因相似度数据
+# Read gene similarity data
+y <- read.csv("very_easy_input.csv")
+head(y)  # 查看数据结构/Check data structure
+unique(y$Var1)  # 查看唯一基因列表/View unique gene list
+
+# 计算各基因相似度均值
+# Calculate mean similarity per gene
+y.mean <- aggregate(.~Var1, y, mean) 
+m <- y.mean$value
+names(m) <- y.mean$Var1
+
+# 按均值排序基因因子水平
+# Order gene factor levels by mean similarity
+y$Var1 <- factor(y$Var1, levels=names(sort(m))) 
+
+# 创建雨云图(Raincloud plot)
+# Create raincloud plot (combination of violin, box and dot plots)
+p2 <- ggplot(y, aes(Var1, value, fill = Var1)) +
+  # 注释的配色方案(可取消注释使用)
+  # Commented color scheme (can uncomment to use)
+  # scale_fill_brewer(palette="Set2") +
+  
+  guides(fill=FALSE) +  # 隐藏填充图例/Hide fill legend
+  
+  # 扁平化小提琴图(左侧分布)
+  # Flat violin plot (left side distribution)
+  geom_flat_violin(position=position_nudge(x=.2)) +
+  
+  # 注释的散点图方案(二选一)
+  # Commented jitter option (choose one)
+  # geom_jitter(aes(color=Var1), width=.15) + guides(color=FALSE) +
+  
+  # 堆叠点图(显示数据点密度)
+  # Dot plot showing data point density
+  geom_dotplot(binaxis="y", stackdir="down", dotsize=.35) +
+  
+  # 精简箱线图(右侧)
+  # Slim boxplot (right side)
+  geom_boxplot(width=.1, position=position_nudge(x=.1)) +
+  
+  # 0.75相似度参考线
+  # 0.75 similarity reference line
+  geom_hline(aes(yintercept=0.75), linetype="dashed") +
+  
+  # 坐标轴设置
+  # Coordinate settings
+  coord_flip() +  # 翻转坐标/Flip coordinates
+  xlab("") + ylab("") +  # 空轴标签/Blank axis labels
+  
+  # 文本样式设置
+  # Text styling
+  theme(axis.text.x = element_text(family = "Arial", size = 16, face = "bold"),
+        axis.text.y = element_text(family = "Arial", size = 16, face = "bold")) + 
+  
+  theme_bw() +  # 黑白主题/Black and white theme
+  theme(panel.border=element_rect(size=1))  # 边框粗细/Border thickness
+
+# 显示图形/Display plot
+p2
+
+# 保存为PDF
+# Save as PDF
+ggsave("friends_raincloud.pdf",
+       width = 10,  # 更宽的画布/Wider canvas
+       height = 8,  # 更高的画布/Taller canvas
+       dpi = 300)   # 高分辨率/High resolution
+```
+
+组个图，对比两种展示效果
+
+Group a picture to compare the two display effects
+
+```{r}
+# 加载cowplot包用于图形排版
+# Load cowplot package for plot arrangement
+library(cowplot)
+
+# 将p1和p2两个图形组合在一起
+# Combine p1 and p2 plots together
+# 参数说明/Parameters:
+# p1, p2 - 要组合的ggplot2图形对象/ggplot2 objects to combine
+# labels = c("A", "B") - 为子图添加标签A和B/Add labels A and B to subplots
+# align = "h" - 水平对齐图形/Horizontal alignment of plots
+plot_grid(p1, p2, labels = c("A", "B"), align = "h")
+
+# 保存组合图形为PDF文件
+# Save combined plot as PDF file
+# 默认参数会保存最后一个显示的图形
+# Default parameters will save the last displayed plot
+ggsave("friends.pdf",
+       width = 14,      # 宽度14英寸/Width 14 inches 
+       height = 7,      # 高度7英寸/Height 7 inches
+       dpi = 300)       # 分辨率300dpi/Resolution 300dpi
+
+# 高级排版选项(注释掉的备用方案)
+# Advanced layout options (commented alternatives)
+# plot_grid(p1, p2, 
+#           labels = c("A", "B"), 
+#           label_size = 12,                 # 标签大小/Label size
+#           align = "hv",                    # 水平和垂直对齐/Horizontal and vertical alignment
+#           ncol = 2,                        # 2列布局/2-column layout
+#           rel_widths = c(1, 1.3))          # 相对宽度/Relative widths
+```
+
+```{r}
+sessionInfo()
+```
