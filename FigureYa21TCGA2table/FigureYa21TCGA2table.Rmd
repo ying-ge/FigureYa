@@ -1,0 +1,362 @@
+---
+title: "FigureYa21TCGA2table"
+author: "Guangchuang Yu, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+[<img src="https://guangchuangyu.github.io/blog_images/biobabble.jpg" width="100px"/>](https://guangchuangyu.github.io/blog_images/biobabble.jpg) 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+TCGA临床数据直接用R代码画出三线表。
+
+Draw a three-line table directly using R code for TCGA clinical data.
+
+![](example.png)
+
+## 使用场景
+## usage scenario
+输入数据是临床样品信息，例如TCGA提供的clinical information。
+
+根据年龄、性别、种族、病毒感染、吸烟史等特征进行分类对比，可能发现疾病、癌症发病、转移、耐药跟这些特征的关系，例如发现亚洲非吸烟女性肺癌发病率高。
+
+如果还想加入某个基因的表达数据，计算单因素和多因素cox回归的HR，可参考FigureYa47HRtable，还能生成html、word、csv格式的表格。
+
+The input data is information on clinical samples, such as the clinical information provided by TCGA.
+
+Categorical comparisons based on characteristics such as age, gender, ethnicity, viral infection, smoking history, etc., may reveal the relationship between disease, cancer incidence, metastasis, and drug resistance and these characteristics, for example, a high incidence of lung cancer was found in Asian non-smoking women.
+
+If you also want to add the expression data of a certain gene, and calculate the HR of one-way and multi-factor cox regression, you can refer to FigureYa47HRtable, which can also generate tables in html, word and csv formats.
+
+## 环境设置
+## environment setting
+
+使用国内镜像安装包
+
+use the domestic mirror installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("TCGAbiolinks")
+install.packages("kableExtra")
+```
+
+加载包
+
+load package
+
+```{r}
+library(TCGAbiolinks)
+library(dplyr)
+library(kableExtra)
+```
+
+你可能还需要安装pdflatex
+
+You may also need to install pdflatex
+
+## 输入文件的准备
+## Preparation of input files
+
+下载TCGA临床数据。
+
+如果你不需要TCGA数据，而是自己收集的数据，可以整理成像`easy_input.csv`那样的格式，跳过这步，直接进入下一步：“按列分成4组”。
+
+Download the TCGA clinical data.
+
+If you don't need the TCGA data, but have collected it yourself, you can organize it in a format like `easy_input.csv`, skip this step, and go directly to the next step: "Split into 4 groups by columns".
+
+```r
+#参数`project = `后面写你要看的癌症名称缩写
+#parameter `project = ` followed by the abbreviated name of the cancer you want to see
+clinical <- GDCquery(project = "TCGA-LIHC", 
+                  data.category = "Clinical", 
+                  file.type = "xml")
+GDCdownload(clinical)
+cliquery <- GDCprepare_clinic(clinical, clinical.info = "patient")
+colnames(cliquery)[1] <- "Tumor_Sample_Barcode"
+write.csv(cliquery,"easy_input.csv")
+```
+
+## 按列分成4组
+## Split into 4 groups by columns
+
+即`Alive`、`Dead with tumor`、`Dead tumor free`、`Total`。
+
+That is, `Alive`, `Dead with tumor`, `Dead tumor free`, `Total`.
+
+```{r,message=FALSE}
+x <- read.csv("easy_input.csv")
+
+#%>%，是管道操作符，将上一个函数的输出作为下一个函数的输入
+#其实用for循环一个一个嵌套也能实现，就是写起来太烦
+#用dplyr包的管道操作符，无论读写都变得清晰容易了
+#%>% is a pipeline operator that takes the output of the previous function and uses it as input for the next function.
+#In fact, it can be realized by nesting one by one in a for loop, but it's too annoying to write.
+#Using the pipeline operator of the dplyr package, both reading and writing become clear and easy
+
+#挑出生存状态是“Alive”的行
+#select rows with a survival status of "Alive"
+x1 <- x %>% filter(vital_status == "Alive") 
+#挑出生存状态是“Dead”并且有tumor的行
+#select rows with a survival status of "Dead" and a presence of a tumor
+x2 <- x %>% filter(vital_status == "Dead" & person_neoplasm_cancer_status == "WITH TUMOR") 
+x3 <- x %>% filter(vital_status == "Dead" & person_neoplasm_cancer_status == "TUMOR FREE")
+
+#把没信息的行去掉，用于算总数
+#remove lines without information to calculate the total
+xx = x %>% filter(vital_status != "" & person_neoplasm_cancer_status != "")
+```
+
+## 按项细分
+## Breakdown by item
+### 性别
+### gender
+```{r}
+#还记得前面提取的x1是生存状态是“Alive”的行，把这些行按性别分组
+#remember the rows where x1 was extracted with the survival status "Alive" and group these rows by gender
+s1 = x1 %>% group_by(gender) %>% summarise(alive=n())
+s1
+s2 = x2 %>% group_by(gender) %>% summarise(tumor=n())
+s3 = x3 %>% group_by(gender) %>% summarise(tumor_free=n())
+
+#依次合并s1、s2、s3
+#merge s1, s2, and s3 in sequence
+sex = full_join(s1, s2, by='gender') %>% full_join(s3, by='gender') %>% as.data.frame
+sex
+
+rn = sex[,1]#取出第一列，后面作为行名 take out the first column followed by the row name
+sex = sex[,-1]#先把不需要计算的第一列删除 first delete the first column that does not need to be calculated
+
+#计算p value
+#calculate p value
+sex.p = chisq.test(sex)$p.value
+print(sex.p)
+
+#算总数
+#calculate total
+sex$total = rowSums(sex)
+cs = colSums(sex)
+
+#算百分比、写到括号里
+#用sprintf格式化为小数点后保留1位，加上百分号
+#用paste0加到个数后面，默认是sep=""，比paste代码更简洁
+#calculate the percentage, write it in parentheses
+#format with sprintf to 1 decimal place, add percent sign
+#add after the number of digits with paste0, default is sep="", more concise than paste code
+sex <- rbind(paste0(sex[1,], " (", sprintf("%1.1f\\%%", sex[1,]/cs*100), ")"),
+    paste0(sex[2,], " (", sprintf("%1.1f\\%%", sex[2,]/cs*100), ")"))
+
+#加上行名、列名
+#add row and column names
+rownames(sex) = rn
+colnames(sex) = paste0(c("Alive", "Dead with tumor", "Dead tumor free", "Total"), 
+                "\n(n=", cs, ")")
+print(sex)
+```
+
+
+### 年龄
+### Age
+
+```{r}
+#先写个函数，用到dplyr包
+#有些年龄数据缺失，需要去掉
+#write a function first, using the dplyr package
+#some age data is missing and needs to be removed
+age_stats <- function(x) {
+   res <- x %>% summarise(age = round(mean(age_at_initial_pathologic_diagnosis,na.rm = T), 1), 
+                sd=round(sd(age_at_initial_pathologic_diagnosis,na.rm = T), 1),
+                median=round(median(age_at_initial_pathologic_diagnosis,na.rm = T), 1),
+                min=round(min(age_at_initial_pathologic_diagnosis,na.rm = T), 1),
+                max=round(max(age_at_initial_pathologic_diagnosis,na.rm = T), 1)
+                )
+   c("Mean (SD)" = with(res, paste0(age, " (", sd, ")")),
+       "Median [MIN, MAX]" = with(res, paste0(median, " [", min, ",", max, "]"))#,
+   )             
+}
+
+a1 = age_stats(x1)
+a2 = age_stats(x2)
+a3 = age_stats(x3)
+aa = age_stats(xx)
+#依次合并a1、a2、a3、aa
+#merge a1, a2, a3 and aa in sequence
+age = cbind(a1, a2) %>% cbind(a3) %>% cbind(aa)
+
+colnames(age) = colnames(sex)
+print(age)
+```
+
+### 阶段
+### Stage
+
+```{r}
+stage_stats <- function(x) {
+    x %>% filter(stage_event_pathologic_stage != "") %>% 
+        group_by(stage_event_pathologic_stage) %>% summarise(stage = n())
+}
+
+sg1 = stage_stats(x1)
+sg2 = stage_stats(x2)
+sg3 = stage_stats(x3)
+sgx = stage_stats(xx)
+sg = full_join(sg1, sg2, by="stage_event_pathologic_stage") %>% 
+    full_join(sg3, by="stage_event_pathologic_stage") %>% 
+    full_join(sgx, by="stage_event_pathologic_stage") %>% 
+    as.data.frame
+
+rownames(sg) = sg[,1]
+sg = sg[,-1]
+colnames(sg) = colnames(sex)
+
+print(sg)
+
+# 卡方检验  
+# total列不用于计算，删掉它
+# chisq test
+# the total column is not used for calculation, delete it
+sgx <- sg[, -4]
+# 有些stage在分组里没人，不用于计算p value
+# some stages in the group have no participants and are not used for calculating the p-value
+sgx <- sgx[!apply(sgx, 1, anyNA),]
+# 计算p value
+# calculate p value
+sg.p = chisq.test(sgx)$p.value
+
+# NA的啥都不打印
+# NA doesn't print anything
+sgv2 = lapply(1:nrow(sg), function(i) ifelse(is.na(sg[i,]), "", 
+    paste0(sg[i,], " (", sprintf("%1.1f\\%%", sg[i,]/cs * 100), ")"))) %>% 
+    do.call(rbind, .)
+#或者用下面这种，打印“NA”字样
+#or use the following, which prints “NA”.
+#sgv2 = lapply(1:nrow(sg), function(i) ifelse(is.na(sg[i,]), NA, 
+#    paste0(sg[i,], " (", sprintf("%1.1f\\%%", sg[i,]/cs * 100), ")"))) %>% 
+#    do.call(rbind, .)
+
+rownames(sgv2) = rownames(sg)
+colnames(sgv2) = colnames(sg)
+print(sgv2)
+```
+
+### 合并
+### Merge
+
+```{r}
+res = rbind(sex, age) %>% rbind(sgv2) %>% as.data.frame
+print(res)
+```
+
+
+## 生成表格
+## Generate tables
+
+用`kableExtra`包生成好看的html表格
+
+Generate nice looking html tables with the `kableExtra` package
+
+```{r}
+if (knitr:::is_html_output()) {
+    cn = sub("\n", "<br>", colnames(res))
+} else if (knitr:::is_latex_output()) {
+    usepackage_latex('makecell')
+    usepackage_latex('booktabs')
+    cn = linebreak(colnames(res), align="c")
+}   
+
+#如果你不用knit，而是复制粘贴代码，需要运行下面这行
+#If you don't use knit but instead copy and paste the code, you need to run the following line
+#cn = colnames(res)
+
+res %>%
+    kable(booktabs = T, escape = F, caption = "Example Table",
+        col.names = cn) %>%
+    kable_styling(c("striped", "scale_down")) %>%
+    group_rows("Gender*", 1, 2) %>% #根据p value手动加* manually add * according to p value
+    group_rows("Age", 3, 4) %>% #根据具体分组数设置行数，例如这里年龄是两行，这里写3和4 set the number of rows according to the number of specific groups, for example, here age is two rows, here write 3 and 4
+    group_rows("Stage", 5, 13) %>% #根据具体分组数设置行数，例如从5到13都是stage，这里写5和13 set the number of rows according to the number of specific groups, for example, from 5 to 13 are stage, here write 5 and 13
+    footnote(general = "significant",
+             #general = paste("P-value =", sg.p), #或者用这行直接打印p value or use this line to print p value directly
+             general_title = "*: ", 
+             footnote_as_chunk = T, title_format = "italic")
+```
+
+\newpage
+
+```{r eval=T}
+#下面要把P value加到最后一列
+
+#如果p值太小，不想打太多位，round一下位数又变成0，就用科学记数
+#例如用sprintf("%1.1e", sex.p)替换round(sex.p, 3)
+
+#哪个P value显著，就在哪个p value后面加上*
+#就像这样：“paste0(round(sg.p, 3), footnote_marker_symbol(1))”
+
+#The following is to add the p value to the last column.
+
+#If the p value is too small, and you don't want too many digits, and round turns the number of digits to 0, use scientific notation.
+#For example, use sprintf(“%1.1e”, sex.p) to replace round(sex.p, 3).
+
+# Add * to any p-value that is significant.
+#Like this: “paste0(round(sg.p, 3), footnote_marker_symbol(1))”
+
+res[["P Value"]] = c("", paste0(round(sex.p, 3), footnote_marker_symbol(1)), ## sex
+                 rep("", 2), ## age
+                 rep("", nrow(sg)-1), round(sg.p, 3) ## stage
+                 )
+cn <- c(cn, "P Value") #加个列名 add a column name
+
+res %>%
+    kable(booktabs = T, escape = F, caption = "Example Table",
+        col.names = cn) %>%
+    kable_styling(c("striped", "scale_down")) %>%
+    group_rows("Gender", 1, 2) %>% #根据具体分组数设置行数，例如性别是两行，这里写1和2 set the number of rows according to the number of specific groups, for example, gender is two rows, here write 1 and 2
+    group_rows("Age", 3, 4) %>% #根据具体分组数设置行数，例如这里年龄是两行，这里写3和4 set the number of rows according to the number of specific groups, for example, here age is two rows, here write 3 and 4
+    group_rows("Stage", 5, 13) %>% #根据具体分组数设置行数，例如从5到13都是stage，这里写5和13 set the number of rows according to the number of specific groups, for example, from 5 to 13 are stage, here write 5 and 13
+    footnote(general = "significant", 
+             #general = paste("P-value =", sg.p), #或者用这行直接打印p value or use this line to print p value directly
+            general_title = "*", 
+            footnote_as_chunk = T, title_format = "italic")
+```
+
+\newpage
+
+## 生成pdf格式的表格
+## Generate a table in pdf format
+
+1. 打开FigureYa21TCGA2table.Rmd文件，把第5行换成`output: latex_document`
+
+2. 删除FigureYa21TCGA2table.Rmd中所有中文，保存为`FigureYa21TCGA2table_latex.Rmd`
+
+3. 在Rstudio中点击`Knit`，会生成`FigureYa21TCGA2table_latex.tex`文件
+
+4. 通过复制粘贴运行下面两行，就会输出pdf格式的文件
+
+1. open FigureYa21TCGA2table.Rmd file, replace line 5 with `output: latex_document`
+
+2. Delete all Chinese characters in FigureYa21TCGA2table.Rmd and save it as `FigureYa21TCGA2table_latex.Rmd`.
+
+3. Click `Knit` in Rstudio, it will generate `FigureYa21TCGA2table_latex.tex` file.
+
+4. Run the following two lines by copying and pasting, it will output the file in pdf format
+
+```r
+library(tools)
+texi2pdf("FigureYa21TCGA2table_latex.tex")
+```
+
+注：如果要表格页不显示代码，就把第224行换成这句：“```{r eval=T, echo = F}”
+
+Note: If you want the form page to not show the code, replace line 224 with this, “```{r eval=T, echo = F}”
+
+```{r}
+sessionInfo()
+```
