@@ -1,0 +1,633 @@
+---
+title: "FigureYa70mutationEvents"
+author: "Yi Xiong, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+## Requirements description
+
+co-occurrence/mutual exclusivity分析，画出图d。
+
+co-occurrence/mutual exclusivity analysis, draw figure d.
+
+Co-occurrence/mutual exclusivity -- Only mutations seen in **at least 10 patients** were kept. The **DISCOVER method** was used to determine significant mutual exclusivity and co-occurrence. A plot of the co-occurrences was generated using corrplot with the **odds ratio of the pairwise co-occurrence** used to color and scale the circle sizes.
+
+![](https://media.springernature.com/lw900/springer-static/image/art%3A10.1038%2Fs41586-018-0623-z/MediaObjects/41586_2018_623_Fig1_HTML.png)
+
+出自<https://www.nature.com/articles/s41586-018-0623-z>
+
+from<https://www.nature.com/articles/s41586-018-0623-z>
+
+## 应用场景
+
+用TCGA的基因突变数据分析Co-occurrence/mutual exclusivity。
+
+用corrplot同时展示相关性和显著性。
+
+corrplot这个包对相关性的更多展示方式可参考<http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram>。
+
+## Application Scenarios
+
+Analyze Co-occurrence/mutual exclusivity with gene mutation data from TCGA.
+
+Demonstrate both correlation and significance with corrplot.
+
+More ways of displaying correlation by the package corrplot can be found at <http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram>.
+
+## 环境设置
+
+## Environment settings
+
+```{r}
+# ====================== 包安装设置 ======================
+# ====================== Package Installation Settings ======================
+
+# 使用国内镜像加速CRAN包下载 (注释状态)
+# Use Chinese mirror to accelerate CRAN package downloads (commented out)
+# options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 使用国内镜像加速Bioconductor包下载 (注释状态)
+# Use Chinese mirror for Bioconductor packages (commented out)
+# options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+# 安装Cairo图形设备包 (注释状态)
+# Install Cairo graphics device package (commented out)
+# install.packages("Cairo")
+
+# 添加discover包专用仓库并安装 (注释状态)
+# Add discover package repository and install (commented out)
+# options(repos=c(getOption("repos"), "http://ccb.nki.nl/software/discover/repos/r"))
+# install.packages("discover")
+
+
+# ====================== 加载所需包 ======================
+# ====================== Load Required Packages ======================
+
+# 数据重塑包：用于数据结构转换（宽表/长表）
+# Data reshaping package: for data structure transformation (wide/long format)
+library(reshape2)
+
+# 颜色调色板包：提供科学配色方案
+# Color palette package: provides scientific color schemes
+library(RColorBrewer)
+
+# 高质量图形输出包：支持多种格式输出
+# High-quality graphics package: supports multiple output formats
+library(Cairo)
+
+# 差异分析包：用于发现差异特征
+# Differential analysis package: for discovering differential features
+library(discover)
+
+# 数据读取包：高效读取结构化数据
+# Data reading package: efficient reading of structured data
+library(readr)
+
+# 相关性可视化包：绘制相关矩阵图
+# Correlation visualization package: for plotting correlation matrices
+library(corrplot)
+
+# Excel文件操作包：读写Excel文件
+# Excel file manipulation package: read/write Excel files
+library(openxlsx)
+
+
+# ====================== 系统环境设置 ======================
+# ====================== System Environment Settings ======================
+
+# 设置系统语言环境为英文（保证报错信息是英文）
+# Set system language to English (to ensure error messages in English)
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止自动将字符串转换为因子（保持字符型数据不变）
+# Prevent automatic conversion of strings to factors (keep character data as is)
+options(stringsAsFactors = FALSE)
+```
+
+## 参数设置
+
+## Parameter setting
+
+```{r}
+# 设置目标癌症类型 - 此处以乳腺癌(BRCA)为例 / Set target cancer type - using Breast Cancer (BRCA) as example
+target_tumor <- "BRCA"
+```
+
+## 输入文件的准备
+
+如果你的数据已经保存为“easy_input_mutation.csv”，就可以跳过这步，直接进入“Co-occurrence/mutual exclusivity分析”。
+
+如果只为画图，就直接进入“开始画图”。
+
+例文没有提供基因层面的突变数据，此处以TCGA的BRCA为例，用DISCOVERY method进行co-occurrence和mutual exclusivity分析。
+
+## Input file preparation
+
+If your data has been saved as “easy_input_mutation.csv”, you can skip this step and go directly to the “Co-occurrence/mutual exclusivity analysis “.
+
+If you only want to draw a picture, you can go directly to “Start Drawing”.
+
+The example paper does not provide mutation data at the gene level, so here we take the BRCA of TCGA as an example, and use the DISCOVERY method to analyze the co-occurrence and mutual exclusivity.
+
+### 基因层面的突变数据下载
+
+从UCSC xena的TCGA Pan-Cancer (PANCAN) (39 datasets)<https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>，下载两个文件：
+
+- mc3.v0.2.8.PUBLIC.nonsilentGene.xena：somatic mutation (SNP and INDEL) - Gene level non-silent mutation。点击链接下载：<https://pancanatlas.xenahubs.net/download/mc3.v0.2.8.PUBLIC.nonsilentGene.xena.gz>。下载后解压缩，把mc3.v0.2.8.PUBLIC.nonsilentGene.xena文件保存到当前文件夹。里面包含TCGA所有癌症类型，用下面的代码提取你感兴趣的癌症的突变数据。
+
+- TCGA_phenotype_denseDataOnlyDownload.tsv：phenotype - sample type and primary disease。点击链接下载：<https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz>
+
+- TCGA的癌症全称和缩写的对应关系，参照GEPIA help的Differential analysis：<http://gepia.cancer-pku.cn/help.html>，整理成samplepair.txt文件
+
+### Gene-level mutation data downloads
+
+TCGA Pan-Cancer (PANCAN) from UCSC xena (39 datasets)<https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub= https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>, download two files:
+
+- mc3.v0.2.8.PUBLIC.nonsilentGene.xena: somatic mutation (SNP and INDEL) - Gene level non-silent mutation. Click on the link to download: <https://pancanatlas. xenahubs.net/download/mc3.v0.2.8.PUBLIC.nonsilentGene.xena.gz>. After downloading and unzipping, save the mc3.v0.2.8.PUBLIC.nonsilentGene.xena file to the current folder. It contains all TCGA cancer types, use the following code to extract the mutation data for the cancer you are interested in.
+
+- TCGA_phenotype_denseDataOnlyDownload.tsv: phenotype - sample type and primary disease. click the link to download: <https://pancanatlas.xenahubs.net/download/ TCGA_phenotype_denseDataOnlyDownload.tsv.gz>
+
+- The correspondence between the full name of the cancer and the abbreviation of TCGA is organized into a samplepair.txt file by referring to the Differential analysis of GEPIA help: <http://gepia.cancer-pku.cn/help.html>
+
+```{r}
+# ====================== 数据读取与预处理 ======================
+# ====================== Data Loading and Preprocessing ======================
+
+# 读取突变信息数据（大数据文件，可能需要较长时间）
+# Read mutation information data (large file, may take time)
+# library(readr)  
+mutationinfo <- read_tsv(file = "mc3.v0.2.8.PUBLIC.nonsilentGene.xena")
+mutationinfo[1:5,1:5]  # 预览前5行5列数据 / Preview first 5 rows and columns
+
+# 读取样本配对信息
+# Read sample pairing information
+samplepair <- read.delim("samplepair.txt", as.is = TRUE)  # as.is=TRUE保持字符格式 / Keep character format
+gtexpair <- samplepair[, c(1, 2, 5)]  # 提取TCGA组织名、Detail和GTEx组织名列 
+                                      # Extract columns: TCGA tissue name, Detail, and GTEx tissue name
+gtexpair
+
+# ====================== GTEx数据处理 ======================
+# ====================== GTEx Data Processing ======================
+
+# 创建GTEx样本类型标识
+# Create GTEx sample type labels
+gtexpair$type <- paste0(gtexpair$TCGA, "_normal_GTEx")  # 添加GTEx类型标签 / Add GTEx type label
+gtexpair$type2 <- "normal"  # 统一标记为正常样本 / Uniformly labeled as normal samples
+
+# 整理GTEx-TCGA对应表
+# Organize GTEx-TCGA mapping table
+gtextcga <- gtexpair[, c(1, 3:5)]  # 筛选列（去除Detail） / Select columns (remove Detail)
+colnames(gtextcga)[1:2] <- c("tissue", "X_primary_site")  # 重命名列 / Rename columns
+head(gtextcga)
+
+# 读取GTEx表型数据并合并
+# Read GTEx phenotype data and merge
+gtexcase <- read.delim(file = "GTEX_phenotype.tsv", header = TRUE, as.is = TRUE)
+colnames(gtexcase)[1] <- "sample"  # 确保第一列名为sample / Ensure first column named sample
+gtexcase2tcga <- merge(gtextcga, gtexcase, by = "X_primary_site")  # 按原发部位合并 / Merge by primary site
+gtextable <- gtexcase2tcga[, c(5, 2:4)]  # 选择需要的列 / Select required columns
+head(gtextable)
+
+# 创建组织类型映射向量
+# Create tissue type mapping vector
+tissue <- gtexpair$TCGA
+names(tissue) <- gtexpair$Detail  # 用Detail作为命名 / Name with Detail column
+
+# ====================== TCGA数据处理 ======================
+# ====================== TCGA Data Processing ======================
+
+# 读取TCGA表型数据
+# Read TCGA phenotype data
+tcgacase <- read.delim(file = "TCGA_phenotype_denseDataOnlyDownload.tsv", 
+                      header = TRUE, as.is = TRUE)
+
+# 添加组织信息和样本类型标签
+# Add tissue info and sample type labels
+tcgacase$tissue <- tissue[tcgacase$X_primary_disease]  # 映射组织类型 / Map tissue type
+tcgacase$type <- ifelse(
+  tcgacase$sample_type == 'Solid Tissue Normal',
+  paste(tcgacase$tissue, "normal_TCGA", sep = "_"),  # 正常样本标签 / Normal sample label
+  paste(tcgacase$tissue, "tumor_TCGA", sep = "_")    # 肿瘤样本标签 / Tumor sample label
+)
+tcgacase$type2 <- ifelse(
+  tcgacase$sample_type == 'Solid Tissue Normal',
+  "normal",  # 标记为正常 / Mark as normal
+  "tumor"    # 标记为肿瘤 / Mark as tumor
+)
+
+# 生成最终TCGA数据表
+# Generate final TCGA table
+tcgatable <- tcgacase[, c(1, 5:7)]  # 选择样本ID和组织类型列 / Select sample ID and tissue type columns
+head(tcgatable)  # 预览结果 / Preview result
+```
+
+### 提取你感兴趣的癌症的突变数据
+
+### Extract mutation data for your cancer of interest
+
+```{r}
+# 加载data.table包用于高效数据处理
+# Load data.table package for efficient data manipulation
+library(data.table)
+
+# ====================== 筛选目标样本 ======================
+# ====================== Filter Target Samples ======================
+
+# 从TCGA数据中筛选特定癌症类型(BRCA)的肿瘤样本
+# Filter tumor samples of target cancer type (BRCA) from TCGA data
+target_sample <- tcgacase[tcgacase$tissue == target_tumor & tcgatable$type2 == "tumor", ]
+
+# ====================== 提取目标突变信息 ======================
+# ====================== Extract Target Mutation Data ======================
+
+# 从突变数据中提取目标样本对应的列
+# Extract columns corresponding to target samples from mutation data
+target_mutationinfo <- mutationinfo[, colnames(mutationinfo) %in% target_sample$sample]
+
+# 查看前几行数据
+# View first few rows of data
+head(target_mutationinfo)
+
+# 添加样本ID列（来自原始突变数据的sample列）
+# Add sample ID column (from original mutation data's sample column)
+target_mutationinfo$sample = mutationinfo$sample
+
+# 移除sample列为NA的行
+# Remove rows with NA in sample column
+target_mutationinfo = target_mutationinfo[complete.cases(target_mutationinfo[, "sample"]), ]
+
+# 转换为data.frame格式
+# Convert to data.frame format
+target_mutationinfo = as.data.frame(target_mutationinfo)
+
+# 设置行名为样本ID
+# Set row names as sample IDs
+rownames(target_mutationinfo) = target_mutationinfo$sample
+
+# 移除最后一列（sample列，因为已作为行名）
+# Remove last column (sample column, since it's now row names)
+target_mutationinfo = target_mutationinfo[, -length(target_mutationinfo)]
+
+# 再次查看前5行5列数据
+# View first 5 rows and columns again
+target_mutationinfo[1:5, 1:5]
+
+# ====================== 数据保存 ======================
+# ====================== Data Saving ======================
+
+# 保存完整数据到CSV（当前注释掉）
+# Save full data to CSV (currently commented out)
+# write.csv(target_mutationinfo, "easy_input_mutation.csv", quote = FALSE)
+
+# 保存前5列数据用于检查文件格式
+# Save first 5 columns to check file format
+write.csv(target_mutationinfo[, 1:5], "easy_input_mutation.csv", quote = FALSE)
+```
+
+## Co-occurrence/mutual exclusivity分析
+
+DESCOVERY method，用R版本的DESCOVERY计算co-occurrence和mutual exclusivity。
+
+参考资料：<https://github.com/NKI-CCB/DISCOVER>
+
+<http://ccb.nki.nl/software/discover/doc/r/discover-intro.html>
+
+下面使用Discover包进行co-occurrence和mutual exclusivity分析
+
+需要引用的文献：<https://genomebiology.biomedcentral.com/articles/10.1186/s13059-016-1114-x>
+
+## Co-occurrence/mutual exclusivity analysis
+
+DESCOVERY method to calculate co-occurrence and mutual exclusivity with R version of DESCOVERY.
+
+Reference: <https://github.com/NKI-CCB/DISCOVER>
+
+<http://ccb.nki.nl/software/discover/doc/r/discover-intro.html>
+
+The following co-occurrence and mutual exclusivity analysis is performed using the Discover package
+
+Literature to be cited: <https://genomebiology.biomedcentral.com/articles/10.1186/s13059-016-1114-x>
+
+```{r}
+# ====================== 数据准备 ======================
+# ====================== Data Preparation ======================
+
+# 输入文件说明：
+# 格式要求：行代表基因，列代表样本，0表示未突变，1表示突变
+# Input file format:
+# Rows = genes, columns = samples, 0 = no mutation, 1 = mutated
+# target_mutationinfo <- read.csv("easy_input_mutation.csv", row.names = 1)
+# target_mutationinfo[1:5,1:5]  # 查看数据前5行5列 / View first 5 rows and columns
+
+# ====================== 互斥突变分析 ======================
+# ====================== Mutual Exclusivity Analysis ======================
+
+# 加载discover包（用于分析基因突变模式）
+# Load discover package (for analyzing gene mutation patterns)
+library(discover)
+
+# Step1: 构建背景突变模型（计算密集型步骤）
+# Step1: Build background mutation model (computationally intensive)
+events <- discover.matrix(target_mutationinfo)
+# 功能：估计基因突变的背景频率 / Estimates background mutation frequencies
+
+# Step2: 筛选高频突变基因（至少在25个样本中突变）
+# Step2: Filter frequently mutated genes (mutated in ≥25 samples)
+subset <- rowSums(target_mutationinfo) > 25
+# 目的：提高统计效力，减少多重检验负担 / Increases statistical power, reduces multiple testing burden
+
+# Step3: 执行成对互斥性检验（mutual exclusivity）
+# Step3: Perform pairwise mutual exclusivity test
+result.mutex <- pairwise.discover.test(
+  events[subset, ],    # 使用筛选后的基因 / Use filtered genes
+  alternative = "less"  # 检验互斥性 / Test for mutual exclusivity
+)
+
+# 查看结果（FDR阈值设为0.05）
+# View results (FDR threshold = 0.05)
+print(result.mutex, fdr.threshold = 0.05)
+
+# 保存互斥性分析结果
+# Save mutual exclusivity results
+result <- as.data.frame(result.mutex)
+write.csv(result, file = "Target_cancer_discover_less.csv")
+
+# ====================== 共现突变分析 ======================
+# ====================== Co-occurrence Analysis ======================
+
+# 执行成对共现性检验（alternative="greater"）
+# Perform pairwise co-occurrence test
+result.mutex <- pairwise.discover.test(
+  events[subset, ],     # 使用相同的基因子集 / Use same gene subset
+  alternative = "greater"  # 检验共现性 / Test for co-occurrence
+)
+
+# 查看结果（FDR阈值设为0.05）
+# View results (FDR threshold = 0.05)
+print(result.mutex, fdr.threshold = 0.05)
+
+# 保存共现性分析结果
+# Save co-occurrence results
+result <- as.data.frame(result.mutex)
+write.csv(result, file = "Target_cancer_discover_greater.csv")
+
+# ====================== 结果解读 ======================
+# ====================== Result Interpretation ======================
+# 1. "less"检验：显著结果提示基因对倾向于互斥突变
+#    - 可能在同一通路或功能复合物中
+# 2. "greater"检验：显著结果提示基因对倾向于共突变
+#    - 可能参与协同致癌过程
+#
+# 1. "less" test: Significant results indicate mutually exclusive mutations
+#    - May belong to same pathway or functional complex
+# 2. "greater" test: Significant results indicate co-occurring mutations
+#    - May participate in cooperative oncogenic processes
+```
+
+例文的图中有两个输入：P value和odds ratio。
+
+The figure in the example text has two inputs: p value and odds ratio.
+
+Figure legend of Figure 1d.d, Co-occurrence or exclusivity of the most recurrent mutational events in the Beat AML cohort (n = 531 patients) were assessed using the DISCOVER method. The dot plot shows the odds ratio of co-occurrence (blue) or exclusivity (red) using colour-coding and circle size as well as asterisks that indicate FDR-corrected statistical significance. *P < 0.1; **P < 0.05; ***P < 0.01.
+ 
+And the discription in Methods:
+Co-occurrence and mutual exclusivity. Only mutations seen in at least 10 patients were kept. The DISCOVER41 method was used to determine significant mutual exclusivity and co-occurrence. A plot of the co-occurrences was generated using corrplot84 with the odds ratio of the pairwise co-occurrence used to colour and scale the circle sizes.
+
+然而DESCOVER并不输出odds ratio，原文未描述odds ratio的计算方法，联系通讯作者未得到回复。欢迎对odds ratio的计算感兴趣的小伙伴来小丫画图知识星球或微信群里讨论。
+
+However, DESCOVER does not output odds ratio, the original article does not describe the calculation method of odds ratio, and contacting the corresponding author did not get a reply. Welcome friends who are interested in the calculation of odds ratio to discuss it in Xiaoya Drawing Knowledge Planet or WeChat Group.
+
+## 例文的原图复现
+
+## A reproduction of the original image of the example text
+
+### 输入文件
+
+输入数据来源：例文的Source Data Fig. 1，<https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-018-0623-z/MediaObjects/41586_2018_623_MOESM4_ESM.xlsx>，Tab C。
+
+### Input file
+
+Input Data Source: Source Data for Example Fig.
+1，<https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-018-0623-z/MediaObjects/41586_2018_623_MOESM4_ESM.xlsx>，Tab C。
+```{r}
+# ====================== Excel数据读取与预处理 ======================
+# ====================== Excel Data Import and Preprocessing ======================
+
+# 加载openxlsx包用于处理Excel文件
+# Load openxlsx package for Excel file manipulation
+library(openxlsx)
+
+# 从Excel文件中读取特定工作表的数据
+# Read data from specific sheet in Excel file
+input <- read.xlsx(
+  "41586_2018_623_MOESM4_ESM.xlsx",  # 输入文件名 / Input file name
+  sheet = 3,                         # 读取第3个工作表 / Read 3rd worksheet
+  cols = c(1, 2, 5, 6),             # 提取第1,2,5,6列 / Extract columns 1,2,5,6
+  startRow = 1                       # 从第1行开始读取 / Start reading from row 1
+)
+
+# 查看数据结构（可选）
+# View data structure (optional)
+# str(input)
+# head(input)
+
+# ====================== 数据保存 ======================
+# ====================== Data Export ======================
+
+# 将处理后的数据保存为CSV格式
+# Save processed data as CSV file
+write.csv(
+  input,                     # 要保存的数据对象 / Data object to save
+  "easy_input.csv",          # 输出文件名 / Output file name
+  quote = FALSE,             # 不添加引号 / Do not add quotes
+  row.names = FALSE          # 不写入行名 / Do not write row names
+)
+
+# ====================== 参数说明 ======================
+# ====================== Parameter Details ======================
+# read.xlsx()参数解释 / Parameters explanation:
+# - sheet: 可接受工作表名称或序号（从1开始计数）
+#          Can accept either sheet name or index (1-based)
+# - cols: 指定要读取的列号（数值向量）
+#         Specifies columns to read (numeric vector)
+# - startRow: 从指定行开始读取（跳过表头等）
+#             Start reading from specified row (skip headers etc.)
+
+# write.csv()参数解释 / Parameters explanation:
+# - quote: FALSE表示字符串不加引号（适合后续程序读取）
+#          FALSE means no quotes around strings (better for programmatic reading)
+# - row.names: FALSE避免保存不必要的行名
+#              FALSE prevents saving unnecessary row names
+```
+
+easy_input.csv，只需要4列，前两列是基因名，第三列决定点的大小和“***”符号（此处是p value），第四列决定点的颜色（此处是odd ratio）。根据自己的需要填后两列的数值。
+
+转换成两个矩阵inputdata和input_pvalue，分别表示Odd_ratio和p值的矩阵
+
+easy_input.csv, only 4 columns are needed, the first two columns are the gene name, the third column determines the size of the point and the “***” symbol (in this case p value), and the fourth column determines the color of the point (in this case odd ratio). Fill in the last two columns as you see fit.
+
+Convert to two matrices inputdata and input_pvalue, representing the Odd_ratio and p-value matrices respectively
+```{r}
+# ====================== 数据读取与预处理 ======================
+# ====================== Data Loading and Preprocessing ======================
+
+# 读取CSV文件（第一列作为行名）
+# Read CSV file (using first column as row names)
+input <- read.csv("easy_input.csv")
+
+# 查看数据前几行
+# View first few rows of data
+head(input)
+
+# ====================== 比值比(Odd Ratio)矩阵准备 ======================
+# ====================== Odd Ratio Matrix Preparation ======================
+
+# 选择Gene1, Gene2和Odd Ratio列
+# Select Gene1, Gene2 and Odd Ratio columns
+input_data = input[, c(1:2, 4)]  # 列选择 / Column selection
+
+# 使用reshape2包的dcast函数将长格式转为宽格式
+# Convert long format to wide format using dcast from reshape2
+input_data = dcast(as.data.table(input_data), Gene1 ~ Gene2)  # 基因对矩阵转换 / Gene pair matrix transformation
+
+# 设置行名为Gene1
+# Set row names as Gene1
+rownames(input_data) = input_data$Gene1
+
+# 移除第一列（Gene1列，因其已成为行名）
+# Remove first column (Gene1, now used as row names)
+input_data = input_data[, -1]
+
+# 转换为矩阵格式
+# Convert to matrix format
+input_data = as.matrix(input_data)
+
+# 查看前5行5列数据
+# View first 5 rows and columns
+input_data[1:5, 1:5]
+
+# ====================== P值矩阵准备 ======================
+# ====================== P-value Matrix Preparation ======================
+
+# 选择Gene1, Gene2和P值列
+# Select Gene1, Gene2 and P-value columns
+input_pvalue = input[, c(1:3)]  # 列选择 / Column selection
+
+# 使用dcast转换格式（长格式转宽格式）
+# Convert format using dcast (long to wide)
+input_pvalue = dcast(as.data.table(input_pvalue), Gene1 ~ Gene2)
+
+# 设置行名和列名
+# Set row and column names
+rownames(input_pvalue) = input_pvalue$Gene1  # 行名为Gene1 / Row names as Gene1
+input_pvalue = input_pvalue[, -1]  # 移除Gene1列 / Remove Gene1 column
+input_pvalue = as.matrix(input_pvalue)  # 转换为矩阵 / Convert to matrix
+rownames(input_pvalue) = colnames(input_pvalue)  # 确保行列名一致 / Ensure consistent row and column names
+
+# 查看前5行5列数据
+# View first 5 rows and columns
+input_pvalue[1:5, 1:5]
+
+# ====================== 关键说明 ======================
+# ====================== Key Notes ======================
+# 1. input_data矩阵包含基因对的比值比(Odd Ratio)值，将用于热图颜色映射
+#    - input_data matrix contains Odd Ratio values for gene pairs, used for heatmap color mapping
+# 2. input_pvalue矩阵包含基因对的P值，将用于热图点的大小和显著性标记
+#    - input_pvalue matrix contains P-values for gene pairs, used for dot size and significance in heatmap
+# 3. 两个矩阵的行列顺序必须完全一致
+#    - Row and column orders of both matrices must be identical
+# 4. 缺失值(NA)在后续可视化中需要特殊处理
+#    - Missing values (NA) require special handling in visualization
+```
+
+### 开始画图
+
+### Start drawing
+
+```{r}
+# ====================== 突变相关性可视化 ======================
+# ====================== Mutation Correlation Visualization ======================
+
+# 创建PDF输出文件（使用Cairo图形设备保证高质量输出）
+# Create PDF output (using Cairo for high-quality graphics)
+CairoPDF("mutationplot.pdf")
+
+# 绘制相关性热图
+# Generate correlation heatmap
+corrplot(
+  input_data,                # 输入数据矩阵（比值比矩阵）
+                            # Input data matrix (Odd Ratio matrix)
+  
+  # 基本图形参数 / Basic plot parameters
+  type = "upper",           # 只显示上三角部分
+                            # Show upper triangle only
+  order = "hclust",         # 使用层次聚类排序基因
+                            # Hierarchical clustering for gene ordering
+  col = brewer.pal(n = 8, name = "RdBu"),  # 使用红蓝渐变色
+                                            # Red-Blue color palette
+  tl.col = "black",         # 基因标签颜色为黑色
+                            # Black text labels
+  tl.cex = 0.5,             # 标签文字大小
+                            # Label text size
+  tl.srt = 90,              # 标签旋转90度（垂直）
+                            # Vertical text labels (90 degree rotation)
+  is.corr = FALSE,          # 输入不是相关系数矩阵
+                            # Input is not correlation matrix
+  
+  # 对角线设置 / Diagonal settings
+  diag = FALSE,             # 不显示对角线数值
+                            # Hide diagonal values
+  
+  # 显著性标记设置 / Significance marking
+  p.mat = input_pvalue,     # P值矩阵
+                            # P-value matrix
+  sig.level = c(.001, .05, .1),  # 显著性水平阈值
+                                  # Significance thresholds
+  insig = "label_sig",      # 用星号标记显著性
+                            # Mark significance with asterisks
+  pch.cex = 0.5,            # 星号大小
+                            # Asterisk size
+  font = 3                  # 斜体显示星号
+                            # Italic asterisks
+)
+
+# 关闭图形设备（完成PDF输出）
+# Close graphics device (finalize PDF)
+dev.off()
+
+# ====================== 参数详解 ======================
+# ====================== Parameter Details ======================
+
+# 颜色参数说明 / Color parameters:
+# - brewer.pal(): 从RColorBrewer调色板获取颜色
+#                 使用RdBu(红-蓝)渐变色，适合表示正负关联
+#                RdBu palette (red-blue) suitable for positive/negative associations
+
+# 显著性标记 / Significance markers:
+# - *** p < 0.001
+# - **  p < 0.05
+# - *   p < 0.1
+
+# 可视化技巧 / Visualization tips:
+# 1. 上三角布局避免重复显示相同基因对
+#    Upper triangle avoids duplicate gene pairs
+# 2. 层次聚类使相似突变模式的基因相邻
+#    Hierarchical clustering groups genes with similar patterns
+# 3. 小字体和垂直标签适合显示大量基因
+#    Small text and vertical labels work well for many genes
+```
+
+![](mutationplot.pdf)
+
+```{r}
+sessionInfo()
+```
