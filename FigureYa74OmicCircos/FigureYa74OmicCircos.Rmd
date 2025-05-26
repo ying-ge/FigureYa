@@ -1,0 +1,496 @@
+---
+title: "FigureYa74omicCircos"
+author: "Li Yin, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+## 需求描述
+
+用R复现文章里的图
+
+## Requirement Description
+
+Reproduce a diagram from an article in R
+
+![](example.png)
+
+出自<https://onlinelibrary.wiley.com/doi/abs/10.1111/all.13222>
+
+from<https://onlinelibrary.wiley.com/doi/abs/10.1111/all.13222>
+
+## 应用场景
+
+##Application scenarios
+
+visualizing genomic variations, including mutation patterns, copy number variations (CNVs), expression patterns, and methylation patterns.
+
+支持hg18、hg19、mm9、mm10
+
+例如像例文那样展示多个芯片基因的表达变化和之间的link关系
+
+Support hg18, hg19, mm9, mm10
+
+For example, displaying the expression changes of multiple chip genes and the link relationships between them as in the example text
+
+参考资料：<https://journals.sagepub.com/doi/10.4137/CIN.S13495>
+
+<https://www.bioconductor.org/packages/devel/bioc/html/OmicCircos.html>
+
+reference: <https://journals.sagepub.com/doi/10.4137/CIN.S13495>
+
+<https://www.bioconductor.org/packages/devel/bioc/html/OmicCircos.html>
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("OmicCircos")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载必要的R包 / Load necessary R packages
+library(S4Vectors)      # 提供S4向量数据结构 / Provides S4 vector data structures
+library(tidyverse)     # 数据清洗和分析工具集 / Data cleaning and analysis toolkit
+library(OmicCircos)     # 用于绘制环形基因组图 / For drawing circular genomic plots
+
+# 设置R环境显示英文报错信息 / Set R environment to display error messages in English
+Sys.setenv(LANGUAGE = "en") 
+
+# 防止字符串自动转换为因子 / Prevent automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 输入数据
+
+如果你的数据已经保存为easy_input.csv格式，就可以跳过这步，进入“开始画图”
+
+- gene.location.csv，基因在染色体上的位置。至少包括基因所在的染色体、起始位置、基因 ID（例如ensembl ID、ENTREZ ID、gene symbol）。此处以人为例，对应hg19版本，来自TCGAbiolinks。
+
+- signal.csv，图中基因的信号值。第一列是gene ID，跟gene.location.csv里的一种基因ID一致，此处是gene symbol；第二列是图中基因名及其连线的颜色，红色连红色，蓝色连蓝色，你也可以写成其他颜色；第三列之后是三组样品的signal，第一组有两个，第二组有三个，第三组有三个。可以是RNA-seq、ChIP-seq、ATAC-seq、CNV、DNA甲基化等信息。用感兴趣的区段信息替换示例中的基因信息。
+
+##Input data
+
+If your data has already been saved in easy_input.csv format, you can skip this step and enter "Start Drawing"
+
+- gene.location.csv， The position of genes on chromosomes. At least including the chromosome where the gene is located, the starting position, and the gene ID (such as ensembl ID, ENTREZ ID, gene symbol). Here is a human example, corresponding to the hg19 version, from TCGAbiolinks.
+
+- signal.csv， The signal values of genes in the figure. The first column is the gene ID, which is consistent with a gene ID in gene.location.csv. Here is the gene symbol; The second column is the color of the gene names and their connecting lines in the figure. Red is connected to red, blue is connected to blue, or you can write them in other colors; After the third column are the signals of three groups of samples, the first group has two, the second group has three, and the third group has three. It can be information such as RNA seq, ChIP seq, ATAC seq, CNV, DNA methylation, etc. Replace the gene information in the example with the segment information of interest.
+
+```{r}
+# 读取基因位置文件 / Read gene location file
+# 文件应包含染色体位置和基因ID信息 / File should contain chromosome locations and gene IDs
+gene.location <- read.csv("gene.location.csv")
+head(gene.location)  # 查看前几行数据 / Check the first few rows of data
+
+# 读取信号数据文件 / Read signal data file
+# 文件应包含基因ID和对应的信号值 / File should contain gene IDs and corresponding signal values
+easy_input <- read.csv('signal.csv')
+head(easy_input)  # 查看前几行数据 / Check the first few rows of data
+
+# 提取目标基因列表 / Extract target gene list
+gene_list <- easy_input$id  # 从信号数据中获取基因ID / Get gene IDs from signal data
+
+# 根据基因ID匹配染色体位置信息 / Match chromosome locations based on gene IDs
+# 从gene.location中筛选出目标基因的位置信息 / Filter location info for target genes from gene.location
+gene_list_chr <- gene.location[gene.location$external_gene_id %in% gene_list,]
+
+# 精简数据列，只保留必要信息 / Simplify columns, keep only essential info
+# 保留染色体、位置和基因ID三列 / Keep chromosome, position and gene ID columns
+gene_list_chr <- gene_list_chr[,c(1,2,7)]
+# 重命名列名以便后续处理 / Rename columns for subsequent processing
+colnames(gene_list_chr) <- c('chr','position','id')
+head(gene_list_chr)  # 查看处理后的数据 / Check processed data
+
+# 合并染色体位置信息和信号数据 / Merge chromosome location and signal data
+# 通过基因ID进行合并 / Merge by gene ID
+gene_chr_fc <- merge(gene_list_chr, easy_input, by='id')
+# 去除重复的基因ID / Remove duplicated gene IDs
+gene_chr_fc <- gene_chr_fc[!duplicated(gene_chr_fc$id),]
+
+# 保存合并后的数据到新文件 / Save merged data to new file
+write.csv(gene_chr_fc, "easy_input.csv", row.names = F)
+```
+
+## 分别准备图中各部分所需的数据
+
+### 热图
+
+##Prepare the data required for each part of the diagram separately
+
+###Heat map
+
+```{r}
+# 读取CSV文件并存储为data.frame对象gene_chr_fc
+# Read CSV file and store as data.frame object gene_chr_fc
+gene_chr_fc <- read.csv("easy_input.csv")
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+head(gene_chr_fc)
+
+# 画三组样品的热图，分3层来
+# Draw heatmaps for three groups of samples, divided into three layers
+# 若不分3层，热图则会挨在一起，无法分开
+# If not divided into three layers, the heatmaps will be adjacent and cannot be separated
+
+# 提取第一组样本数据：选取第2、3、1、5、6列
+# Extract data for the first group of samples: select columns 2, 3, 1, 5, 6
+exp1 <- gene_chr_fc[,c(2,3,1,5,6)]
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+head(exp1)
+
+# 提取第二组样本数据：选取第2、3、1、7、8、9列
+# Extract data for the second group of samples: select columns 2, 3, 1, 7, 8, 9
+exp2 <- gene_chr_fc[,c(2,3,1,7,8,9)]
+
+# 提取第三组样本数据：选取第2、3、1、10、11、12列
+# Extract data for the third group of samples: select columns 2, 3, 1, 10, 11, 12
+exp3 <- gene_chr_fc[,c(2,3,1,10,11,12)]
+```
+
+### 连线
+
+处理基因名字为一一对应关系，红色连红色，蓝色连蓝色
+
+###Connect
+
+Process gene names into one-to-one correspondence, with red connected to red and blue connected to blue
+
+```{r}
+# 提取基因标签数据：选取第2、3、1、4列
+# Extract gene label data: select columns 2, 3, 1, 4
+gene_label <- gene_chr_fc[, c(2,3,1,4)]
+
+# 按照1-22,x,y排序
+# Sort chromosomes in order 1-22, X, Y
+# 有的数据没有X或Y，小鼠只有1:20也没关系，不用改
+# It's okay if the dataset doesn't have X or Y chromosomes (e.g., mouse dataset with 1:20)
+
+# 将chr列转换为因子，指定染色体顺序为1-22, X, Y
+# Convert the 'chr' column to a factor with specified chromosome order
+gene_label$chr <- factor(gene_label$chr, levels = c(1:22, "X", "Y"))
+
+# 下面去掉多余的factor。也可以不运行这行，对结果没影响
+# Remove unused factor levels (optional, no impact on results)
+gene_label$chr <- droplevels(gene_label$chr, exclude = if(anyNA(levels(gene_label$chr))) NULL else NA)
+
+# 按染色体排序数据框
+# Sort the dataframe by chromosome
+gene_label <- gene_label[order(gene_label$chr),]
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+tail(gene_label)
+
+# 红色基因分析
+# Analysis for red genes
+
+# 筛选color列为'red'的基因
+# Filter genes with 'red' color
+gene_link1 <- filter(gene_label, gene_label$color == 'red')
+# 移除color列
+# Remove the 'color' column
+gene_link1 <- gene_link1[, -4]
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+head(gene_link1)
+
+# 生成红色基因两两组合的第一个基因ID
+# Generate first gene IDs for all red gene pairs
+id11 <- data_frame(id = combn(gene_link1$id, 2)[1, ])
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+head(id11)
+
+# 生成红色基因两两组合的第二个基因ID
+# Generate second gene IDs for all red gene pairs
+id1.1 <- data_frame(id1.1 = combn(gene_link1$id, 2)[2, ])
+
+# 将第一个基因ID与基因信息右连接
+# Right join first gene IDs with gene information
+genelink1 <- gene_link1 %>%
+  right_join(id11)
+
+# 将第二个基因ID与基因信息右连接（重命名id列为id1.1）
+# Right join second gene IDs with gene information (rename 'id' to 'id1.1')
+genelink11 <- gene_link1 %>%
+  rename(id1.1=id) %>%
+  right_join(id1.1)
+
+# 合并两个连接结果形成完整的基因对
+# Combine the two joined results to form complete gene pairs
+gene_link1 <- cbind(genelink1, genelink11)
+
+# 蓝色基因分析（与红色基因分析流程相同）
+# Analysis for blue genes (same process as red genes)
+
+# 筛选color列为'blue'的基因
+# Filter genes with 'blue' color
+gene_link2 <- filter(gene_label, gene_label$color == 'blue')
+# 移除color列
+# Remove the 'color' column
+gene_link2 <- gene_link2[, -4]
+
+# 生成蓝色基因两两组合的第一个基因ID
+# Generate first gene IDs for all blue gene pairs
+id22 <- data_frame(id=combn(gene_link2$id, 2)[1, ])
+# 生成蓝色基因两两组合的第二个基因ID
+# Generate second gene IDs for all blue gene pairs
+id2.1<- data_frame(id2.1=combn(gene_link2$id, 2)[2, ])
+
+# 将第一个基因ID与基因信息右连接
+# Right join first gene IDs with gene information
+genelink2 <- gene_link2 %>%
+  right_join(id22)
+
+# 将第二个基因ID与基因信息右连接（重命名id列为id2.1）
+# Right join second gene IDs with gene information (rename 'id' to 'id2.1')
+genelink22 <- gene_link2 %>%
+  rename(id2.1=id) %>%
+  right_join(id2.1)
+
+# 合并两个连接结果形成完整的基因对
+# Combine the two joined results to form complete gene pairs
+gene_link2 <- cbind(genelink2, genelink22)
+```
+
+## 开始画图
+
+R代表半径位置，W是宽度，cir是染色体
+
+图中的三组样品的文字需要用AI进行标记
+
+包里自带的写染色体名字的位置不合理，也没有参数可以调整，这里提供两种方法来处理：
+
+##Start drawing
+
+R represents the radius position, W is the width, and cir is the chromosome
+
+The text of the three sets of samples in the picture needs to be marked with AI
+
+The position of writing chromosome names in the package is unreasonable, and there are no parameters to adjust. Here are two methods to deal with it:
+
+### 方法一：单独画染色体名字
+
+###Method 1: Draw chromosome names separately
+
+```{r}
+# 创建PDF设备，设置输出文件名为OmicCircos.pdf，宽度和高度均为8英寸
+# Create a PDF device with specified width and height
+pdf('OmicCircos.pdf', width = 8, height = 8)
+
+# 设置图形边距为0，准备绘制图形
+# Set plot margins to zero and prepare the canvas
+par(mar=c(0, 0, 0, 0)); 
+# 创建一个空的绘图区域，设置坐标轴范围和标题等属性
+# Create an empty plot area with specified ranges and no axes/labels
+plot(c(1,800), c(1,800), type="n", axes=FALSE, xlab="", ylab="", main="");
+
+# 绘制染色体刻度
+# Draw chromosome scale
+circos(R=250, cir="hg19", W=5, type="chr", 
+       print.chr.lab=FALSE, # 自带的名字会跟scale重叠
+       # The built-in chromosome labels overlap with the scale
+       scale=TRUE) 
+
+# 绘制染色体名称
+# Draw chromosome names
+# 从文件读取染色体长度信息（从UCSC下载并整理）
+# Read chromosome length information from file (downloaded and formatted from UCSC)
+chr_info <- read.table("hg19.chrom.sizes.txt")
+# 查看数据集行数和列数
+# View the number of rows and columns in the dataset
+head(chr_info)
+
+# 准备染色体标签数据框，包含染色体名称、位置和ID
+# Prepare chromosome label dataframe with chromosome names, positions, and IDs
+chr_label <- data.frame(chr = chr_info$V1, position = (chr_info$V2 + 1)/2, id = chr_info$V1)
+
+# 在指定半径处绘制染色体标签，字体黑色，内部显示，大小0.5
+# Draw chromosome labels at specified radius, black color, inside the circle, size 0.5
+circos(R=270, cir="hg19", W=2, mapping=chr_label, type="label2", col = "black", side="in", cex=0.5);
+
+# 绘制基因名称，side="out"表示基因名称在圈外部
+# Draw gene names outside the circle
+circos(R=280, cir="hg19", W=10, mapping=gene_label, type="label", lwd = 0.4, col = gene_label$color, 
+       side="out", cex=0.5);  
+
+# 绘制第一个热图，位于半径210处，宽度40
+# Draw the first heatmap at radius 210 with width 40
+circos(R=210, cir="hg19", W=40, mapping=exp1,  type="heatmap2",   
+       cluster=FALSE, col.bar=FALSE, col=NULL, scale = TRUE) 
+
+# 绘制第二个热图，位于半径160处，宽度60
+# Draw the second heatmap at radius 160 with width 60
+circos(R=160, cir="hg19", W=60, mapping=exp2,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL, scale = TRUE) 
+
+# 绘制第三个热图，位于半径110处，宽度60
+# Draw the third heatmap at radius 110 with width 60
+circos(R=110, cir="hg19", W=60, mapping=exp3,  type="heatmap2",
+       cluster=FALSE, col.bar=FALSE, col=NULL, scale = TRUE) 
+
+# 绘制蓝色基因关联，位于半径100处，宽度10
+# Draw blue gene links at radius 100 with width 10
+circos(R=100, cir="hg19", W=10, mapping=gene_link2, type="link2", lwd=2, col='blue') 
+
+# 绘制红色基因关联，位于半径100处，宽度10
+# Draw red gene links at radius 100 with width 10
+circos(R=100, cir="hg19", W=10, mapping=gene_link1, type="link2", lwd=2, col='red')
+
+# 关闭PDF设备，完成图形绘制
+# Close the PDF device to finalize the plot
+dev.off()
+```
+
+![](OmicCircos.pdf)
+
+### 方法二：修改包里的代码
+
+修改了染色体名字的位置，顺便修改了scale的位置。
+
+修改后的函数命名为circos_plus，保存为sourceOmiccircos.R，位于当前文件夹。查找#Ya#可看到修改的代码。
+
+###Method 2: Modify the code in the package
+
+Changed the position of chromosome names and also modified the position of scales.
+
+The modified function is named circos_plus and saved as sourceOmiccircos.R in the current folder. Search for # Ya # to see the modified code.
+
+```{r}
+# 加载OmicCircos_plus所需的自定义函数库
+# Load custom function library required for OmicCircos_plus visualization
+source("sourceOmiccircos.R")
+
+# 创建PDF设备，设置输出文件名为OmicCircos_plus.pdf，宽度和高度均为8英寸
+# Create PDF device with specified dimensions for output file
+pdf('OmicCircos_plus.pdf', width = 8, height = 8)
+
+# 设置图形边距为0，准备绘制圆形基因组图谱
+# Set plot margins to zero to prepare circular genome visualization canvas
+par(mar=c(0, 0, 0, 0));
+
+# 创建空绘图区域，设置坐标范围和基本属性
+# Create empty plot area with specified coordinate ranges
+plot(c(1,800), c(1,800), type="n", axes=FALSE, xlab="", ylab="", main="");
+
+# 绘制染色体框架（使用增强版函数）
+# Draw chromosome framework (using enhanced function)
+circos_plus(
+  R=250,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=5,            # 宽度 Width
+  type="chr",     # 类型：染色体 Type: chromosome
+  print.chr.lab=TRUE,  # 是否显示染色体标签 Whether to display chromosome labels
+  scale=TRUE      # 是否显示刻度 Whether to display scale
+)
+
+# 绘制基因名称标签（外圈显示）
+# Draw gene name labels (outside the circle)
+circos_plus(
+  R=280,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=10,           # 宽度 Width
+  mapping=gene_label,  # 映射数据 Mapping data
+  type="label",   # 类型：标签 Type: label
+  lwd = 0.4,      # 线宽 Line width
+  col = gene_label$color,  # 颜色 Color
+  side="out",     # 位置：外侧 Position: outside
+  cex=0.5         # 字体大小 Font size
+);
+
+# 绘制第一组样本热图（半径210，宽度40）
+# Draw first sample heatmap (radius 210, width 40)
+circos_plus(
+  R=210,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=40,           # 宽度 Width
+  mapping=exp1,   # 映射数据 Mapping data
+  type="heatmap2",  # 类型：热图 Type: heatmap
+  cluster=FALSE,  # 是否聚类 Whether to cluster
+  col.bar=FALSE,  # 是否显示颜色条 Whether to display color bar
+  col=NULL,       # 颜色方案 Color scheme
+  scale = TRUE    # 是否显示刻度 Whether to display scale
+)
+
+# 绘制第二组样本热图（半径160，宽度60）
+# Draw second sample heatmap (radius 160, width 60)
+circos_plus(
+  R=160,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=60,           # 宽度 Width
+  mapping=exp2,   # 映射数据 Mapping data
+  type="heatmap2",  # 类型：热图 Type: heatmap
+  cluster=FALSE,  # 是否聚类 Whether to cluster
+  col.bar=FALSE,  # 是否显示颜色条 Whether to display color bar
+  col=NULL,       # 颜色方案 Color scheme
+  scale = TRUE    # 是否显示刻度 Whether to display scale
+)
+
+# 绘制第三组样本热图（半径110，宽度60）
+# Draw third sample heatmap (radius 110, width 60)
+circos_plus(
+  R=110,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=60,           # 宽度 Width
+  mapping=exp3,   # 映射数据 Mapping data
+  type="heatmap2",  # 类型：热图 Type: heatmap
+  cluster=FALSE,  # 是否聚类 Whether to cluster
+  col.bar=FALSE,  # 是否显示颜色条 Whether to display color bar
+  col=NULL,       # 颜色方案 Color scheme
+  scale = TRUE    # 是否显示刻度 Whether to display scale
+)
+
+# 绘制蓝色基因关联（半径100，线宽2，蓝色）
+# Draw blue gene connections (radius 100, line width 2, blue color)
+circos_plus(
+  R=100,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=10,           # 宽度 Width
+  mapping=gene_link2,  # 映射数据 Mapping data
+  type="link2",   # 类型：连接线 Type: link
+  lwd=2,          # 线宽 Line width
+  col='blue'      # 颜色 Color
+)
+
+# 绘制红色基因关联（半径100，线宽2，红色）
+# Draw red gene connections (radius 100, line width 2, red color)
+circos_plus(
+  R=100,          # 半径 Radius
+  cir="hg19",     # 基因组版本 Genome version
+  W=10,           # 宽度 Width
+  mapping=gene_link1,  # 映射数据 Mapping data
+  type="link2",   # 类型：连接线 Type: link
+  lwd=2,          # 线宽 Line width
+  col='red'       # 颜色 Color
+)
+
+# 关闭PDF设备，完成图形绘制
+# Close PDF device to finalize the plot
+dev.off()
+```
+
+![](OmicCircos_plus.pdf)
+
+```{r}
+sessionInfo()
+```
