@@ -1,0 +1,508 @@
+---
+title: "FigureYa83enrichment"
+author: "Haitao Wang, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+## 需求描述
+
+## Requirement Description
+
+Enrichment for Molecular Concept Map, to identify significant association within lists of TF genes。
+
+通过转录因子靶基因的集合，用Fisher's exact test分析转录因子间的coupling（耦合、共调控），在形式上模仿paper里的这种图来展示结果：
+
+Analyze coupling (coupling, co-regulation) between transcription factors by means of a collection of transcription factor target genes using Fisher's exact test, and present the results in a form that mimics this kind of map in a paper:
+
+![](example.png)
+
+出自<http://www.bloodjournal.org/content/128/5/686?sso-checked=true>
+
+from<http://www.bloodjournal.org/content/128/5/686?sso-checked=true>
+
+## 应用场景
+
+分析任意集合之间的关系，例如转录因子之间（示例数据）、差异表达基因跟通路之间、染色质开放跟基因转录之间。
+
+场景一：找转录因子之间的耦合关系（共同调控靶基因），例如示例数据(Interactions.RData)是201个转录因子，以及每个转录因子对应的多个有相互作用的基因。
+
+场景二：差异表达基因在通路里的富集，就把差异表达基因跟通路里的基因都放到Interactions.RData里。例如：
+
+$up_regulated_genes
+[1] "ZBTB38" "SRA1"   "IPO13"  "ALX4"   "EP300"  "CREBBP" "IPO13" 
+
+$MAPK_pathway
+  [1] "ESR2"     "ZNF688"   "BANP"     "ISYNA1"   "TBC1D7" 
+
+场景三：分析染色质开放程度跟基因转录调控之间的关系，就把ATAC-seq peak附近的基因跟差异表达基因都放到Interactions.RData里。例如：
+
+$up_regulated_genes
+[1] "ZBTB38" "SRA1"   "IPO13"  "ALX4"   "EP300"  "CREBBP" "IPO13" 
+
+$ATAC-seq_peak
+  [1] "ESR2"     "ZNF688"   "BANP"     "ISYNA1"   "TBC1D7" 
+
+## Application Scenarios
+
+Analyze the relationship between any sets, such as between transcription factors (example data), between differentially expressed genes and pathways, between chromatin opening and gene transcription.
+
+Scenario 1: Find the coupling relationship between transcription factors (co-regulation of target genes), e.g. the example data (Interactions.RData) is 201 transcription factors, and multiple interacting genes corresponding to each transcription factor.
+
+Scenario 2: Enrichment of differentially expressed genes in a pathway, put the differentially expressed genes and the genes in the pathway into Interactions.RData. Example:
+
+$up_regulated_genes
+[1] “ZBTB38” “SRA1” “IPO13” “ALX4” “EP300” “CREBBP” “IPO13” 
+
+$MAPK_pathway
+  [1] “ESR2” “ZNF688” “BANP” “ISYNA1” “TBC1D7” 
+
+Scenario 3: To analyze the relationship between chromatin openness and gene transcriptional regulation, put the genes near the ATAC-seq peak and the differentially expressed genes into Interactions.RData. RData. For example:
+
+$up_regulated_genes
+[1] “ZBTB38” “SRA1” “IPO13” “ALX4” “EP300” “CREBBP” “IPO13” 
+
+$ATAC-seq_peak
+  [1] “esr2” “znf688” “banp” “isyna1” “tbc1d7” 
+  
+## 环境设置
+
+使用国内镜像安装包
+
+## Environment settings
+
+Installation of packages using domestic mirrors
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("rentrez")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载rentrez包，用于访问NCBI数据库进行文献检索和数据获取
+# Load the rentrez package for accessing NCBI databases for literature retrieval and data acquisition
+library(rentrez)
+
+# 加载RColorBrewer包，提供丰富的色彩方案用于数据可视化
+# Load the RColorBrewer package, which provides a variety of color schemes for data visualization
+library(RColorBrewer)
+
+# 加载corrplot包，用于绘制相关性矩阵图
+# Load the corrplot package for plotting correlation matrix diagrams
+library(corrplot)
+
+# 加载ggplot2包，强大的数据可视化工具
+# Load the ggplot2 package, a powerful data visualization tool
+library(ggplot2)
+
+# 加载ggthemes包，提供额外的ggplot2主题和样式
+# Load the ggthemes package, which provides additional themes and styles for ggplot2
+library(ggthemes)
+
+# 导入自定义函数文件
+# Import custom function file
+source("my_function.R")
+
+# 设置环境变量，使R显示英文错误信息
+# Set environment variable to display English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止字符串自动转换为因子类型，避免意外的数据类型转换
+# Disable automatic conversion of strings to factors to avoid unexpected data type conversions
+options(stringsAsFactors = FALSE) 
+```
+
+## 输入文件的获得
+
+如果你有自己的相互作用的基因list，保存在Interactions.RData里，就可以跳过这步，直接进入“Fisher's Exact Test”。
+
+easy_input_TF.csv，此处用201个转录因子的gene symbol，可以替换成你感兴趣的基因的gene symbol，例如差异表达基因、差异表达lncRNA等。
+
+easy_input_bg.csv，背景gene sybol，可以替换成与你感兴趣的基因相对应的背景基因，例如基因组上的全部基因、全部lncRNA等。
+
+```{r}
+# 从CSV文件读取转录因子列表数据，设置header=T表示第一行为列名
+# Read transcription factor list data from a CSV file, setting header=T to indicate the first row contains column names
+TFlist <- read.csv("easy_input_TF.csv", header = T)
+
+# 查看转录因子列表数据的前几行，帮助快速了解数据结构
+# View the first few rows of the transcription factor list data to quickly understand its structure
+head(TFlist)
+
+# 查看转录因子列表数据的维度（行数和列数）
+# Check the dimensions (number of rows and columns) of the transcription factor list data
+dim(TFlist)
+
+# 从CSV文件读取背景基因列表数据，使用read.table函数并设置header=T
+# Read background gene list data from a CSV file using the read.table function with header=T
+bglist <- read.table("easy_input_bg.csv", header = T)
+
+# 查看背景基因列表数据的前几行
+# View the first few rows of the background gene list data
+head(bglist)
+
+# 查看背景基因列表数据的维度
+# Check the dimensions of the background gene list data
+dim(bglist)
+```
+
+### 从NCBI获取基因interaction
+
+用rentrez包获取NCBI gene数据库里的Interactions，即基因与它有相互作用的基因的list，保存到Interactions.RData。The general interactions in this section are provided, without review by Gene staff, by the external sources listed in <ftp://ftp.ncbi.nlm.nih.gov/gene/GeneRIF/interaction_sources>。详情看这里：<https://www.ncbi.nlm.nih.gov/books/NBK3841/#EntrezGene.Interactions>
+
+```r
+#Download TF related interactions genes from NCBI Gene
+#来源：https://github.com/ropensci/rentrez/wiki/Find-genes-known-to-interact-with-a-given-gene
+res <- c()
+for (i in 1:nrow(TFlist)) {
+ output <- print(as.character(TFlist$GeneSym[i]),quote=FALSE)
+ gene_search <- entrez_search(db="gene",term=paste0("(",output,"[GENE]) AND (Homo sapiens[ORGN])")) 
+ # if you just want the interacting genes you can use this function, it's huge Xpath query
+ interactions_from_gene <- function(gene_id){
+   xmlrec <- entrez_fetch(db="gene", id=gene_id, rettype="xml", parsed=TRUE)
+   XML::xpathSApply(xmlrec,
+                    "//Gene-commentary[Gene-commentary_heading[./text()='Interactions']]//Other-source[Other-source_src/Dbtag/Dbtag_db[./text()='GeneID']]//Other-source_anchor",
+                    XML::xmlValue)
+   }
+ res1=interactions_from_gene(gene_search$ids)
+ res1=toupper(res1)
+ res1=list(res1)
+ names(res1)=output
+ res<- c(res,res1)
+}
+
+save(res, file = "Interactions.RData")
+```
+
+## Fisher's Exact Test
+
+Produce a geneset (lists) for hypergeometric test p-value
+
+```{r}
+# 加载保存的R数据文件，其中包含预计算的交互数据
+# Load a saved R data file containing precomputed interaction data
+(load("Interactions.RData"))
+
+# 查看结果对象的前几行，了解数据结构
+# View the first few rows of the result object to understand its structure
+head(res)
+
+# 根据背景基因列表过滤基因集，保留基因数量在150-2000范围内的基因集
+# 也可以跳过此步骤不进行筛选
+# Filter gene sets by background gene list, keeping those with gene counts between 150-2000
+# This step can be skipped if no filtering is needed
+res1 <- GeneSetsFilterByBackground(res, bglist$GeneSym, 100, 2000)
+
+# 查看过滤后基因集的名称
+# View the names of the filtered gene sets
+names(res1)
+
+# 统计过滤后基因集的数量
+# Count the number of filtered gene sets
+length(names(res1))
+
+##########################################################
+################# 超几何检验分析 ####################
+##########################################################
+# 使用超几何检验计算每个给定基因列表的富集分数及其p值
+# 函数使用方法：
+# 输入1.基因集列表 2.背景基因的长度
+# Usage ## Input 1. List of gene sets 2. Length of background genes
+# Usage HyperGeoTest <- hyperTest(GeneSet, length(background.genes))
+
+# 超几何检验核心函数，计算两个基因集之间的富集p值和优势比
+# Hypergeometric test core function to calculate enrichment p-value and odds ratio between two gene sets
+hyper <- function(X, Y, N, alpha = 1) {
+  K <- length(X)  # 第一个基因集的大小
+  M <- length(Y)  # 第二个基因集的大小
+  
+  # 如果任一基因集为空，则返回p值为1
+  # Return p-value of 1 if either gene set is empty
+  if (K == 0 || M == 0) {
+    return(1)
+  }
+  
+  # 计算两个基因集的交集大小
+  # Calculate the size of the intersection of the two gene sets
+  both <- length(intersect(X, Y))
+  
+  # 计算只在第一个基因集中的基因数量
+  # Calculate the number of genes only in the first gene set
+  XOnly <- length(setdiff(X, Y))
+  
+  # 计算只在第二个基因集中的基因数量
+  # Calculate the number of genes only in the second gene set
+  YOnly <- length(setdiff(Y, X))
+  
+  # 计算不在任何一个基因集中的背景基因数量
+  # Calculate the number of background genes not in either gene set
+  Fisher.table <- N - both - XOnly - YOnly
+  
+  # 构建四格表用于Fisher精确检验
+  # Construct a contingency table for Fisher's exact test
+  tab <- matrix(c(Fisher.table, YOnly, XOnly, both), 2, 2)
+  dimnames(tab) <- list(0:1, 0:1)
+  
+  # 执行单侧Fisher精确检验，替代假设为"greater"
+  # Perform one-sided Fisher's exact test with alternative hypothesis "greater"
+  f <- fisher.test(tab, alternative = "greater")
+  
+  # 提取p值和优势比
+  # Extract p-value and odds ratio
+  pVal <- f$p.value
+  estimate <- f$estimate
+  return(c(pVal, estimate))
+}
+
+## s 基因向量列表
+## N 背景基因总数（使用length函数提供）
+## s A list of gene vectors.
+## N Total number of background genes (provided using the length function).
+
+# 对所有基因集对进行超几何检验的包装函数
+# Wrapper function to perform hypergeometric tests on all pairs of gene sets
+hyperTest <- function(s, N, alpha = 1) {
+  n <- length(s)  # 基因集的数量 / Number of gene sets
+  pVal <- matrix(0, n, n)  # 初始化p值矩阵 / Initialize p-value matrix
+  estimate <- matrix(0, n, n)  # 初始化优势比矩阵 / Initialize odds ratio matrix
+  
+  # 对所有基因集对进行两两比较
+  # Compare all pairs of gene sets
+  for (i in 1:n) {
+    print(paste("Processing", i))  # 打印进度信息 / Print progress message
+    for (j in 1:n) {
+      h <- hyper(s[[i]], s[[j]], N, alpha)  # 调用hyper函数进行检验 / Call hyper function for test
+      pVal[i, j] <- h[1]  # 存储p值 / Store p-value
+      estimate[i, j] <- h[2]  # 存储优势比 / Store odds ratio
+    }
+  }
+  
+  # 设置矩阵的行名和列名
+  # Set row and column names for the matrices
+  dimnames(pVal) <- list(names(s), names(s))
+  dimnames(estimate) <- list(names(s), names(s))
+  
+  # 返回包含p值矩阵和优势比矩阵的列表
+  # Return a list containing the p-value matrix and odds ratio matrix
+  return(list(pVal = pVal, estimate = estimate))
+}
+
+# 执行超几何检验，计算所有基因集对之间的富集p值
+# Perform hypergeometric tests to calculate enrichment p-values for all gene set pairs
+HyperGeoTest <- hyperTest(res1, length(bglist$GeneSym))
+
+# 释放不再需要的大型对象以节省内存
+# Free up memory by removing large objects that are no longer needed
+rm(res1)
+
+# 提取优势比矩阵
+# Extract the odds ratio matrix
+est <- HyperGeoTest$estimate
+
+# 将自比较产生的无穷大值替换为NA
+# Replace infinite values (from self-comparisons) with NA
+est[est == Inf] = NA
+
+# 查看优势比矩阵的前几行
+# View the first few rows of the odds ratio matrix
+head(est)
+
+# 提取p值矩阵
+# Extract the p-value matrix
+p <- HyperGeoTest$pVal
+```
+
+借用corrplot做clustring，为后面画图做准备
+
+Borrowing corrplot for clustring, in preparation for drawing later
+
+```{r}
+# 设置颜色渐变，从蓝色到红色，共199个渐变色
+# Create a color gradient from blue to red with 199 color steps
+cols <- rev(colorRampPalette(brewer.pal(9, "RdBu"))(199))
+
+# 也可以使用固定的9色RdBu调色板（此行被注释掉）
+# Alternatively, use a fixed 9-color RdBu palette (this line is commented out)
+# cols <- brewer.pal(n = 9, name = "RdBu")
+
+# 使用corrplot包绘制基因集关联热图
+# 使用log2(est+1)转换后的优势比矩阵作为数据
+# Plot a heatmap of gene set associations using the corrplot package
+# Use the log2-transformed odds ratio matrix (log2(est+1)) as data
+p1 <- corrplot(as.matrix(log2(est + 1)),
+               type = "upper",         # 只显示矩阵的上三角部分 / Show upper triangle only
+               method = "color",       # 使用颜色填充表示值的大小 / Use color to represent values
+               order = "hclust",       # 使用层次聚类排序基因集 / Order genesets by hierarchical clustering
+               hclust.method = "ward.D2", # 层次聚类方法选择Ward方差最小化法 / Ward's minimum variance method
+               col = cols,             # 指定颜色渐变 / Specify color gradient
+               tl.col = "black",       # 文字标签颜色设为黑色 / Set text label color to black
+               tl.cex = 0.5,           # 文字标签大小设为0.5 / Set text label size to 0.5
+               tl.srt = 45,            # 文字标签旋转45度 / Rotate text labels 45 degrees
+               is.corr = FALSE,        # 声明这不是相关系数矩阵 / Declare it's not a correlation matrix
+               diag = F,               # 不显示对角线元素 / Omit diagonal elements
+               p.mat = as.matrix(p),   # 指定p值矩阵用于显著性标记 / Specify p-value matrix for significance
+               sig.level = c(1e-25, 1e-35, 1e-50), # 设置多个显著性水平阈值 / Set multiple significance thresholds
+               insig = c("label_sig"), # 在不显著的位置标记显著性水平 / Label significance levels
+               pch.cex = 0.5,          # 显著性标记（星号）的大小 / Size of significance markers
+               font = 3)               # 文字字体设为斜体 / Set text font to italic
+```
+
+## 开始画图
+
+作者提供了三种画法展示以上结果，这里展示画法一，画法二三见压缩包里的2_3_ggplot2.R文件
+
+
+## Start drawing
+
+The author provides three drawing methods to show the above results, here to show the drawing method one, drawing method two or three see the zip file 2_3_ggplot2.
+
+### 准备工作
+
+前面用corrplot做了聚类，提取顺序；只需要画一半，也就是三角形，需要把另一半变成NA。
+
+### Preparation.
+
+Clustering was done earlier with corrplot to extract the order; only half of the drawing, the triangle, needs to be drawn, and the other half needs to be turned into NA.
+
+```{r}
+# 处理极端p值：将小于1.0e-150的p值设为NA，避免对数计算时出现无穷大
+# 也可以选择将所有等于0的p值设为NA（此行被注释掉）
+# Handle extreme p-values: set p-values smaller than 1.0e-150 to NA to avoid infinity during log transformation
+# Alternatively, set all exact 0 p-values to NA (this line is commented out)
+# p[p == 0 ] = NA
+p[p < 1.0e-150] = NA
+
+# 将下三角部分的p值设为NA，因为我们只需要分析上三角（非对称矩阵）
+# Set lower triangle of the p-value matrix to NA since we only need the upper triangle (asymmetric matrix)
+p[lower.tri(p)] <- NA
+
+# 从之前的corrplot结果中提取层次聚类的排序信息
+# Extract hierarchical clustering order from the previous corrplot result
+o <- rownames(p)
+
+# 按照层次聚类的顺序重新排列p值矩阵
+# Reorder the p-value matrix according to the hierarchical clustering order
+p <- reorder(p, o)
+
+# 计算FDR校正后的-q值（-log10(FDR)），便于可视化
+# Calculate FDR-adjusted q-values (-log10(FDR)) for visualization
+q <- -log10(p.adjust(p, method = "fdr"))
+
+# 计算原始p值的负对数变换（-log10(p)），便于可视化
+# Transform p-values to -log10(p) for better visualization
+p <- -log10(p)
+head(p)
+
+# 按照层次聚类的顺序重新排列优势比(estimate)矩阵
+# Reorder the odds ratio (estimate) matrix according to the hierarchical clustering order
+o <- rownames(p)
+r <- reorder(est, o)
+
+# 将下三角部分的优势比值设为NA，保持与p值矩阵一致
+# Set lower triangle of the odds ratio matrix to NA to match the p-value matrix
+r[lower.tri(r)] <- NA
+```
+
+### 画图
+
+### plot
+
+```{r}
+# 创建PDF文件用于保存热图，设置宽度为11英寸，高度为10英寸
+# Create a PDF file to save the heatmap with dimensions 11 inches wide and 10 inches tall
+pdf("Enrichment_baseplot.pdf", 11, 10)
+
+# 设置图形参数：无边框，调整边距，设置坐标轴标签样式和刻度线长度
+# Set plot parameters: no border, adjust margins, set axis label style and tick mark length
+par(bty = "n", 
+    mar = c(4, 4, 4, 8) + .1, # Margins around the plot
+    las = 2, # Axis label style (perpendicular to axis)
+    tcl = -.33) # Tick mark length as fraction of text height
+
+# 获取矩阵的行数和列数
+# Get the number of rows and columns in the matrix
+m <- nrow(est)
+n <- ncol(est)
+
+# 应检查数据范围和分布来设置颜色和断点（此为建议，未实际执行）
+# Recommended to check data range and distribution for color and breakpoints setting (commented out)
+# we should check range(est[!est==Inf]) for col and breaks setting
+# we should check data distribution hist(est[!est==Inf]) for col and breaks setting
+
+# 计算非NA值的最大值，用于设置颜色映射的断点
+# Calculate the maximum non-NA value for setting color breakpoints
+max_value <- range(r[!is.na(r)])[2]
+
+# 设置颜色断点：低数值区间细分，高数值区间粗分
+# Set color breakpoints: finer intervals for low values, coarser for high values
+brks <- c(0, seq(1, 20, l = 10), seq(21, max_value, l = 4))
+
+# 创建红蓝渐变的颜色方案，颜色数量与断点数量匹配
+# Create a blue-red color gradient with number of colors matching the breakpoints
+cols2 <- rev(colorRampPalette(brewer.pal(9, "RdBu"))(length(brks) - 1))
+
+# 使用base R的image函数绘制热图，设置坐标轴和标签为空，预留右侧空间
+# Draw the heatmap using base R's image function, leaving axes and labels empty, reserving space on the right
+image(x = 1:n, y = 1:m, r, col = cols2, breaks = brks, xaxt = "n", yaxt = "n", xlab = "", ylab = "", xlim = c(0, n + 4), ylim = c(0, n + 1))
+
+# 在左侧和顶部添加基因名称标签，使用斜体字体
+# Add gene names on the left and top sides using italic font
+mtext(side = 2, at = 1:n, o, font = 3, col = "black") # Left side
+mtext(side = 3, at = 1:n, o, font = 3, col = "black") # Top side
+
+# 添加白色网格线分隔每个单元格
+# Add white grid lines to separate each cell
+abline(h = 0:n + .5, col = "white", lwd = .5)
+abline(v = 0:n + .5, col = "white", lwd = .5)
+
+# 计算FDR校正后q值的范围，用于显著性标记
+# Calculate the range of FDR-adjusted q-values for significance markers
+q_range <- range(q[!is.na(q)])[2]
+
+# 在q值大于阈值的位置添加显著性标记：星号、加号和减号
+# Add significance markers (*, +, -) for different q-value thresholds
+w <- arrayInd(which(q > q_range/2), rep(m, 2))
+points(w, pch = "*", col = "black", cex = 1)  # Highest significance
+
+w <- arrayInd(setdiff(which(q > q_range/3), which(q > q_range/2)), rep(m, 2))
+points(w, pch = 3, col = "black", cex = 1)  # Intermediate significance
+
+w <- arrayInd(setdiff(which(q > q_range/4), which(q > q_range/3)), rep(m, 2))
+points(w, pch = "-", col = "black", cex = 1)  # Lowest significance
+
+# 在右侧添加颜色条图例
+# Add color bar legend on the right side
+image(y = 1:16 + 6, x = rep(n, 2) + c(2.5, 3) + 1, z = matrix(c(1:16), nrow = 1), col = cols2, add = TRUE)
+
+# 为颜色条添加刻度值
+# Add scale values to the color bar
+brks2 <- round(c(0, seq(1, 20, l = 10), seq(21, max_value, l = 4)))
+axis(side = 4, at = seq(1, 15) + 6.5, tcl = -.15, label = brks2, las = 1, lwd = .5)
+
+# 添加显著性标记图例
+# Add legend for significance markers
+points(x = rep(n, 3) + 3.5, y = 1:3, pch = c("-", "+", "*"))
+text(x = n + 2, y = 15, "enrichment estimate value", pos = 1, srt = 90)
+mtext(side = 4, at = c(1, 2, 3, 4), c("-log10(FDR) > 25", "-log10(FDR) > 35", "-log10(FDR) > 50", "ns"), line = 0.2)
+
+# 关闭PDF设备，完成图形保存
+# Close the PDF device to finalize the plot
+dev.off()
+```
+
+![](Enrichment_baseplot.pdf)
+
+```{r}
+sessionInfo()
+```
