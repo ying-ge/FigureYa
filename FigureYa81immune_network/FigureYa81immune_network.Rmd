@@ -1,0 +1,420 @@
+---
+title: "FigureYa81immune_network"
+author: "Dongqiang Zeng, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+## 需求描述
+
+复现原文免疫细胞之间相关性的网络图
+
+##Requirement description
+
+Reproduce the network diagram of the correlation between immune cells in the original text
+
+![](example.png)
+
+出自<http://cancerimmunolres.aacrjournals.org/content/early/2019/03/06/2326-6066.CIR-18-0436>
+
+from<http://cancerimmunolres.aacrjournals.org/content/early/2019/03/06/2326-6066.CIR-18-0436>
+
+节点的颜色代表细胞所属的cluster，节点的大小代表生存分析的log_rank_p，用圆心点的颜色展示HR，连线颜色代表正/负相关，连线的粗细代表相关性Pvalue。
+
+The color of the node represents the cluster to which the cell belongs, the size of the node represents the log_rank_p of survival analysis, HR is displayed using the color of the center point, the color of the connecting line represents positive/negative correlation, and the thickness of the connecting line represents correlation Pvalue.
+
+## 应用场景
+
+用网络图同时展示相关关系、pvalue、聚类/分类结果、跟预后的关系。
+
+- 例如例文中各细胞之间的相关关系、跟预后的关系
+- 或表达谱数据中多个基因的相关性、聚类结果、pvalue、跟预后的关系，比FigureYa37correlation更丰富。
+
+**画法说明：**
+
+- 用代码画出例图中除圆心以外的部分。
+- 再根据“output_HR_corlor.csv”的最后一列，用Illustrator在圆心上画点，点的颜色代表HR的正负。
+- 最后输出的pdf文件是矢量图，可以用Illustrator等软件调整细胞名等文字的位置。
+
+##Application scenarios
+
+Using a network diagram to simultaneously display relevant relationships pvalue、 The relationship between clustering/classification results and prognosis.
+
+-For example, the correlation between cells in the example text and their relationship with prognosis
+-Or the correlation and clustering results of multiple genes in the expression profile data pvalue、 The relationship with prognosis is richer than the correlation shown in Figure Ya37.
+
+**Painting Description:**
+
+-Draw the parts of the example diagram except for the center using code.
+-Based on the last column of 'outputting _ HR-color. csv', use Illustrator to draw a point on the center of the circle, with the color of the point representing the positive or negative sign of HR.
+-The final output PDF file is a vector image, which can be adjusted using software such as Illustrator to position text such as cell names.
+
+## 环境设置
+
+##Environment settings
+
+```{r}
+# 加载数据处理和可视化所需的包 | Load packages for data processing and visualization
+library(reshape2)     # 用于数据重塑 | For data reshaping
+library(corrplot)     # 用于绘制相关性热图 | For correlation matrix visualization
+library(plyr)         # 用于数据操作和聚合 | For data manipulation and aggregation
+library(igraph)       # 用于绘制网络图 | For network graph visualization
+
+# 设置环境和选项 | Set environment and options
+Sys.setenv(LANGUAGE = "en")           # 设置显示英文报错信息 | Set error messages to English
+options(stringsAsFactors = FALSE)     # 禁止将字符型变量自动转换为因子 | Disable automatic conversion of strings to factors
+```
+
+## 参数设置
+
+##Parameter settings
+
+```{r}
+# 定义网络图中连线的颜色 | Define colors for edges in network graph
+poscol <- "#FB9A99"  # 正相关用红色连线 | Red color for positive correlations
+negcol <- "#C6DBEF"  # 负相关用蓝色连线 | Blue color for negative correlations
+
+# 定义聚类的颜色方案 | Define color palette for clusters
+mycol <- c("#FDBF6F", "#1F78B4", "#E31A1C", "#8C510A")  
+# 用于不同聚类的颜色，如果有更多类，需要添加更多颜色 | Colors for different clusters, add more if needed
+```
+
+## 输入文件
+
+至少要提供easy_input_immune.csv文件，例如免疫细胞矩阵，或基因表达矩阵（把这里的免疫细胞替换成基因即可）。如果没有生存分析结果，可以用其他pvalue代替。
+
+easy_input_immune.csv，免疫细胞矩阵文件，用于计算相关系数和P值、把细胞分成4个cluster、通过卡相关性的P值来建立细胞间的连接关系。每行一个sample，每列一种细胞。最后一列fibioblast用mcpcounter获得，可参考FigureYa56immune_inflitration；文中其他22种免疫细胞用CIBERSORT计算获得，还可以用FigureYa56immune_inflitration或FigureYa71ssGSEA来量化免疫细胞。
+
+easy_input_HR.csv，生存分析结果，需要HR（节点圆心点的颜色，用AI来加）和p value（节点圆的大小）列。可通过FigureYa47HR2table计算获得。
+
+##Input file
+
+At least provide the easy_input_immune.csv file, such as the immune cell matrix or gene expression matrix (replace the immune cells here with genes). If there are no survival analysis results, other p-values can be used instead.
+
+easy_input_immune.csv， Immune cell matrix file, used to calculate correlation coefficients and P-values, divide cells into 4 clusters, and establish intercellular connections through P-values of card correlation. One sample per row, one cell per column. The last column of fibioblast can be obtained using mcpcounter, as shown in Figure Ya56immune_inflation; The other 22 types of immune cells in the article were calculated using CIBERSORT, and can also be quantified using FigureYa56immune-inflammation or FigureYa71ssGSEA.
+
+easy_input_HR.csv， The survival analysis results require columns for HR (color of node center point, added by AI) and p-value (size of node circle). It can be calculated using FigureYa47HR2table.
+
+```{r}
+# 读取免疫细胞表达矩阵数据 | Read immune cell expression matrix data
+input_data <- read.csv("easy_input_immune.csv", row.names = 1, check.names = F)
+dim(input_data)                  # 查看数据维度 | Check data dimensions
+input_data[1:3,1:3]              # 显示数据前几行几列 | Preview data structure
+
+# 读取生存分析结果数据 | Read survival analysis results
+bb <- read.csv("easy_input_HR.csv", header = T)
+head(bb)                         # 查看数据前几行 | Preview data
+bb$Cell.types <- as.character(bb$Cell.types)  # 将细胞类型转为字符型 | Convert cell types to character
+colnames(bb)[1] <- c("ID")       # 重命名第一列为ID | Rename first column to "ID"
+
+# 数据预处理：计算节点属性 | Data preprocessing: Calculate node attributes
+bb$weight <- abs(log10(bb$log_rank_p))        # 用log-rank p值的对数绝对值表示节点大小 | Node size by -log10(p-value)
+bb$weight_HR <- (as.numeric(bb$HR)-1)*100     # 将HR值转换为可用于着色的值 | Transform HR for coloring
+bb$colr <- ifelse(bb$weight_HR<0, "green", "black")  # 根据HR值设置节点颜色：HR<1为绿色，否则为黑色 | Set node color by HR
+
+head(bb)                         # 查看处理后的数据集 | Preview processed data
+
+# 保存处理后的生存分析结果到CSV文件 | Save processed survival analysis results to CSV
+write.csv(bb, "output_HR_corlor.csv", quote = F)  # 输出用于后续绘图的带颜色信息的文件 | Output file with color info for plotting
+```
+
+## 相关性的计算
+
+### 计算每两种细胞间的相关性
+
+计算每两种细胞间的相关性corr，用corrplot可视化，看看聚成几类比较好。
+
+##Calculation of correlation
+
+###Calculate the correlation between every two types of cells
+
+Calculate the correlation corr between every two types of cells, visualize it using corrplot, and see which categories are better clustered.
+
+```{r, fig.width = 8, fig.height = 8}
+# options(scipen = 100,digits = 4)  # 取消科学计数法显示，保留4位小数 | Disable scientific notation, show 4 decimal places
+
+# 计算免疫细胞表达量之间的Spearman相关性矩阵 | Calculate Spearman correlation matrix between immune cell expressions
+corr <- cor(input_data, method = "spearman")
+
+# 绘制相关性热图 | Plot correlation heatmap
+corrplot(corr, title = "", 
+         method = "pie",           # 可视化方法：饼图 (也可用"circle", "square"等) | Visualization method: pie chart
+         outline = T,              # 显示单元格边框 | Show cell borders
+         addgrid.col = "darkgray", # 添加网格线颜色 | Add grid line color
+         order = "hclust",         # 按层次聚类排序 | Order by hierarchical clustering
+         addrect = 4,              # 添加4个聚类矩形框 | Add 4 clustering rectangles
+         mar = c(4,0,4,0),         # 调整边距使标签完整显示 | Adjust margins for label visibility
+         rect.col = "black",       # 矩形框颜色 | Rectangle color
+         rect.lwd = 5,             # 矩形框线宽 | Rectangle line width
+         cl.pos = "b",             # 颜色图例位置：底部 | Color legend position: bottom
+         tl.col = "black",         # 文本标签颜色 | Text label color
+         tl.cex = 1.08,            # 文本标签大小 | Text label size
+         cl.cex = 1.5,             # 颜色图例大小 | Color legend size
+         tl.srt = 60)              # 文本标签旋转角度 | Text label rotation angle
+```
+
+### 计算相关性分析的P值
+
+也可以用Hmsic包来求，但是发现它输出的P值有限制。
+
+###Calculate the P-value for correlation analysis
+
+It can also be calculated using the Hmsic package, but it was found that its output P value is limited.
+
+```{r, warning=FALSE}
+# 自定义函数：计算相关系数的p值矩阵 | Custom function: Calculate p-value matrix for correlation coefficients
+cor.mtest <- function(corr, ...) {
+  corr <- as.matrix(corr)          # 将输入转换为矩阵格式 | Convert input to matrix format
+  n <- ncol(corr)                  # 获取矩阵列数（变量数量）| Get number of columns (variables)
+  p.corr <- matrix(NA, n, n)       # 初始化p值矩阵 | Initialize p-value matrix
+  diag(p.corr) <- 0                # 对角线元素（自身相关）p值设为0 | Set diagonal p-values to 0
+  
+  # 计算所有变量对之间的相关系数p值 | Calculate p-values for all variable pairs
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(corr[, i],   # 执行Spearman相关性检验 | Perform Spearman correlation test
+                      corr[, j], 
+                      method = "spearman", ...)
+      p.corr[i, j] <- p.corr[j, i] <- tmp$p.value  # 对称填充p值矩阵 | Fill p-value matrix symmetrically
+    }
+  }
+  
+  colnames(p.corr) <- rownames(p.corr) <- colnames(corr)  # 设置矩阵行列名 | Set matrix row/column names
+  p.corr  # 返回p值矩阵 | Return p-value matrix
+}
+
+# 计算免疫细胞表达量相关性的p值矩阵 | Calculate p-value matrix for immune cell correlations
+p.corr <- cor.mtest(input_data) 
+head(p.corr[, 1:5])  # 显示p值矩阵的前几行和前5列 | Show first few rows and 5 columns of p-value matrix
+```
+
+### 计算节点间的连接关系
+
+只保留那些相关性较强的连接
+
+###Calculate the connection relationship between nodes
+
+Only retain connections with strong correlation
+
+```{r}
+# 合并相关系数矩阵和P值矩阵 | Merge correlation coefficients and p-values
+rr <- as.data.frame(corr)         # 将相关系数矩阵转换为数据框 | Convert correlation matrix to dataframe
+rr$ID <- rownames(rr)             # 添加行名作为ID列 | Add row names as ID column
+cor <- melt(rr, "ID", value.name = "cor")  # 重塑数据为长格式 | Reshape data to long format
+
+pp <- as.data.frame(p.corr)        # 将P值矩阵转换为数据框 | Convert p-value matrix to dataframe
+pp$ID <- rownames(pp)             # 添加行名作为ID列 | Add row names as ID column
+pvalue <- melt(pp, "ID", value.name = "pvalue")  # 重塑数据为长格式 | Reshape data to long format
+colnames(pvalue) <- c("from", "to", "pvalue")  # 重命名列 | Rename columns
+
+corpvlue <- cbind(pvalue, cor)    # 合并相关性和P值数据 | Combine correlation and p-value data
+head(corpvlue)
+corpvlue <- corpvlue[, -c(4:5)]   # 删除重复的ID列 | Remove redundant ID columns
+head(corpvlue)
+dim(corpvlue)                     # 查看数据维度 | Check data dimensions
+
+# 筛选显著相关的连接 | Filter significant correlations
+corpvlue <- corpvlue[corpvlue$pvalue < 0.0001, ]  # 保留p值小于0.0001的连接 | Keep only highly significant connections
+dim(corpvlue)
+
+# 计算连接权重（基于P值） | Calculate edge weights (based on p-values)
+corpvlue$weight <- corpvlue$pvalue
+corpvlue$weight <- -log10(corpvlue$weight)  # 转换为-log10(p)以增强显著性差异 | Transform to -log10(p) for better visualization
+head(corpvlue)
+
+# 数据清洗：移除自相关和重复连接 | Data cleaning: Remove self-correlations and duplicate edges
+corpvlue <- corpvlue[!corpvlue$cor == 1, ]  # 移除完全相关（自身）的连接 | Remove self-correlations (cor=1)
+dim(corpvlue)
+
+# 移除重复连接 | Remove duplicate edges
+summary(duplicated(corpvlue$weight))
+corpvlue <- corpvlue[!duplicated(corpvlue$weight), ]  # 保留唯一连接 | Keep unique edges only
+dim(corpvlue)
+
+# 根据相关系数方向设置连接颜色 | Set edge colors based on correlation direction
+corpvlue$color <- ifelse(corpvlue$cor < 0, negcol, poscol)  # 负相关为蓝色，正相关为红色 | Negative: blue, Positive: red
+
+# 保存处理后的连接数据到CSV文件 | Save processed edge data to CSV
+write.csv(corpvlue, "output_links.csv")  # 输出用于网络图的连接数据 | Output edge data for network visualization
+```
+
+## 利用矩阵文件进行细胞的聚类
+
+细胞聚类的结果综合考虑了"hclust"的结果、"kmeans"聚类的结果、以及目前的研究现状
+
+##Cluster cells using matrix files
+
+The results of cell clustering comprehensively consider the results of "hcluster", "k-means" clustering, and the current research status
+
+```{r}
+# 转置数据用于聚类分析 | Transpose data for clustering analysis
+cellcluster <- as.data.frame(t(input_data))  # 转置免疫细胞表达矩阵 | Transpose immune cell expression matrix
+# cellcluster[1:5,1:5]  # 查看数据前几行几列 | Preview data structure
+
+# 执行层次聚类分析 | Perform hierarchical clustering
+hc <- hclust(dist(cellcluster))  # 计算距离矩阵并进行层次聚类 | Calculate distance matrix and perform hierarchical clustering
+hcd <- as.dendrogram(hc)  # 将聚类结果转换为树状图对象 | Convert clustering result to dendrogram
+(clus4 <- cutree(hc, 4))  # 将树状图切割为4个聚类 | Cut dendrogram into 4 clusters
+
+# 获取每个聚类中的细胞名称 | Extract cell names in each cluster
+A <- as.character(rownames(as.data.frame(subset(clus4, clus4==1))))  # 聚类1的细胞 | Cells in cluster 1
+B <- as.character(rownames(as.data.frame(subset(clus4, clus4==2))))  # 聚类2的细胞 | Cells in cluster 2
+C <- as.character(rownames(as.data.frame(subset(clus4, clus4==3))))  # 聚类3的细胞 | Cells in cluster 3
+D <- as.character(rownames(as.data.frame(subset(clus4, clus4==4))))  # 聚类4的细胞 | Cells in cluster 4
+cls <- list(A, B, C, D)  # 将所有聚类结果存入列表 | Store all clusters in a list
+
+# 创建节点数据框并指定聚类标签 | Create node dataframe and assign cluster labels
+nodes <- as.data.frame(unlist(cls))  # 将聚类结果展平为数据框 | Flatten cluster list into dataframe
+nodes$type <- c(rep("B", 9), rep("A", 4), rep("C", 5), rep("D", 5))  # 为每个细胞分配聚类类型 | Assign cluster types to cells
+names(nodes) <- c("media", "type.label")  # 重命名列名 | Rename columns
+
+# 基于领域知识手动调整部分细胞的聚类归属 | Manually adjust cluster assignments based on domain knowledge
+nodes$type.label[nodes$media == "T cells follicular helper"] <- "B"  # 调整T细胞滤泡辅助细胞的聚类 | Adjust T follicular helper cells
+nodes$type.label[nodes$media == "B cells naive"] <- "A"  # 调整幼稚B细胞的聚类 | Adjust naive B cells
+nodes$type.label[nodes$media == "T cells CD4 naive"] <- "A"  # 调整幼稚CD4+T细胞的聚类 | Adjust naive CD4+ T cells
+nodes$type.label[nodes$media == "Plasma cells"] <- "A"  # 调整浆细胞的聚类 | Adjust plasma cells
+nodes$type.label[nodes$media == "Dendritic cells resting"] <- "C"  # 调整静息树突状细胞的聚类 | Adjust resting dendritic cells
+nodes$type.label[nodes$media == "Eosinophils"] <- "C"  # 调整嗜酸性粒细胞的聚类 | Adjust eosinophils
+nodes$type.label[nodes$media == "Mast cells resting"] <- "A"  # 调整静息肥大细胞的聚类 | Adjust resting mast cells
+
+# 数据类型转换和检查 | Data type conversion and validation
+nodes <- as.data.frame(nodes)  # 确保数据为数据框格式 | Ensure data is in dataframe format
+nodes$media <- as.character(nodes$media)  # 将细胞名称转换为字符型 | Convert cell names to character type
+nodes  # 显示最终节点数据 | Display final node data
+```
+
+## 构建网络的input文件
+
+##Build the input file for the network
+
+```{r}
+# 合并生存分析数据和细胞分类数据 | Merge survival analysis data and cell classification data
+summary(nodes$media %in% bb$ID)  # 检查细胞名称是否一致 | Check if cell names match between datasets
+nodes <- merge(nodes, bb, by.x = "media", "ID", all.x = T, all.y = T)  # 按细胞名合并数据 | Merge datasets by cell name
+
+# 准备节点属性 | Prepare node attributes
+nodes$Fraction <- abs(nodes$weight_HR)  # 计算节点大小属性（HR值的绝对值）| Node size based on absolute HR value
+nodes$id <- paste("S", 01:23, sep = "")  # 为每个细胞分配唯一ID | Assign unique IDs to cells
+nodes <- nodes[order(nodes$type.label),]  # 按细胞类型排序 | Sort by cell type
+nodes <- nodes[,c(ncol(nodes),1:ncol(nodes)-1)]  # 调整列顺序，ID列为第一列 | Reorder columns, ID first
+nodes <- nodes[order(nodes$type.label),]  # 再次按细胞类型排序 | Sort again by cell type
+nodes  # 显示节点数据 | Display node data
+
+# 建立细胞名与ID的映射关系 | Create mapping between cell names and IDs
+paste0("'",nodes$media,"'","=","'",nodes$id,"'",collapse = ",")
+
+# 将连接数据中的细胞名替换为ID | Replace cell names with IDs in edge data
+corpvlue$from <- revalue(corpvlue$from, c(
+  'B cells memory'='S1', 'B cells naive'='S2', 'Dendritic cells activated'='S3',
+  'Dendritic cells resting'='S4', 'Eosinophils'='S5', 'Fibroblasts'='S6', 
+  'Macrophages M0'='S7', 'Macrophages M1'='S8', 'Macrophages M2'='S9', 
+  'Mast cells activated'='S10', 'Mast cells resting'='S11', 'Monocytes'='S12', 
+  'Neutrophils'='S13', 'NK cells activated'='S14', 'NK cells resting'='S15', 
+  'Plasma cells'='S16', 'T cells CD4 memory activated'='S17', 
+  'T cells CD4 memory resting'='S18', 'T cells CD4 naive'='S19', 
+  'T cells CD8'='S20', 'T cells follicular helper'='S21', 
+  'T cells gamma delta'='S22', 'T cells regulatory Tregs'='S23'
+))
+
+corpvlue$to <- revalue(corpvlue$to, c(
+  'B cells memory'='S1', 'B cells naive'='S2', 'Dendritic cells activated'='S3',
+  'Dendritic cells resting'='S4', 'Eosinophils'='S5', 'Fibroblasts'='S6', 
+  'Macrophages M0'='S7', 'Macrophages M1'='S8', 'Macrophages M2'='S9', 
+  'Mast cells activated'='S10', 'Mast cells resting'='S11', 'Monocytes'='S12', 
+  'Neutrophils'='S13', 'NK cells activated'='S14', 'NK cells resting'='S15', 
+  'Plasma cells'='S16', 'T cells CD4 memory activated'='S17', 
+  'T cells CD4 memory resting'='S18', 'T cells CD4 naive'='S19', 
+  'T cells CD8'='S20', 'T cells follicular helper'='S21', 
+  'T cells gamma delta'='S22', 'T cells regulatory Tregs'='S23'
+))
+
+links <- corpvlue  # 重命名连接数据 | Rename edge data
+
+# 使用igraph包构建网络图 | Construct network graph using igraph package
+net <- graph_from_data_frame(d = links, vertices = nodes, directed = T)  
+# 从数据框构建图对象：d为连接数据，vertices为节点数据，directed指定有向图 | Build graph: edges from 'links', nodes from 'nodes', directed graph
+```
+
+### 开始画图
+
+###Start drawing
+
+```{r, fig.width=10, fig.height=8}
+# 根据细胞聚类设置节点颜色 | Set node colors based on cell clusters
+V(net)$color <- revalue(nodes$type.label, c("A"=mycol[1], "B"=mycol[2], "C"=mycol[3], "D"=mycol[4]))
+# 将聚类标签映射为之前定义的颜色 | Map cluster labels to predefined colors
+
+# 计算节点度并设置节点大小 | Calculate node degrees and set node sizes
+V(net)$size <- (1 + V(net)$weight)*3  # 节点大小基于-log10(p值)，可根据数据调整 | Node size based on -log10(p-value), adjustable
+V(net)$label <- V(net)$media  # 设置节点标签为细胞名称 | Set node labels to cell names
+
+# 设置边的属性 | Set edge properties
+E(net)$arrow.mode <- 0        # 无边箭头 | No arrowheads
+E(net)$edge.color <- "tomato"  # 边的默认颜色 | Default edge color
+E(net)$width <- 1 + E(net)$weight/6  # 边的宽度基于权重，即-log10(p值) | Edge width based on -log10(p-value)
+
+# 输出网络图到PDF文件 | Export network graph to PDF
+pdf("Immune_network.pdf", width = 9.75, height = 8.78)
+
+# 绘制网络图 | Plot network graph
+plot(net,
+     layout = layout_in_circle,  # 圆形布局 | Circular layout
+     edge.curved = 0.2,          # 边的弯曲度 | Edge curvature
+     vertex.label.color = V(net)$color,  # 标签颜色与节点一致 | Label color matches node color
+     vertex.label.dist = -2,     # 标签与节点的距离，负值表示外部 | Label distance from node
+     edge.color = links$color)   # 边的颜色基于相关系数正负 | Edge color based on correlation direction
+
+# 添加聚类图例 | Add legend for clusters
+legend("topright",             # 图例位置：右上角 | Legend position: top-right
+       c("Cell cluster-A", "Cell cluster-B", "Cell cluster-C", "Cell cluster-D"),
+       pch = 21,               # 图例符号：实心圆带边框 | Legend symbol: filled circle with border
+       col = "black",          # 边框颜色 | Border color
+       pt.bg = mycol,          # 填充颜色 | Fill color
+       pt.cex = 3,             # 符号大小 | Symbol size
+       cex = 1.3,              # 文字大小 | Text size
+       bty = "n",              # 无边框 | No box
+       ncol = 1)               # 单列排列 | Single column
+
+# 添加节点大小图例（基于P值） | Add legend for node size (based on p-values)
+f <- c(0.05, 0.001, 0.00001, 0.00000001)  # 示例P值 | Example p-values
+s <- abs(log10(f))  # 对应大小 | Corresponding sizes
+
+legend("bottomright", 
+       inset = c(0, -0.1),     # 向下偏移 | Shift downward
+       legend = f,             # 图例文字 | Legend text
+       text.width = 0.2,       # 文字宽度 | Text width
+       title = "logrank test, P value",  # 图例标题 | Legend title
+       title.adj = -0.5,       # 标题位置调整 | Title position adjustment
+       pch = 21,               # 符号类型 | Symbol type
+       pt.cex = s,             # 符号大小 | Symbol size
+       bty = 'n',              # 无边框 | No box
+       horiz = TRUE)           # 水平排列 | Horizontal arrangement
+
+# 添加边的图例（正负相关） | Add legend for edge colors (positive/negative correlations)
+legend("bottomright",
+       c("Positive correlation with P < 0.0001", 
+         "Negative correlation with P < 0.0001"),
+       col = c(poscol, negcol),  # 颜色对应正负相关 | Colors for positive/negative correlations
+       bty = "n",                # 无边框 | No box
+       cex = 1,                  # 文字大小 | Text size
+       lty = 1,                  # 线条类型 | Line type
+       lwd = 5)                  # 线条宽度 | Line width
+
+dev.off()  # 关闭图形设备 | Close graphics device
+```
+
+![](Immune_network.pdf)
+
+文字的位置用Illustrator调整；再根据“output_HR_corlor.csv”的最后一列用Illustrator在圆心上画点，点的颜色代表HR的正负。
+
+Adjust the position of the text using Illustrator; Draw a point on the center of the circle using Illustrator based on the last column of 'outputting _ HR-color. csv', where the color of the point represents the positive or negative sign of HR.
+
+```{r}
+sessionInfo()
+```
