@@ -1,0 +1,148 @@
+---
+title: "FigureYa24 ROC"
+author: "yeoli, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+用R画出ROC曲线（receiver operating characteristic curve）。
+
+Draw the ROC curve in R（receiver operating characteristic curve）
+
+## 应用场景
+## application scenario
+
+在分类任务中，直观展示敏感性和特异性连续变量的综合指标。
+
+场景一：比较多个biomarker或临床参数的诊断表现
+
+场景二：比较多个算法的分类效果
+
+Visualize composite metrics of sensitivity and specificity continuous variables in a classification task.
+
+Scenario 1: Compare the diagnostic performance of multiple biomarkers or clinical parameters
+
+Scenario 2: Compare the classification performance of multiple algorithms
+
+## 输入文件
+## Input data
+
+包含至少两列，第一列是分组，此处第二列至第五列是miRNA的表达量。
+
+It contains at least two columns, the first column is the group, and here the second to fifth columns are the miRNA expression.
+
+```{r}
+df <- read.table("easy_input.txt",head=T,sep="\t",check.names = F)
+head(df)
+```
+
+## 开始画图
+## Start drawing
+
+```{r,message=FALSE,warning=FALSE}
+#install.packages("pROC")
+library("pROC")
+
+#定义足够多的颜色，后面画线时从这里选颜色
+#define enough colors to choose from when drawing lines later.
+mycol <- c("slateblue","seagreen3","dodgerblue","firebrick1","lightgoldenrod","magenta","orange2")
+
+pdf("ROC.pdf",height=6,width=6)
+auc.out <- c()
+
+
+#先画第一条线，此处是miRNA1
+#draw the first line first, here is miRNA1
+x <- plot.roc(df[,1],df[,2],ylim=c(0,1),xlim=c(1,0),
+              smooth=T, #绘制平滑曲线 draw smooth curve
+              ci=TRUE, 
+              main="",
+              #print.thres="best", #把阈值写在图上，其sensitivity+ specificity之和最大 write the threshold on the graph with the sum of its sensitivity and specificity maximized
+              col=mycol[2],#线的颜色 color of the line
+              lwd=2, #线的粗细 thickness of the line
+              legacy.axes=T)#采用大多数paper的画法，横坐标是“1-specificity”，从0到1 adopt the way most papers are drawn, the horizontal coordinate is "1-specificity", from 0 to 1.
+
+ci.lower <- round(as.numeric(x$ci[1]),3) #置信区间下限 lower bound of the confidence interval
+ci.upper <- round(as.numeric(x$ci[3]),3) #置信区间上限 upper bound of the confidence interval
+
+auc.ci <- c(colnames(df)[2],round(as.numeric(x$auc),3),paste(ci.lower,ci.upper,sep="-"))
+auc.out <- rbind(auc.out,auc.ci)
+
+
+#再用循环画第二条和后面更多条曲线
+#Then use the loop to draw the second curve and more curves after that
+for (i in 3:ncol(df)){
+  x <- plot.roc(df[,1],df[,i],
+                add=T, #向前面画的图里添加 add to the previously drawn plot
+                smooth=T,
+                ci=TRUE,
+                col=mycol[i],
+                lwd=2,
+                legacy.axes=T)
+
+  ci.lower <- round(as.numeric(x$ci[1]),3)
+  ci.upper <- round(as.numeric(x$ci[3]),3)
+  
+  auc.ci <- c(colnames(df)[i],round(as.numeric(x$auc),3),paste(ci.lower,ci.upper,sep="-"))
+  auc.out <- rbind(auc.out,auc.ci)
+}
+
+
+#对比多条曲线
+#在参数`method=`后面，有三种方法可选“delong”, “bootstrap”或“venkatraman”，计算p值
+#compare multiple curves
+#after the parameter `method=`, there are three methods to choose from "delong", "bootstrap" or "venkatraman", calculate p-value
+p.out <- c()
+for (i in 2:(ncol(df)-1)){
+  for (j in (i+1):ncol(df)){
+    p <- roc.test(df[,1],df[,i],df[,j], method="bootstrap")
+    p.tmp <- c(colnames(df)[i],colnames(df)[j],p$p.value)
+    p.out <- rbind(p.out,p.tmp)
+  }
+}
+
+#输出p value到文件
+#output p value to file
+p.out <- as.data.frame(p.out)
+colnames(p.out) <- c("ROC1","ROC2","p.value")
+write.table(p.out,"pvalue_output.xls",sep="\t",quote=F,row.names = F,col.names = T)
+
+#还可以把p value写在图上
+#这里有4条线，6组对比。太多，就不写了吧。
+#如果只对比两条线，就运行下面这行
+#Also write the p value on the plot
+#There are 4 lines and 6 sets of comparisons here. It's too much to write.
+#If you only compare two lines, run the following line
+#text(0.4, 0.3, labels=paste("miRNA1 vs. miRNA2\np-value =", p.out[1,3]), adj=c(0, .5))
+
+
+# 输出AUC、AUC CI到文件
+# output AUC, AUC CI to file
+auc.out <- as.data.frame(auc.out)
+colnames(auc.out) <- c("Name","AUC","AUC CI")
+write.table(auc.out,"auc_output.xls",sep="\t",quote = F,row.names = F,col.names = T)
+
+
+#绘制图例
+#draw legend
+legend.name <- paste(colnames(df)[2:length(df)],"AUC",auc.out$AUC,sep=" ")
+legend("bottomright", 
+       legend=legend.name,
+       col = mycol[2:length(df)],
+       lwd = 2,
+       bty="n")
+dev.off()
+```
+
+![](ROC.pdf)
+
+```{r}
+sessionInfo()
+```
