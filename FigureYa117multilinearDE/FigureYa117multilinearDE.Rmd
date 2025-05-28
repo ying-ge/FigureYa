@@ -1,0 +1,313 @@
+---
+title: "FigureYa117multilinearDE"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+去除RNAseq表达量混杂因素，混杂因素包括年龄、性别、人种、批次等。
+方法在文章method部分的Differential expression analyses里面描述。
+结果图可以放两个热图进行比较
+
+##Requirement description
+
+Remove confounding factors such as age, gender, race, batch, etc. that affect RNAseq expression levels.
+The method is described in the differential expression analyses section of the article.
+The result chart can be compared with two heat maps
+
+![](method.png)
+
+出自<https://academic.oup.com/hmg/article/22/24/5001/568201>
+
+from<https://academic.oup.com/hmg/article/22/24/5001/568201>
+
+或参考：Evaluation of logistic regression models and effect of covariates for case–control study in RNA-Seq analysis，<https://link.springer.com/article/10.1186%2Fs12859-017-1498-y>
+
+**题外话：**例文中采用这种多变量逻辑回归的方式考虑协变量的影响，个人觉得在一些成熟的差异表达算法（如DESeq2，edgeR，limma）的design matrix中加入这些变量可能更稳定。
+
+Or reference: Evaluation of logistic regression models and effect of covariates for case–control study in RNA-Seq analysis，< https://link.springer.com/article/10.1186%2Fs12859 -017-1498-y>
+
+**Off topic: In the example text, this multivariate logistic regression approach is used to consider the influence of covariates. Personally, I think adding these variables to the design matrix of some mature differential expression algorithms (such as DESeq2, edgeR, limma) may be more stable.
+
+## 应用场景
+
+用于做差异表达分析。大规模测序数据，往往混杂着各种协变量，影响差异基因筛选，常见的两种策略：
+
+- 策略一，去除这些混杂因素，例文采取的是这种策略；
+- 策略二，把这些因素加入到DESeq2的design里，推荐这种策略。
+
+下面这篇文章详细探讨了第一种方式的缺点，并给出了实际操作时的指导意见：2016年的Biostatistics，Methods that remove batch effects while retaining group differences may lead to exaggerated confidence in downstream analyses，<https://t.zsxq.com/3j2beI6>
+
+##Application scenarios
+
+Used for differential expression analysis. Large scale sequencing data is often mixed with various covariates, which affect differential gene screening. There are two common strategies:
+
+-Strategy one is to remove these confounding factors, which is adopted in the example text;
+-Strategy 2: Incorporate these factors into the design of DESeq2 and recommend this strategy.
+
+The following article discusses in detail the drawbacks of the first approach and provides guidance for practical operation: 2016 Biostatistics，Methods that remove batch effects while retaining group differences may lead to exaggerated confidence in downstream analyses，< https://t.zsxq.com/3j2beI6 >
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```{r}
+# 设置R包安装源为清华大学镜像（Set R package repository to Tsinghua University mirror）
+# 这将加速R包的下载过程（This will speed up the download process of R packages）
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为中国科学技术大学镜像（Set Bioconductor mirror to USTC mirror）
+# 这将加速Bioconductor包的下载过程（This will speed up the download process of Bioconductor packages）
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载glmnet包，用于正则化线性模型，如LASSO和弹性网络（Load the glmnet package for regularized linear models such as LASSO and Elastic-Net）
+library(glmnet)
+# 加载pheatmap包，用于创建美观的热图（Load the pheatmap package for creating beautiful heatmaps）
+library(pheatmap)
+# 加载ClassDiscovery包，用于基因表达数据的聚类和分类（Load the ClassDiscovery package for clustering and classification of gene expression data）
+library(ClassDiscovery)
+# 加载gplots包，提供额外的绘图功能（Load the gplots package for additional plotting functions）
+library(gplots)
+
+# 设置环境语言为英语，使报错信息以英文显示（Set the environment language to English to display error messages in English）
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止字符串自动转换为因子类型，避免数据处理中的意外转换（Prevent automatic conversion of strings to factors to avoid unexpected data type changes）
+options(stringsAsFactors = FALSE) 
+```
+
+自定义函数
+
+Custom functions
+
+```{r}
+# 显示差异表达分析进度（Display progress of differential expression analysis）
+# index: 当前处理的索引（Current processing index）
+# totalN: 总处理数量（Total number of items to process）
+# breakN: 进度显示的分割数（Number of progress updates to display）
+display.progress = function ( index, totalN, breakN=20) {
+  
+  # 每处理一定数量的项目时显示进度百分比（Display progress percentage at regular intervals）
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}    
+
+# 多变量线性回归差异表达分析（考虑其他协变量）（Multivariable linear regression for differential expression analysis considering covariates）
+# emat: 输入的表达矩阵（行为基因；列为样本），一般是适用于回归模型的数据变量，如FPKM，TPM，标准化的count以及芯片数据等（Input expression matrix with genes as rows and samples as columns）
+# sinfo: 样本信息，包括差异表达的两个组，其他感兴趣变量或批次效应（协变量）（Sample information including groups for comparison and covariates）
+# res.var: response variable逻辑回归中的响应变量（单一字符串），及差异表达要比较的两个组，请优先转换为1和0（Response variable for logistic regression, should be binary (1/0)）
+# cov.var: covariate variable逻辑回归中的协变量（可为多个变量），及差异表达时要考虑的其他因素，请优先添加额外的因素，比如age的平方等（Covariate variables to adjust for in the model）
+# logtrans: 逻辑变量，指示在逻辑回归时对基因表达量是否做log2转化，默认为TRUE（Whether to log2 transform gene expression values, default is TRUE）
+# isorder: 逻辑变量，指示是否对结果中的FDR进行升序排列，默认为TRUE（Whether to sort results by FDR, default is TRUE）
+multilinearDE <- function(emat = NULL, sinfo = NULL, res.var = NULL, cov.var = NULL, logtrans = T, isorder = T) {
+  
+  # 验证表达矩阵和样本信息的样本ID是否匹配（Validate sample IDs match between expression matrix and sample information）
+  if(!identical(colnames(emat),rownames(sinfo))) {
+    stop("Error! The sampleIDs are not matched in emat and sinfo!\n")
+  }
+  
+  # 确保响应变量为0和1且二者均存在（Ensure response variable is binary with both 0 and 1 present）
+  if(sum(is.element(c("1","0"),as.character(sinfo[,res.var]))) != 2) { 
+    stop("Error! The response variable must be 1 and 0, please transform it first!\n")
+  }
+  
+  # 验证所有变量都存在于样本信息中（Validate all variables exist in sample information）
+  if(!all(is.element(c(res.var,cov.var),colnames(sinfo)))) {
+    stop("Error! All the variable should be included in sinfo with the same label name!\n")
+  }
+  
+  # 初始化结果变量（Initialize result variables）
+  p.gene <- fc <- log2fc <- c() 
+  for (i in 1:nrow(emat)) {
+    
+    # 显示计算进度（Display progress）
+    display.progress(index = i,totalN = nrow(emat)) 
+    
+    gene = rownames(emat)[i]
+    
+    # 根据logtrans参数决定是否对表达值进行log2转换（Log transform expression values if specified）
+    if(logtrans) {
+      tmp <- cbind.data.frame(gene = log2(t(emat[gene,]) + 1), sinfo) 
+    } else { tmp <- cbind.data.frame(gene = t(emat[gene,]), sinfo) }
+    colnames(tmp)[1] <- "gene"
+    
+    # 构建逻辑回归公式（Construct logistic regression formula）
+    f <-  as.formula(paste(res.var, "~", paste(c("gene",cov.var), collapse = ' + '))) 
+    
+    # 执行二元多变量逻辑回归（Perform binomial logistic regression）
+    model_glm <- glm(f, data = tmp, family = "binomial") 
+    # 提取基因表达的p值（Extract p-value for gene expression）
+    p.gene <- c(p.gene,summary(model_glm)$coefficients["gene",4]) 
+    
+    # 计算两组样本的表达均值比（Calculate fold change between groups）
+    a <- as.numeric(emat[gene,which(tmp$class == "1"),])
+    b <- as.numeric(emat[gene,which(tmp$class == "0"),])
+    fc <- c(fc,mean(a)/mean(b)) 
+    log2fc <- c(log2fc,log2(mean(a)/mean(b))) 
+  }
+  
+  # 生成差异表达结果表格（Generate differential expression results table）
+  outTab <- data.frame(gene = rownames(emat), 
+                       fc = fc,
+                       log2fc = log2fc,
+                       p.value = p.gene, 
+                       fdr = p.adjust(p.gene,method = "fdr"), 
+                       stringsAsFactors = F)
+  
+  # 根据isorder参数决定是否按FDR排序结果（Sort results by FDR if specified）
+  if(isorder) { 
+    outTab <- outTab[order(outTab$fdr),]
+    return(outTab)
+  } else {return(outTab)}
+}
+```
+
+## 输入文件
+
+easy_input_expr.txt，表达矩阵。
+
+easy_input_info.txt，样品信息，包含亚型、年龄、性别。
+
+##Input file
+
+easy_input_expr.txt， Expression matrix.
+
+easy_input_info.txt， Sample information, including subtype, age, and gender.
+
+```{r}
+# 读取表达谱数据（Read gene expression matrix）
+# 文件格式：制表符分隔，第一行为列名，第一列为行名（基因名）（Tab-separated format with header and gene names as row names）
+expr <- read.table("easy_input_expr.txt",sep = "\t",check.names = F,stringsAsFactors = F,row.names = 1,header = T)
+# 查看数据前几行和列（Preview the first few rows and columns）
+expr[1:3, 1:3]
+
+# 读取样本信息数据（Read sample information）
+# 文件格式：制表符分隔，第一行为列名，第一列为样本ID（Tab-separated format with header and sample IDs as row names）
+sinfo <- read.table("easy_input_info.txt",sep = "\t",check.names = F,stringsAsFactors = F,row.names = 1,header = T)
+# 查看样本信息的基本结构（Preview sample information structure）
+head(sinfo)
+
+# 匹配表达矩阵和样本信息中的样本ID（Match samples between expression matrix and sample information）
+# 仅保留两者共有的样本，并移除存在协变量缺失值的样本（Keep only overlapping samples and remove those with missing covariates）
+sinfo <- as.data.frame(na.omit(sinfo[intersect(rownames(sinfo),colnames(expr)),]))
+sinfo <- as.data.frame(na.omit(sinfo))
+
+# 创建二分类变量class，用于差异表达分析（Create binary classification variable for differential expression analysis）
+# 将TCGA Subtype为immune的样本设为1，其他设为0（Set immune subtype samples to 1, others to 0）
+sinfo$class <- ifelse(sinfo$`TCGA Subtype` == "immune",1,0) 
+
+# 准备用于差异表达分析的表达矩阵（Prepare expression matrix for differential expression analysis）
+# 仅保留有完整样本信息的样本对应的表达数据（Keep only samples with complete information）
+emat <- expr[,rownames(sinfo)]
+```
+
+## 多变量逻辑回归确定显著转录本
+
+##Multivariate logistic regression to determine significant transcripts
+
+```{r}
+# 创建年龄的二次项作为额外协变量（Create age squared as an additional covariate）
+# 用于捕捉年龄与基因表达之间的非线性关系（To capture potential nonlinear effects of age）
+sinfo$age2 <- sinfo$age^2 
+
+# 执行多变量线性回归差异表达分析（Perform multivariable linear regression for differential expression analysis）
+# 考虑年龄、年龄平方和性别作为协变量（Adjust for age, age squared, and gender as covariates）
+outTab <- multilinearDE(emat = emat,
+                        sinfo = sinfo,
+                        res.var = "class",        # 响应变量：免疫亚型 vs 其他亚型（Response variable: immune subtype vs others）
+                        cov.var = c("age","age2","sex"),  # 协变量：年龄、年龄平方和性别（Covariates: age, age squared, and gender）
+                        logtrans = T,             # 对表达值进行log2转换（Log-transform expression values）
+                        isorder = F)              # 不按FDR排序结果（Do not sort results by FDR）
+# 查看结果前几行（Preview the first few results）
+head(outTab)
+
+# 将差异表达分析结果输出到文件（Export differential expression results to a text file）
+# 文件格式：制表符分隔，不含行名，不使用引号（Tab-separated format without row names or quotes）
+write.table(outTab,
+            "DE results by multilinear regression considering covariates.txt",
+            sep = "\t",
+            row.names = F,
+            quote = F)
+```
+
+## 开始画图
+
+通过绘制热图查看分型效果
+
+##Start drawing
+
+View the typing effect by drawing a heat map
+
+```{r}
+# 筛选差异表达基因（Select differentially expressed genes）
+# 筛选标准：FDR < 0.05 且 绝对log2FC > 2（Criteria: FDR < 0.05 and absolute log2 fold change > 2）
+degs <- outTab[which(outTab$fdr < 0.05 & abs(outTab$log2fc) > 2), "gene"]
+
+# 创建样本注释信息（Create sample annotation for heatmap）
+# 基于class变量标记样本类型（Label samples by class variable）
+annCol <- data.frame(class=sinfo$class,row.names = rownames(sinfo),stringsAsFactors = F)
+annCol$class <- ifelse(annCol$class == 1,"Immune","Others") 
+
+# 为热图注释设置颜色（Set colors for heatmap annotations）
+# Immune组使用蓝色，Others组使用黄色（Blue for Immune group, yellow for Others）
+annColors <- list("class"=c("Immune"="#2874C5","Others"="#EABF00"))
+
+# 对表达矩阵进行log2转换（Log2 transform expression matrix）
+indata <- log2(emat + 1)
+
+# 计算样本间的层次聚类（Hierarchical clustering for samples）
+# 使用欧氏距离和ward.D方法（Euclidean distance with ward.D linkage）
+hcg <- hclust(distanceMatrix(as.matrix(t(indata[degs,rownames(sinfo)])), "euclidean"), "ward.D")
+
+# 计算基因间的层次聚类（Hierarchical clustering for genes）
+# 使用欧氏距离和ward.D方法（Euclidean distance with ward.D linkage）
+hcs <- hclust(distanceMatrix(as.matrix(indata[degs,rownames(sinfo)]), "euclidean"), "ward.D")
+
+# 数据标准化并截断异常值（Standardize data and truncate extreme values）
+# 将表达值标准化后限制在[-3,3]区间（Standardize and limit values to [-3, 3]）
+plotdata <- t(scale(t(indata)))
+plotdata[plotdata >= 3] <- 3
+plotdata[plotdata <= -3] <- -3
+
+# 绘制差异表达基因的热图（Plot heatmap of differentially expressed genes）
+# 使用pheatmap包创建带样本注释的热图（Create annotated heatmap with pheatmap）
+pheatmap(plotdata[degs,],
+         annotation_col = annCol,          # 添加样本注释（Add sample annotations）
+         annotation_colors = annColors,    # 设置注释颜色（Set annotation colors）
+         cluster_cols = hcs,               # 使用预计算的列聚类（Use precomputed column clustering）
+         show_rownames = F,                # 不显示行名（Hide gene names）
+         show_colnames = F,                # 不显示列名（Hide sample names）
+         cluster_rows = hcg,               # 使用预计算的行聚类（Use precomputed row clustering）
+         labels_col = NULL,                # 不显示列标签（No column labels）
+         labels_row = NULL,                # 不显示行标签（No row labels）
+         filename = "heatmap for DEGs.pdf") # 保存为PDF文件（Save as PDF）
+```
+
+![](heatmap for DEGs.pdf)
+
+从热图可以看出差异表达基因较好地分开了immune 和 others亚型，去除混杂因素的效果还不错。
+
+From the heatmap, it can be seen that the differentially expressed genes have effectively separated the immune and other subtypes, and the effect of removing confounding factors is also good.
+
+```{r}
+sessionInfo()
+```
