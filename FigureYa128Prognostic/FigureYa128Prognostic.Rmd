@@ -1,0 +1,514 @@
+---
+title: "FigureYa128Prognostic"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+文章中的那7个基因咋选出来的？
+
+出自<https://clincancerres.aacrjournals.org/content/18/21/6001>
+
+这里有文章解读：<https://www.jianshu.com/p/58eab0d8ac22?from=singlemessage&isappinstalled=0>
+
+##Requirement description
+
+How were the 7 genes selected in the article?
+
+From< https://clincancerres.aacrjournals.org/content/18/21/6001 >
+
+Here is an article interpretation:< https://www.jianshu.com/p/58eab0d8ac22?from=singlemessage&isappinstalled=0 >
+
+## 应用场景
+
+找marker基因。
+
+通过迭代LASSO产生“共识”下被保留的基因，进一步通过AUC选择与生存相关的最小基因组合。
+
+**小伙伴跟作者间的问答记录：**
+
+问：迭代lasso的原理是什么？
+
+答：lasso在允许的时候高度依赖种子，因为你需要交叉验证，而交叉验证的过程是随机选取样本的。所以一旦你更换了种子，最优lambda就会改变，最终得到的特征就会改变。共识就是在多次运行lasso（不依赖种子）后，那么高频次被保留下的特征，可以认为是对感兴趣话题最有影响的。因为如果我运行500次，A特征出现了300次，和B特征出现了30次，它们的重要程度肯定是不同的。不是选共同的，是对频次排序，这是我的理解。频次的顺序代表了这些特征的影响程度，然后依次把这些特征纳入cox模型，当AUROC达到峰值的时候停止纳入，此时模型最优，并且所含特征最少。
+
+##Application scenarios
+
+Find marker genes.
+
+By iterating LASSO to generate genes that are retained under the consensus, the minimum gene combination related to survival is further selected through AUC.
+
+**Q&A record between the friend and the author:**
+
+Q: What is the principle of iterating lasso?
+
+Answer: lasso heavily relies on seeds when allowed, as you need cross validation, which involves randomly selecting samples. So once you change the seed, the optimal lambda will change, and the final features obtained will change. Consensus is that after running lasso multiple times (without relying on seeds), the high-frequency features preserved can be considered the most influential on the topic of interest. Because if I run it 500 times and feature A appears 300 times and feature B appears 30 times, their importance levels will definitely be different. It's not about choosing common ones, it's about sorting by frequency, that's my understanding. The order of frequency represents the degree of influence of these features, and then these features are sequentially included in the Cox model. When the AUROC reaches its peak, the inclusion stops, and the model is optimal with the least number of features.
+
+## 环境设置
+
+### 使用国内镜像安装和加载包
+
+##Environment settings
+
+###Install and load packages using domestic images
+
+```{r}
+# 设置CRAN镜像为清华大学镜像源
+# Set CRAN mirror to Tsinghua University mirror source
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为中国科学技术大学镜像源
+# Set Bioconductor mirror to University of Science and Technology of China mirror source
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+# 检查并加载/安装survival包 - 用于生存分析
+# Check and load/install survival package - for survival analysis
+if(!require(survival)){ 
+  install.packages("survival")
+} else {library(survival)}  
+
+# 检查并加载/安装glmnet包 - 用于正则化广义线性模型
+# Check and load/install glmnet package - for regularized generalized linear models
+if(!require(glmnet)){ 
+  install.packages("glmnet")
+} else {library(glmnet)}  
+
+# 检查并加载/安装pbapply包 - 用于并行计算和进度条显示
+# Check and load/install pbapply package - for parallel computation and progress bar display
+if(!require(pbapply)){ 
+  install.packages("pbapply")
+} else {library(pbapply)}  
+
+# 检查并加载/安装survivalROC包 - 用于生存分析中的ROC曲线
+# Check and load/install survivalROC package - for ROC curves in survival analysis
+if(!require(survivalROC)){ 
+  install.packages("survivalROC")
+} else {library(survivalROC)}
+
+# 设置环境语言为英文，确保报错信息为英文
+# Set environment language to English to ensure error messages are in English
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止字符串自动转换为因子，提高数据处理稳定性
+# Disable automatic conversion of strings to factors for more stable data processing
+options(stringsAsFactors = FALSE) 
+```
+
+### 自定义函数
+
+###Custom functions
+
+```{r}
+# 显示进程
+# Display progress
+display.progress = function (index, totalN, breakN=20) {
+  # index: 当前迭代索引
+  # index: Current iteration index
+  # totalN: 总迭代次数
+  # totalN: Total number of iterations
+  # breakN: 控制进度显示的频率，将总次数分成breakN份显示
+  # breakN: Controls the frequency of progress display, divides total iterations into breakN parts
+  
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    # 当迭代次数达到指定间隔时显示进度百分比
+    # Display progress percentage when current iteration reaches specified interval
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}    
+
+# lasso回归
+# LASSO regression for survival analysis
+surv_lasso <- function(iter.times = NULL, surv.obj = NULL, expr.obj = NULL, nfolds = 10, alpha = 1, family = "cox") {
+  # iter.times: pblapply的传入参数，用于迭代次数
+  # iter.times: Input parameter for pblapply, used for iteration count
+  # surv.obj: surv对象，由Surv()函数得到；
+  # surv.obj: Survival object created by Surv() function
+  # expr.obj: 表达谱对象，注意行为特征，列为样本
+  # expr.obj: Expression profile object, note rows are features, columns are samples
+  # nfolds：筛选最优lambda时的交叉验证次数，默认为10
+  # nfolds: Number of cross-validation folds for selecting optimal lambda, default is 10
+  # alpha： 默认为1表示LASSO回归
+  # alpha: Default is 1, representing LASSO regression
+  # family： 默认为"cox"
+  # family: Default is "cox" for Cox proportional hazards model
+
+  cvfit = cv.glmnet(x = t(as.matrix(expr.obj)), 
+                    y = surv.obj, 
+                    nfolds = nfolds, # 10折交叉验证选取最优lambda
+                    # 10-fold cross-validation to select optimal lambda
+                    alpha = alpha, # alpha = 1 意味着 lasso
+                    # alpha = 1 indicates LASSO regression
+                    family = family) # 依赖cox模型
+                    # Based on Cox proportional hazards model
+  
+  # 取出最优lambda对应的系数
+  # Extract coefficients corresponding to optimal lambda
+  myCoefs <- coef(cvfit, s="lambda.min");
+  lasso_fea <- myCoefs@Dimnames[[1]][which(myCoefs != 0 )] 
+  # Extract non-zero features (those retained by LASSO)
+  
+  return(lasso_fea)
+}
+```
+
+## 输入文件的准备
+
+如果你的文件已经整理成easy_input_expr.csv和easy_input_cli.csv的格式，就可以跳过这步，直接进入“筛选基因”。
+
+##Preparation of input files
+
+If your file has already been organized into the formats of easy_input-expr.csv and easy_input_cli.csv, you can skip this step and go directly to "Filter Genes".
+
+### 输入文件的下载
+
+需要表达矩阵和带followup的临床数据。
+
+**下面这两个文件太大，我上传到微云上了，下载链接：<https://share.weiyun.com/5t3fKeL>**
+
+- COAD_TPM.txt，表达矩阵，这里用的是COAD的TPM。从XENA pan-cancer表达数据中提取某种癌症的TPM的方法可参考FigureYa56Immune_inflitration；或者直接下载某个癌症的表达矩阵，方法可参考FigureYa23count2TPM、FigureYa34count2FPKMv2。
+
+- clinical_PANCAN_patient_with_followup.tsv，带followup的临床信息，从这个页面下载<https://gdc.cancer.gov/about-data/publications/PanCanStemness-2018>，下载地址：<https://api.gdc.cancer.gov/data/0fc78496-818b-4896-bd83-52db1f533c5c>
+
+###Download of input files
+
+Need to express matrix and clinical data with followup.
+
+**The following two files are too large, I uploaded them to Weiyun, download link:< https://share.weiyun.com/5t3fKeL >**
+
+- COAD_TPM.txt， The expression matrix used here is COAD's TPM. The method for extracting TPM of a certain cancer from XENA pan cancer expression data can refer to FigureYa56Immune_infliction; Alternatively, you can directly download the expression matrix of a certain cancer using the methods shown in FigureYa23count2TPM and FigureYa34count2FPKMv2.
+
+- clinical_PANCAN_patient_with_followup.tsv， Download clinical information with follow up from this page< https://gdc.cancer.gov/about-data/publications/PanCanStemness-2018 >Download link:< https://api.gdc.cancer.gov/data/0fc78496-818b-4896-bd83-52db1f533c5c >
+
+```{r}
+#读取表达矩阵
+# Read expression matrix
+expr <- read.table("COAD_TPM.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+
+#根据TCGA的sample ID编码提取肿瘤样本
+# Extract tumor samples based on TCGA sample ID encoding
+expr <- expr[,substr(colnames(expr),11,12) == "01"] 
+# 01 indicates tumor samples
+colnames(expr) <- substr(colnames(expr),1,9)  
+# Simplify sample names to first 9 characters
+expr[1:3,1:3]  
+
+#读取临床数据
+# Read clinical data
+Sinfo <- read.table("clinical_PANCAN_patient_with_followup.tsv",sep = "\t",check.names = F,header = T,stringsAsFactors = F,quote = "")
+unique(Sinfo$acronym)  # 查看包含的癌症类型
+# Check included cancer types
+Sinfo <- Sinfo[which(Sinfo$acronym %in% "COAD"),]  
+# Keep only colon adenocarcinoma (COAD) data
+rownames(Sinfo) <- paste0("COAD-",substr(Sinfo$bcr_patient_barcode,9,12))  # 构建样本ID
+# Construct sample IDs
+Sinfo[1:3,1:3]  
+dim(Sinfo)  
+```
+
+### 输入数据预处理
+
+```{r}
+# 生存数据预处理（请根据自己的数据特点修改）###
+# Survival data preprocessing (modify according to your data characteristics) ###
+Sinfo <- Sinfo[,c("vital_status","days_to_death","days_to_last_followup")]  # 选取需要的生存相关列
+# Select survival-related columns
+
+Sinfo$OS <- ifelse(Sinfo$vital_status == "Dead", 1,0)  # 将生存状态转换为二元数值变量(1=死亡,0=存活)
+# Convert vital status to binary variable (1=Dead, 0=Alive)
+
+Sinfo$OS.time <- ifelse(grepl("Not", Sinfo$days_to_death), Sinfo$days_to_last_followup, Sinfo$days_to_death)  # 根据两个变量生成最终生存时间
+# Generate overall survival time based on death or last follow-up time
+
+Sinfo <- Sinfo[-grep("Dis", Sinfo$OS.time), ]  # 移除包含无效生存时间的样本
+# Remove samples with invalid survival time
+
+Sinfo$OS.time <- as.numeric(Sinfo$OS.time)  # 转换生存时间为数值型
+# Convert survival time to numeric type
+
+Sinfo <- Sinfo[Sinfo$OS.time > 0,]  # 移除生存时间为0的无效样本
+# Remove samples with survival time <= 0
+
+Sinfo[1:3,1:4]  # 查看处理后的数据前几行
+
+# 筛选既有表达矩阵又有随访信息的样本
+# Filter samples with both expression data and follow-up information
+com_sam <- intersect(rownames(Sinfo),colnames(expr))  # 找出交集样本
+
+# 产生最终数据
+# Generate final datasets
+expr <- expr[,com_sam]  # 筛选表达矩阵
+# Filter expression matrix
+Sinfo <- Sinfo[com_sam,]  # 筛选临床数据
+# Filter clinical data
+
+#保存到文件
+# Save to files
+write.csv(round(expr, 1), "easy_input_expr.csv", quote = F)  # 保存表达矩阵，保留1位小数
+# Save expression matrix with 1 decimal place
+write.csv(Sinfo, "easy_input_cli.csv", quote = F)  # 保存临床数据
+# Save clinical data
+```
+
+## 筛选基因
+
+```{r}
+# 读取预处理后的表达矩阵和临床数据
+# Read preprocessed expression matrix and clinical data
+expr <- read.csv("easy_input_expr.csv", check.names = F, row.names = 1)
+expr[1:3,1:3]  # 查看数据前几行几列
+Sinfo <- read.csv("easy_input_cli.csv", check.names = F, row.names = 1)
+Sinfo[1:3,1:3]  # 查看数据前几行几列
+
+# 过滤出方差>var.cutoff的基因
+# Filter genes with variance > var.cutoff
+var.cutoff <- 5  # 例文中为GEO数据，阈值设为0.2
+# Example uses 0.2 for GEO data, here using 5 for TCGA data
+var <- apply(expr, 1, sd)  # 计算每个基因的标准差
+# Calculate standard deviation for each gene
+expr.filtered <- expr[var > var.cutoff,]  # 因为这里是TCGA数据，所以设置的大一些
+# Keep genes with variance exceeding cutoff
+
+# 过滤出与总生存(OS)有关的基因
+# Filter genes associated with overall survival (OS)
+cox.cutoff <- 0.1  # 例文中阈值设为0.5
+# Example uses 0.5, here using 0.1
+Coxoutput.OS <- NULL  # 初始化结果数据框
+# Initialize results data frame
+
+# 遍历筛选后的基因进行单变量Cox回归分析
+# Iterate through filtered genes for univariate Cox regression
+for (i in 1:nrow(expr.filtered)) {
+  display.progress(index = i,totalN = nrow(expr.filtered))  # 显示进度
+  # Display progress
+  
+  # 产生临时变量存储生存以及变量表达值
+  # Create temporary data frame with gene expression and survival data
+  tmp <- data.frame(gene = as.numeric(expr.filtered[i,]),
+                    OS.time = Sinfo[,"OS.time"],
+                    OS = Sinfo[,"OS"],
+                    stringsAsFactors = F)
+  
+  # 单变量Cox比例风险模型
+  # Univariate Cox proportional hazards model
+  cox <- coxph(Surv(OS.time, OS) ~ gene, data = tmp)
+  coxSummary = summary(cox)
+  
+  # 生成Cox结果数据框，包括基因名，风险比，z值，Wald检验p值，以及HR置信区间
+  # Generate Cox results data frame with gene name, hazard ratio, z-value, p-value, and CI
+  Coxoutput.OS=rbind.data.frame(Coxoutput.OS,data.frame(gene=rownames(expr.filtered)[i],
+                                                        HR=as.numeric(coxSummary$coefficients[,"exp(coef)"]),
+                                                        z=as.numeric(coxSummary$coefficients[,"z"]),
+                                                        pvalue=as.numeric(coxSummary$coefficients[,"Pr(>|z|)"]),
+                                                        lower=as.numeric(coxSummary$conf.int[,3]),
+                                                        upper=as.numeric(coxSummary$conf.int[,4]),
+                                                        stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+write.table(Coxoutput.OS,"Coxoutput.OS.txt",sep = "\t",row.names = F,quote = F)  # 保存结果
+
+### 根据cox.cutoff筛选基因
+### Filter genes by cox.cutoff p-value
+if(!identical(rownames(expr.filtered),Coxoutput.OS$gene)) {stop("Error! Gene name is mismatched!\n")}  # 确保基因名匹配
+# Ensure gene names match between expression matrix and Cox results
+surv.expr <- expr.filtered[Coxoutput.OS$pvalue < cox.cutoff,]  # 筛选p值小于阈值的基因
+# Keep genes with p-value < cutoff
+dim(surv.expr)  # 查看筛选后的基因数量
+
+#############################
+### 迭代LASSO挑选高频特征 ###
+### Iterative LASSO for selecting high-frequency features ###
+iter.times <- 500  # 设置迭代次数，速度非常慢请耐心，例文中是1000次
+# Set number of iterations (example uses 1000, this may take time)
+
+# 运算LASSO回归
+# Perform LASSO regression
+lasso_fea <- list()  # 初始化结果列表
+# Initialize results list
+surv <- Surv(Sinfo$OS.time, Sinfo$OS)  # 创建生存对象
+# Create survival object
+
+set.seed(111)  # 外部设置种子，使得迭代过程是可重复的
+# Set seed for reproducibility
+
+# 下面这步运行时间较长，我们把它保存到lasso_fea.rda里
+# The following step is time-consuming, save results to lasso_fea.rda
+#lasso_fea <- pblapply(1:iter.times,
+#                      surv_lasso, 
+#                      surv.obj = surv, 
+#                      expr.obj = surv.expr)
+#save(lasso_fea,file = "lasso_fea.rda")  # 保存该结果
+# Save results
+
+# 这里直接加载上一步运行的结果
+# Load precomputed results instead
+load("lasso_fea.rda")  # 加载该结果
+# Load results
+
+#######################
+### 根据AUC挑选基因 ###
+### Select genes based on AUC ###
+genes <- sort(table(unlist(lasso_fea)), decreasing = T)  # 根据基因出现的频次排序
+# Sort genes by frequency of selection in LASSO iterations
+# 如果觉得出现次数较少的基因是不鲁棒的，也可以仅选择top基因
+# Optionally select only top genes if fewer occurrences are considered unstable
+freq.cutoff <- 50  # 频次阈值
+# Frequency cutoff
+genes <- names(genes[genes > freq.cutoff])  # 这里选择出现频次大于50的基因，认为是多次LASSO的共识基因
+# Select genes occurring more frequently than cutoff
+write.table(genes, "top50gene.txt", row.names = F, quote = F)  # 输出到文件
+# Save selected genes to file
+
+pred.time <- 5  # 查看5年ROC
+# Time point for ROC analysis (5-year survival)
+roc <- list()  # 初始化ROC列表
+# Initialize ROC results list
+auc <- c()  # 初始化AUC向量
+# Initialize AUC vector
+
+# 计算每个基因的AUC值
+# Calculate AUC for each gene
+for (i in 1:length(genes)) {
+  gene <- genes[i]
+  tmp <- data.frame(gene = as.numeric(surv.expr[gene,]),row.names = colnames(surv.expr),stringsAsFactors = F); colnames(tmp) = gene
+  if(i == 1) {  # 如果为第一个基因就把生存信息纳入数据框
+    # Include survival data for first gene
+    surv.dat <- cbind.data.frame(Sinfo[rownames(tmp),c("OS.time","OS")],tmp)
+  } else {
+    surv.dat <- cbind.data.frame(surv.dat,tmp)
+  }
+  cox <- coxph(Surv(OS.time, OS) ~ ., data = surv.dat)  # 多变量Cox比例风险模型（i=1时为单变量）
+  # Multivariable Cox model (univariate for first gene)
+  riskScore <- predict(cox,type="risk",newdata=surv.dat)  # 计算风险评分
+  # Calculate risk score
+  roc[[i]] <- survivalROC(Stime=surv.dat$OS.time, 
+                          status=surv.dat$OS, 
+                          marker = riskScore[rownames(surv.dat)], 
+                          predict.time =pred.time*365,  # 计算pred.time时刻的ROC，一般是五年生存
+                          # Calculate ROC at specified time point (e.g., 5 years)
+                          method="KM")
+  auc <- c(auc,roc[[i]]$AUC)  # 保存AUC值
+  # Save AUC value
+}
+
+#############################
+### 最终signature与KM曲线 ###
+### Final signature and Kaplan-Meier curve ###
+prog.sig <- genes[1:which.max(auc)]  # 选择AUC最大的前n个基因作为预后标志物
+# Select genes up to the one with maximum AUC as prognostic signature
+# 保存到文件
+# Save to file
+write.table(prog.sig,"signature_gene.txt", row.names = F, quote = F)  # 保存预后标志物基因
+
+surv.dat <- t(surv.expr[prog.sig,])  # 转置表达矩阵
+# Transpose expression matrix
+surv.dat <- cbind.data.frame(Sinfo[rownames(surv.dat),c("OS.time","OS"),],surv.dat)  # 添加生存数据
+# Add survival data
+surv.dat$OS.time <- surv.dat$OS.time/365  # 将生存时间转换为年
+# Convert survival time to years
+cox <- coxph(Surv(OS.time, OS) ~ ., data = surv.dat)  # 多变量Cox比例风险模型
+# Multivariable Cox model
+riskScore <- predict(cox,type="risk",newdata=surv.dat)  # 计算风险评分
+# Calculate risk score
+
+surv.dat$Risk <- ifelse(riskScore > median(riskScore),"High","Low")  # 根据风险值划分高低风险组
+# Divide samples into high/low risk groups by median risk score
+fitd <- survdiff(Surv(OS.time, OS) ~ Risk, data=surv.dat, na.action=na.exclude)  # 生存差异分析
+# Survival difference analysis
+p.val <- 1-pchisq(fitd$chisq, length(fitd$n)-1)  # 计算KM曲线p值
+# Calculate p-value for Kaplan-Meier curve
+fit <- survfit(Surv(OS.time, OS)~ Risk, data=surv.dat, type="kaplan-meier", error="greenwood", conf.type="plain", na.action=na.exclude)  # 拟合KM曲线
+# Fit Kaplan-Meier curve
+```
+
+## 开始画图
+
+用base plot画图
+
+```{r}
+### 设置颜色 ###
+# Set colors
+red  <- "#E94244"  
+blue <- "#4084BB"  
+
+# 生成PDF文件，设置宽度和高度
+# Generate PDF file with specified dimensions
+pdf("AUCandKM.pdf", width = 10, height = 3)
+
+# 设置图形布局为1行3列
+# Set layout to 1 row and 3 columns
+par(mfrow = c(1, 3))
+
+# 第一个子图：AUC随基因纳入数量的变化曲线
+# First subplot: AUC vs. number of genes included
+par(bty = "o", mgp = c(2, 0.5, 0), mar = c(4.1, 4.1, 2.1, 2.1), tcl = -.25, font.main = 3)
+plot(1:length(genes), auc, 
+     # 绘制AUC随基因入组的变化情况
+     # Plot AUC change as genes are included
+     type = "l", lwd = 2, col = blue,
+     ylim = c(0.6, 1), xlab = "Genes ordered by frequency", ylab = "Area under the curve")
+points(which.max(auc), auc[which.max(auc)], pch = 16, cex = 1.5, col = red) 
+# 标记AUC峰值点
+# Mark the peak AUC point
+arrows(x0 = which.max(auc), y0 = auc[which.max(auc)] - 0.07,
+       x1 = which.max(auc), y1 = auc[which.max(auc)] - 0.02,
+       length = 0.1) 
+# 添加箭头指示峰值位置
+# Add arrow to indicate peak position
+text(which.max(auc), auc[which.max(auc)] - 0.1,
+     labels = paste0("Number of genes: ", which.max(auc), "\n",
+                     "Current AUC: ", round(auc[which.max(auc)], 3)), col = red, adj = 0.55) 
+# 添加文本说明峰值处的基因数量和AUC值
+# Add text to explain the number of genes and AUC value at the peak
+
+# 第二个子图：峰值时的ROC曲线
+# Second subplot: ROC curve at peak AUC
+par(bty = "o", mgp = c(2, 0.5, 0), mar = c(4.1, 4.1, 2.1, 2.1), tcl = -.25, font.main = 3)
+plot(roc[[which.max(auc)]]$FP, roc[[which.max(auc)]]$TP, type = "l", xlim = c(0, 1), ylim = c(0, 1), col = blue, 
+     # 绘制峰值时的ROC曲线
+     # Plot ROC curve at peak AUC
+     xlab = "1-Specificity (FPR)", ylab = "Sensitivity (TPR)",
+     lwd = 2, cex.main = 1.3, cex.lab = 1.2, cex.axis = 1.2, font = 1.2)
+text(0.4, 0.7, paste0("AUC = ", round(roc[[which.max(auc)]]$AUC, 3)), cex = 1, col = blue) 
+# 添加AUC值文本
+# Add AUC value text
+lines(x = c(0, 1), y = c(0, 1), lwd = 1.5, lty = 2, col = "grey40") 
+# 添加对角线作为参考
+# Add diagonal line as reference
+
+# 第三个子图：高低风险组的KM生存曲线
+# Third subplot: Kaplan-Meier survival curves for high and low risk groups
+par(bty = "n", mgp = c(1.9, .33, 0), mar = c(4.1, 4.1, 2.1, 2.1) + .1, las = 1, tcl = -.25)
+plot(fit, col = c(red, blue), lwd = 1.2, xlab = "Time (Years)", ylab = "Overall survival", mark.time = T) 
+# 绘制KM生存曲线
+# Plot Kaplan-Meier survival curves
+par(xpd = TRUE)
+legend(x = 10, y = 1.1, bty = "n", "Risk", cex = 1, text.font = 2) 
+# 添加风险分组标题
+# Add risk group title
+legend(x = 10, y = 1, bty = "n", text.col = c(red, blue), c("High", "Low"), cex = 1) 
+# 添加高低风险组图例
+# Add legend for high and low risk groups
+text(x = 0, y = 0.05, paste0("Log-rank P ", ifelse(p.val < 0.001, "< 0.001", paste0("= ", round(p.val, 3)))), cex = 1, pos = 4) 
+# 添加Log-rank检验P值
+# Add Log-rank test P value
+invisible(dev.off()) 
+# 关闭图形设备
+# Close graphics device
+
+# 保存工作环境（注释状态，默认不执行）
+# Save workspace (commented out, not executed by default)
+# save.image("Prognostic.RData")
+```
+
+![](AUCandKM.pdf)
+
+```{r}
+sessionInfo()
+```
