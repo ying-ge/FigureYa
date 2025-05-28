@@ -1,0 +1,321 @@
+---
+title: "FigureYa113MutSigCV"
+author: "小丫画图出品"
+date: "2019-7-14"
+output: html_document
+---
+欢迎关注“小丫画图”公众号，同名知识星球等你加入
+
+小丫微信: epigenomics  E-mail: figureya@126.com
+
+作者：大鱼海棠
+
+单位：Research Center of Biostatistics and Computational Pharmacy, China Pharmaceutical University
+
+小丫编辑校验
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+# 需求描述
+
+用MutSigCV推断SMG（significantly mutated gene），画出文章里的图。
+
+MutSigCV是用matlab写成的，带我顺利用上它。
+
+![](example.png)
+
+出自<https://www.frontiersin.org/articles/10.3389/fonc.2019.00488/full>
+
+# 应用场景
+
+画基因突变瀑布图时，展示哪几个基因呢？可以展示显著突变基因。看例文描述：We used MutSigCV_v1.41 (20) (www.broadinstitute.org) to infer significant cancer mutated genes (q < 0.05) across the two classes currently identified with default parameters.
+
+MutSigCV是用来推断SMG（significantly mutated gene）的，会综合考虑基因长度，以及沉默突变和非沉默突变的频率，因此如果没有沉默突变（silent mutation），或沉默突变过少（算法内有固定阈值），这个算法是无法运行的。
+
+**注意：**若使用MutSigCV，请引用：
+Lawrence MS, Stojanov P, Polak P, Kryukov GV, Cibulskis K, Sivachenko A, Carter SL, Stewart C, Mermel CH, Roberts SA (2013) Mutational heterogeneity in cancer and the search for new cancer-associated genes. Nature 499(7457): 214
+
+如果只想直接从TCGA下载MAF文件画图，可直接使用FigureYa18oncoplot，还可以进一步用FigureYa42oncoprint自己定制瀑布图。
+
+# 环境设置
+
+先在R里准备MutSigCV所需的输入数据，然后用MutSigCV推断SMG，最后在R里用MutSigCV的输出文件画瀑布图。
+
+（其实Matlab的使用方式很傻瓜，比R更容易，更像Excel）
+
+## 安装MutSigCV
+
+第一步：安装Matlab。目前MutSigCV的源码是用Matlab编写的，可前往Matlab网站注册，下载30天试用版：<https://ww2.mathworks.cn/campaigns/products/trials.highResolutionDisplay.html?prodcode=ML>。
+
+第二步：把`MutSigCV.m`文件拷贝到当前文件夹就可以使用了。
+
+## 安装并加载画图所需的R包
+
+```{r}
+# 使用国内镜像安装所需的R包 | Use domestic mirror to install required R packages
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+#BiocManager::install("ComplexHeatmap")
+
+# 加载R包 | Load R packages
+library(tidyverse)      # 数据处理和可视化工具集 | Data processing and visualization toolkit
+library(magrittr)       # 提供管道操作符 %>% | Provides pipe operator %>%
+library(readxl)         # 读取Excel文件 | Read Excel files
+library(stringr)        # 字符串处理工具 | String processing tools
+library(forcats)        # 因子处理工具 | Factor processing tools
+library(ComplexHeatmap) # 复杂热图绘制 | Complex heatmap plotting
+library(RColorBrewer)   # 颜色方案 | Color schemes
+Sys.setenv(LANGUAGE = "en") # 显示英文报错信息 | Display error messages in English
+options(stringsAsFactors = FALSE) # 禁止chr转成factor | Prevent converting strings to factors
+```
+
+# 输入文件
+
+easy_input_meta.local mutation.full.txt，MAF文件，用于推断SVG。从TCGA下载MAF文件的方法可参考FigureYa19Lollipop。
+
+meta.mut.rda和local.mut.rda，用于画图时展示两组，非必需。里面分别保存了两组样品名称（字符串）。此处只是为了重现原图，实际使用时请选用自己不同亚型的样本。
+
+另外，在后面的“使用MutSigCV推断SMG”的“参数设置”部分需要下载默认文件。
+
+```{r}
+# 读取MAF文件 | Read MAF file
+meta.maf <- as.data.frame(read_tsv("easy_input_meta.local mutation.full.txt", comment = "#"))
+head(meta.maf)
+
+# 读取两组样品名，仅在画图时需要它 | Read two groups of sample names, only needed for plotting
+meta.mut <- read.table("easy_input_meta.mut.txt")[,1]  # 转移组样品名 | Metastasis group sample names
+local.mut <- read.table("easy_input_local.mut.txt")[,1]  # 原发组样品名 | Primary group sample names
+```
+
+# 输入文件预处理
+
+把MAF文件整理成MutSigCV所需的输入文件的格式，生成文件：meta.local mutation.full_for_MutSig_input.txt
+
+阅读MutSigCV教程，了解数据格式要求，就能理解下面的预处理过程了
+
+```{r}
+# 确认Tumor_Seq_Allele1和Tumor_Seq_Allele2是否一致（见MutSigCV教程） | Check if Tumor_Seq_Allele1 and Tumor_Seq_Allele2 are identical (see MutSigCV tutorial)
+if(!identical(meta.maf$Tumor_Seq_Allele1,meta.maf$Tumor_Seq_Allele2)) {
+
+  cat("Tumor_Seq_Allele1 and Tumor_Seq_Allele2 should be the same!\n")  # 提示两个等位基因列应保持一致 | Prompt that the two allele columns should be identical
+  cat("Processing is running...\n")  # 提示正在处理数据 | Indicate data processing in progress
+  meta.maf$Tumor_Seq_Allele1 <- meta.maf$Tumor_Seq_Allele2  # 将Allele2的值赋给Allele1，确保两者一致 | Assign Allele2 values to Allele1 to ensure consistency
+  if(all(meta.maf$Tumor_Seq_Allele1 == meta.maf$Tumor_Seq_Allele2) &  !all(meta.maf$Tumor_Seq_Allele1 == meta.maf$Reference_Allele)) {
+    cat("Your data is free to go now!\n")  # 确认数据已处理完毕且符合要求 | Confirm data processing is complete and meets requirements
+  }
+}
+
+# 选择MutSigCV算法需要的列，输出到当前文件夹 | Select columns required by MutSigCV algorithm and output to current directory
+outTable <- meta.maf %>%
+  select(Hugo_Symbol,               # 基因名称 | Gene name
+         Tumor_Sample_Barcode,      # 肿瘤样本条形码 | Tumor sample barcode
+         Variant_Classification,    # 变异分类 | Variant classification
+         Reference_Allele,          # 参考等位基因 | Reference allele
+         Tumor_Seq_Allele1,         # 肿瘤测序等位基因1 | Tumor sequencing allele 1
+         Tumor_Seq_Allele2)         # 肿瘤测序等位基因2 | Tumor sequencing allele 2
+write.table(outTable,              # 输出表格 | Output table
+            "meta.local mutation.full_for_MutSig_input.txt",  # 输出文件名 | Output file name
+            sep = "\t",            # 使用制表符分隔 | Separate with tab
+            row.names = F,         # 不包含行名 | Exclude row names
+            quote = F)             # 不使用引号引述文本 | Do not enclose text with quotes
+```
+
+# 使用MutSigCV推断SMG
+
+这一步要用到Matlab，会生成meta.local mutation.full_MutSig_output.sig_genes.txt文件，用于下一步画图。
+
+也可以在GenePattern云服务器上运行，不想使用Matlab的小伙伴就自行探究在线模式吧。
+
+## 参数设置
+
+MutSigCV算法，这里采用：
+
+- 默认参数：hg19注释文件, chr_files_hg19文件夹
+- 默认的突变字典文件：mutation_type_dictionary_file.txt
+- 默认的coverage文件：gene.covariates.txt和exome_full192.coverage.txt
+
+以上默认文件的源文件下载自<https://software.broadinstitute.org/cancer/cga/mutsig_download>，注册后就能下载。我已经下载好，微云地址：<https://share.weiyun.com/5MyC44s>，下载后全部解压到当前文件夹。
+
+若对该算法非常熟悉，或者有其他个性化需求，可以自定义这些文件，技术细节请参考：<http://software.broadinstitute.org/cancer/software/genepattern/modules/docs/MutSigCV>
+
+## 运行MutSigCV
+
+前面已经攒齐了输入文件，都保存在当前文件夹里。
+
+现在，在Matlab的Current Folder里选择进入当前文件夹，然后把下面这行代码复制粘贴到Matlab的Command Window，敲回车，就开始运行啦！
+
+```matlab
+MutSigCV('meta.local mutation.full_for_MutSig_input.txt','exome_full192.coverage.txt','gene.covariates.txt','meta.local mutation.full_MutSig_output','mutation_type_dictionary_file.txt','chr_files_hg19')
+```
+
+![](matlab.png)
+
+数据格式以及输入命令的参数意义：
+
+- 第一个参数：maf文件（请注意我使用的maf文件的格式，抬头最好完全一致，且Variant_Classification中的突变名称也必须匹配突变字典中的名字，举个简单的例子，沉默突变必须叫Silent，不能叫silent，不能叫silence，也不能叫synonymous）；此外，Reference_Allele为参考碱基，Tumor_Seq_Allele1为突变碱基，且必须与Allele2完全一致，而在有些MAF calling的方法里，这两列是不一致的，请仔细确认并且在R代码的预处理部分根据实际情况修改！！！
+- 第二个参数以及第三个参数默认，第四个参数为输出文件的前缀，后两个参数也默认，一个是数据字典，一个是使用的注释文件。
+- 我将网页上比较关键的一页**How to run MutSigCV**转成了pdf，供大家查看详情。
+
+程序运行结束后，无论是成功还是失败，都会再次出现fx>>。可以看到程序提示显著突变的结果被保存到sig_genes后缀的txt文件：Wrote results to meta.local mutation.full_MutSig_output.sig_genes.txt
+
+随后在文件夹下会生成4个文件：
+
+- meta.local mutation.full_MutSig_output.sig_genes.txt
+- meta.local mutation.full_MutSig_output.categs.txt
+- meta.local mutation.full_MutSig_output.coverage.txt
+- meta.local mutation.full_MutSig_output.mutations.txt
+
+这四个文件中后缀为sig_genes是显著突变基因，打开根据qvalue或者pvalue筛选即可，一般qvalue < 0.05，类似调整的p值：
+
+# 开始画图
+
+提取显著突变基因SMGs，用q < 0.05筛选
+
+```{r}
+# 读取MutSigCV输出的显著突变基因结果 | Read significant mutated genes output from MutSigCV
+mutsigcv <- read.table("meta.local mutation.full_MutSig_output.sig_genes.txt", 
+                       sep = "\t",           # 指定制表符分隔 | Specify tab separator
+                       row.names = 1,        # 使用第一列作为行名 | Use first column as row names
+                       header = T,           # 包含表头 | Include header
+                       stringsAsFactors = F) # 禁止自动转换字符串为因子 | Prevent string to factor conversion
+
+# 筛选q值小于0.05的显著突变基因 | Filter significantly mutated genes with q-value < 0.05
+mutsigcv <- rownames(mutsigcv[mutsigcv$q < 0.05,])  # q值：多重假设检验校正后的p值 | q-value: p-value adjusted for multiple hypothesis testing
+
+# 查看筛选得到的显著突变基因 | View the filtered significant mutated genes
+mutsigcv
+```
+
+画图
+
+```{r, warning=FALSE}
+### 设置颜色 ### | Set colors
+jco <- c("#2874C5","#EABF00")  # JCO杂志配色方案 | JCO journal color scheme
+lightgrey <- "#dcddde"          # 浅灰色背景 | Light gray background
+
+# 提取指定样本的突变数据 | Extract mutation data for specified samples
+mutsig.maf <- as.data.frame(meta.maf[which(meta.maf$Tumor_Sample_Barcode %in% c(meta.mut,local.mut)),
+                                     c("Tumor_Sample_Barcode","Hugo_Symbol","Variant_Classification")])
+
+# 重塑数据为宽格式，适合OncoPrint绘图 | Reshape data to wide format for OncoPrint plotting
+onco.input <- reshape(data = mutsig.maf,
+                      idvar = "Hugo_Symbol",           # 基因名作为标识变量 | Gene name as identifier
+                      timevar = "Tumor_Sample_Barcode",# 样本名作为时间变量 | Sample ID as time variable
+                      direction = "wide")              # 转换为宽格式 | Convert to wide format
+
+# 清理列名，去除前缀 | Clean column names by removing prefix
+colnames(onco.input) <- gsub("Variant_Classification.","",colnames(onco.input))
+onco.input[is.na(onco.input)] <- ""  # 将缺失值替换为空字符串 | Replace NA with empty string
+rownames(onco.input) <- onco.input$Hugo_Symbol  # 设置行名为基因名 | Set row names to gene names
+
+# 重命名特殊变异类型，避免符号问题 | Rename special variant types to avoid symbol issues
+onco.input[onco.input == "5'Flank"] <- "Flank5"
+onco.input[onco.input == "3'Flank"] <- "Flank3"
+onco.input[onco.input == "5'UTR"] <- "UTR5"
+onco.input[onco.input == "3'UTR"] <- "UTR3"
+onco.input <- onco.input[,-1]  # 移除第一列(基因名重复列) | Remove first column (duplicate gene name)
+
+# 筛选显著突变基因并按样本类型排序 | Filter significant genes and sort by sample type
+mygene <- onco.input[mutsigcv,c(meta.mut,local.mut)]  # 按Meta/Local样本排序 | Sort by Meta/Local samples
+
+# 收集所有变异类型 | Collect all variant types
+type <- c()
+for (i in 1:nrow(mygene)) {
+  tmp <- as.character(mygene[i,])
+  type <- unique(c(type,tmp))
+}
+type  # 输出变异类型用于调整颜色 | Output variant types for color adjustment
+
+# 创建光谱渐变调色板 | Create spectral color palette
+mycol <- colorRampPalette(brewer.pal(11,'Spectral'))(12)[12:1]  # 反转色序 | Reverse color order
+
+# 定义每种变异类型的绘图函数 | Define plotting functions for each variant type
+alter_fun = list(
+  background = function(x, y, w, h) {  # 背景色 | Background color
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = lightgrey, col = NA))
+  },
+  Missense_Mutation = function(x, y, w, h) {  # 错义突变 | Missense mutation
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[1], col = NA)) 
+  },
+  Nonsense_Mutation = function(x, y, w, h) {  # 无义突变 | Nonsense mutation
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[2], col = NA)) 
+  },
+  Frame_Shift_Del = function(x, y, w, h) {  # 移码缺失 | Frameshift deletion
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[3], col = NA)) 
+  },
+  Frame_Shift_Ins = function(x, y, w, h) {  # 移码插入 | Frameshift insertion
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[4], col = NA)) 
+  },
+  UTR5 = function(x, y, w, h) {  # 5'非翻译区变异 | 5'UTR variant
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[5], col = NA)) 
+  },
+  Splice_Site = function(x, y, w, h) {  # 剪接位点变异 | Splice site variant
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[6], col = NA)) 
+  },
+  Silent = function(x, y, w, h) {  # 沉默突变 | Silent mutation
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[7], col = NA)) 
+  },
+  UTR3 = function(x, y, w, h) {  # 3'非翻译区变异 | 3'UTR variant
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[8], col = NA)) 
+  },
+  In_Frame_Del = function(x, y, w, h) {  # 框内缺失 | In-frame deletion
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[9], col = NA))
+  },
+  Flank5 = function(x, y, w, h) {  # 5'侧翼区变异 | 5'Flank variant
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[10], col = NA))
+  },
+  Intron = function(x, y, w, h) {  # 内含子变异 | Intron variant
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[11], col = NA)) 
+  },
+  In_Frame_Ins = function(x, y, w, h) {  # 框内插入 | In-frame insertion
+    grid.rect(x, y, w-unit(0.5, "mm"), h-unit(0.5, "mm"), gp = gpar(fill = mycol[12], col = NA)) 
+  }
+)
+
+# 定义变异类型与颜色的映射 | Define color mapping for variant types
+col = c("Missense_Mutation" = mycol[1], 
+        "Nonsense_Mutation" = mycol[2], 
+        "Frame_Shift_Del" = mycol[3], 
+        "Frame_Shift_Ins" = mycol[4], 
+        "UTR5" = mycol[5],
+        "Splice_Site" = mycol[6],
+        "Silent" = mycol[7],
+        "UTR3" = mycol[8],
+        "In_Frame_Del" = mycol[9],
+        "Flank5" = mycol[10],
+        "Intron" = mycol[11],
+        "In_Frame_Ins" = mycol[12])
+
+# 创建样本注释信息 | Create sample annotations
+my_annotation = HeatmapAnnotation(df = data.frame(MetaStatus=rep(c("Meta","Local"),c(49,144))),
+                                  col = list(MetaStatus=c("Meta"=jco[2],"Local"=jco[1])))
+
+# 绘制OncoPrint热图并保存为PDF | Generate OncoPrint heatmap and save as PDF
+pdf("oncoprint_mutsigcv_detailed_variationtype.pdf",width = 10,height = 4)
+oncoPrint(mygene, alter_fun = alter_fun, col = col,
+          show_pct = T,                # 左侧显示突变百分比 | Show mutation percentage on left
+          column_title = "",           # 列标题为空 | Empty column title
+          bottom_annotation = my_annotation,  # 底部添加样本注释 | Add sample annotation at bottom
+          show_heatmap_legend=T,       # 显示图例 | Show legend
+          column_title_gp = gpar(fontsize = 8),  # 列标题字体大小 | Column title font size
+          row_names_gp = gpar(fontsize = 7),     # 行名(基因名)字体大小 | Row name font size
+          column_names_gp = gpar(fontsize = 6))  # 列名(样本名)字体大小 | Column name font size
+dev.off()
+```
+
+![](oncoprint_mutsigcv_detailed_variationtype.pdf)
+
+# 附：
+
+作者使用的是Matlab R2017a版本，可以自行百度下载破解，也可采用如下百度网盘下载，附破解方法，见文件夹MATLAB R2017a安装方法.pdf。
+链接：https://pan.baidu.com/s/1koGMNmEALL1FmDakNwHa9A 
+提取码：3et5
+
+小丫使用的是Matlab R2019a的30天试用版本，已运行成功。
+
+```{r}
+sessionInfo()
+```
