@@ -1,0 +1,531 @@
+---
+title: "FigureYa127HeatmapPie"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+绘制相关性热图并添加相关系数扇形图，使用TCGA GBM数据，原图复现。
+
+##Requirement description
+
+Draw a correlation heatmap and add a correlation coefficient pie chart. Use TCGA GBM data to reproduce the original image.
+
+![](example.png)
+
+出自<https://www.tandfonline.com/doi/full/10.1080/2162402X.2017.1328339>
+
+from<https://www.tandfonline.com/doi/full/10.1080/2162402X.2017.1328339>
+
+Figure 4. TIM-3-related T cell immunity and inflammatory activities in glioma. (A, B) The relationship between TIM-3 and T cell immunity in CGGA and TCGA data set.
+
+## 应用场景
+
+左侧是通路的表达矩阵（用gsva算出来的）热图。其实单画这个图，展示通路的表达变化，就可以放进文章里了。还可以参考FigureYa61GSVA的展示方式。
+
+右侧用饼图展示各个通路跟某一个基因（例文用的是TIM-3）的相关性，若正相关则顺时针填充扇形图（红色），若负相关则逆时针填充扇形图（绿色）
+
+##Application scenarios
+
+On the left is the expression matrix of the pathway (calculated using GSVA) heatmap. In fact, just drawing this diagram to show the expression changes of pathways can be included in the article. You can also refer to the display method of FigureYa61GSVA.
+
+On the right side, use a pie chart to show the correlation between each pathway and a certain gene (e.g. TIM-3). If there is a positive correlation, fill the pie chart clockwise (red), and if there is a negative correlation, fill the pie chart counterclockwise (green)
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```{r}
+# 设置CRAN镜像为清华大学镜像站（Set CRAN mirror to Tsinghua University mirror site）
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为中国科学技术大学镜像站（Set Bioconductor mirror to USTC mirror site）
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载clusterProfiler包，用于基因富集分析和功能注释（Load the clusterProfiler package for gene enrichment analysis and functional annotation）
+library(clusterProfiler)
+# 加载org.Hs.eg.db包，包含人类基因注释信息（Load the org.Hs.eg.db package containing human gene annotation information）
+library(org.Hs.eg.db)
+# 加载GSVA包，用于基因集变异分析（Load the GSVA package for gene set variation analysis）
+library(GSVA)
+# 加载biomaRt包，用于访问Ensembl数据库获取基因注释（Load the biomaRt package to access Ensembl databases for gene annotation）
+library(biomaRt)
+# 加载GO.db包，包含基因本体论相关数据库（Load the GO.db package containing Gene Ontology databases）
+library(GO.db)
+# 加载pheatmap包，用于绘制热图（Load the pheatmap package for creating heatmaps）
+library(pheatmap)
+# 加载RColorBrewer包，提供丰富的颜色方案（Load the RColorBrewer package for color palettes）
+library(RColorBrewer)
+
+# 设置环境语言为英文，使报错信息以英文显示（Set environment language to English for English error messages）
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止字符串自动转换为因子类型，避免意外的数据类型转换（Disable automatic conversion of strings to factors to avoid unexpected data type changes）
+options(stringsAsFactors = FALSE) 
+```
+
+
+## 输入文件
+
+easy_input_expr.csv，TCGA-GBM.htseq_fpkm，基因表达谱。跟FigureYa126CorrelationHeatmap用的是同一个文件。从XENA下载得到，值为log2（FPKM+1），为方便传输，小数点后保留2位。需要把基因名换成gene symbol。
+
+easy_input_GO.txt，感兴趣的通路的GO ID。
+
+##Input file
+
+easy_input_expr.csv，TCGA-GBM.htseq_fpkm， Gene expression profile. The same file is used as FigureYa126CorrelationHeatmap. Downloaded from XENA, the value is log2 (FPKM+1), with 2 decimal places reserved for ease of transmission. We need to change the gene name to gene symbol.
+
+easy_input_GO.txt， GO ID of the pathway of interest.
+
+```{r}
+### 读取GMB表达谱 ###
+# 从CSV文件读取表达谱数据，设置首行为列名，第一列为行名，禁用字符串转因子和列名检查（Read GMB expression profile from CSV file, set first row as column names, first column as row names, disable string-to-factor conversion and column name checking）
+expr <- read.csv("easy_input_expr.csv", header = T, row.names = 1, stringsAsFactors = F, check.names = F)
+# 处理行名，取点号前的部分作为新行名（Process row names by taking the part before the dot as new row names）
+rownames(expr) <- sapply(strsplit(rownames(expr),".",fixed = T),"[",1) 
+# 截取列名前15个字符作为新列名（Truncate column names to the first 15 characters）
+colnames(expr) <- substr(colnames(expr),1,15)
+
+# 利用bitr将entrez id 转为 gene symbol name
+# 使用bitr函数将ENSEMBL ID转换为基因符号，去除重复的基因符号映射（Convert ENSEMBL IDs to gene symbols using bitr function, remove duplicate gene symbol mappings）
+ensembl2gs <- bitr(rownames(expr),fromType = "ENSEMBL",toType = "SYMBOL",OrgDb = org.Hs.eg.db)
+ensembl2gs <- ensembl2gs[!duplicated(ensembl2gs$SYMBOL),]
+
+# 根据TCGA样品名的命名规律，提取出肿瘤样本
+# 根据TCGA样本命名规则，提取样本类型编码为01的肿瘤样本（Extract tumor samples with sample type code '01' according to TCGA naming convention）
+tum.sam <- colnames(expr)[which(substr(colnames(expr),14,15) == "01")]
+
+# 生成新的表达谱
+# 筛选基因并按肿瘤样本筛选数据，设置新的行名为基因符号（Filter genes and samples, set gene symbols as row names）
+expr2 <- expr[ensembl2gs$ENSEMBL,tum.sam]
+rownames(expr2) <- ensembl2gs$SYMBOL
+
+# 根据TIM-3表达排序样本（TIM-3即为HAVCR2）
+# 按HAVCR2基因表达值对样本进行升序排序（Sort samples by HAVCR2 (TIM-3) gene expression values in ascending order）
+sam.order <- sort(sapply(expr2["HAVCR2",],as.factor),decreasing = F)
+
+### 读取感兴趣的通路
+# 从文本文件读取感兴趣的GO通路ID（Read GO pathway IDs of interest from text file）
+gosets <- read.table("easy_input_GO.txt")
+gosets <- gosets$V1
+```
+
+## 对感兴趣GO通路做GSVA，从而获得通路的表达矩阵，并计算相关系数
+
+##Perform GSVA on the GO pathway of interest to obtain the expression matrix of the pathway and calculate the correlation coefficient
+
+```{r}
+# 连接到Ensembl数据库的人类基因数据集（使用亚洲镜像）
+# Connect to the human gene dataset in Ensembl database (using Asian mirror)
+ensembl <- useEnsembl(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", mirror = "asia")
+
+# 初始化空列表存储每个GO term对应的基因（Initialize empty list to store genes for each GO term）
+go.list <- list()
+# 遍历每个GO ID，从Ensembl数据库提取相关基因（Loop through each GO ID to fetch associated genes from Ensembl）
+for (i in gosets) {
+  gene.data <- getBM(attributes = c('hgnc_symbol'),
+                     filters = 'go', 
+                     values = i, 
+                     mart = ensembl,
+                     uniqueRows = T)
+  # 特殊处理：手动添加GO:0002852对应的基因（该ID在数据库中无法查询，根据AmiGO2结果赋值为MUC4）
+  # Special handling for GO:0002852 (manually assigned to MUC4 as the ID is not found in the database)
+  if(i == "GO:0002852") { 
+    go.list[[i]] <- "MUC4"
+  } else {
+    go.list[[i]] <- gene.data[,1]
+  }
+}
+
+# 获取并显示GO ID对应的描述信息（Retrieve and display descriptions for GO IDs）
+goterms <- Term(GOTERM)
+goterms <- goterms[names(goterms) %in% gosets]
+goterms
+
+# 基于基因表达矩阵进行GSVA富集分析，评估基因集活性（Perform GSVA enrichment analysis to evaluate gene set activity）
+# 构造GSVA参数对象（指定表达数据和基因集列表）
+# Construct GSVA parameter object (specify expression data and gene set list)
+params <- gsvaParam(exprData = as.matrix(expr2[, names(sam.order)]), 
+                           geneSets = go.list)
+enrich.go <- gsva(params)
+
+# 计算每个通路活性与TIM-3表达量的Spearman相关性（非参数检验，不依赖数据分布）
+# Calculate Spearman correlation between pathway activities and TIM-3 expression (non-parametric test, distribution-free)
+cor.res <- apply(enrich.go, 1, function(x) {return(cor.test(x, as.numeric(sam.order), method = "spearman"))}) 
+cor.res
+```
+
+## 开始画图
+
+这里提供两种绘图方式：baseplot，或pheatmap + pie + 后期
+
+##Start drawing
+
+There are two drawing methods provided here: baseplot or pheatmap+pie+post production
+
+### 方法一：硬核baseplot直接画
+
+**题外话：**使用baseplot绘图非常灵活，也是学习绘图思路的重要途径，但对于大多数使用者来说，复杂图形的baseplot很耗时，尤其是参数的微调。
+
+如果希望快速出图，或者有一定PPT/AI技巧的小伙伴，可直接移步方法二，方法二采用pheatmap + pie + PPT/AI（后期）也能完美解决。
+
+###Method 1: Draw a hardcore baseplot directly
+
+**Off topic: * * Using baseplot for plotting is very flexible and an important way to learn plotting ideas, but for most users, baseplot for complex graphics is time-consuming, especially for fine-tuning parameters.
+
+If you want to quickly generate images or have some PPT/AI skills, you can directly move to method two, which uses pheatmap+pie+PPT/AI (later stage) to solve the problem perfectly.
+
+```{r}
+# 默认不在最终pdf的首页显示layout结构，不过建议初次绘制的时候改为TRUE看一下，方便理解
+# By default, the layout structure is not displayed on the first page of the final PDF. 
+# It is recommended to set this to TRUE for the initial drawing to facilitate understanding.
+showLayout = FALSE 
+
+# 创建一个PDF文件用于保存图形，设置宽度为6英寸，高度为4英寸
+# Create a PDF file to save the plot with a width of 6 inches and height of 4 inches
+pdf("complex heatmap with pie charts by baseplot.pdf",width = 6,height = 4)
+
+# 设置画面布局，相同数字代表同一区块，数字越多代表该区块所占面积越大
+# Set the plot layout. Identical numbers represent the same region, 
+# and more occurrences of a number indicate a larger area for that region.
+layout(matrix(c(1,1,1,1,1,1,1,2,
+                3,3,3,3,3,3,3,4,
+                3,3,3,3,3,3,3,5,
+                3,3,3,3,3,3,3,6,
+                3,3,3,3,3,3,3,7,
+                3,3,3,3,3,3,3,8,
+                3,3,3,3,3,3,3,9,
+                3,3,3,3,3,3,3,10,
+                11,11,12,12,12,12,13,13),
+              byrow = T,nrow = 9))
+
+# 如果showLayout为TRUE，则直观展示画布分布
+# If showLayout is TRUE, visually display the canvas distribution
+if(showLayout) {
+  layout.show(n=13) 
+}
+
+#-------------------------#
+# 画布区域1：绘制图的标题 #
+# Canvas Area 1: Plot the title of the figure #
+#-------------------------#
+
+# 设置基础参数，去掉边框，各边界距离为0
+# Set basic parameters: remove the border and set all margins to 0
+par(bty="n", mgp = c(0,0,0), mar = c(0,0,0,0)) 
+
+# 绘制一个空白点，设置为白色，不显示坐标轴
+# Plot a white point (invisible) and disable displaying axes
+plot(1,1,
+     col = "white", 
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n") 
+
+# 在画布中央添加图标题
+# Add the figure title at the center of the canvas
+text((par("usr")[1]+par("usr")[2])/2, 
+     (par("usr")[3]+par("usr")[4])/2,
+     "Special immune functions of TIM-3",cex = 1.8) 
+
+#---------------------------#
+# 画布区域2：绘制图的子标题 #
+# Canvas Area 2: Plot the subtitle of the figure #
+#---------------------------#
+
+# 设置基础参数，去掉边框，各边界距离为0
+# Set basic parameters: remove the border and set all margins to 0
+par(bty="n", mgp = c(0,0,0), mar = c(0,0,0,0))
+
+# 绘制一个空白点，设置为白色，不显示坐标轴
+# Plot a white point (invisible) and disable displaying axes
+plot(1,1,
+     col = "white", 
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n") 
+
+# 在画布底部上方添加子标题
+# Add the subtitle slightly above the bottom of the canvas
+text((par("usr")[1]+par("usr")[2])/2, 
+     par("usr")[3]+0.3, 
+      "TCGA****",cex = 1.5) 
+
+#---------------------------------#
+# 画布区域3：绘制热图（主要区域） #
+# Canvas Area 3: Plot the heatmap (main area) #
+#---------------------------------#
+
+# 设置参数，只余留左侧空白给纵坐标写text
+# Set parameters, leaving space only on the left for y-axis labels
+par(bty="n", mgp = c(0,0,0), mar = c(0,6.1,0,0)) 
+
+# 生成一个空白图，设置坐标轴范围，不显示坐标轴，不余留画布空白
+# Create a blank plot with specified axes ranges, no axes displayed, and no extra margins
+plot(c(0,ncol(enrich.go)),c(0,nrow(enrich.go)), 
+     col = "white", 
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n", 
+     xaxs="i", yaxs="i") 
+
+# 生成纵坐标标签
+# Generate y-axis labels
+text(y = 0.5:(nrow(enrich.go)-0.5), 
+     par("usr")[1], cex = 1.1,
+     labels = rownames(enrich.go)[nrow(enrich.go):1], 
+     srt = 0, pos = 2, xpd = TRUE)
+
+# 颜色处理部分
+# Color processing section
+
+# 输入矩阵
+# Input matrix
+input_matrix <- enrich.go
+
+# 将输入矩阵的值进行分箱，步长为0.01
+# Bin the values in the input matrix with a step size of 0.01
+tmp <- cut(input_matrix,breaks = seq(floor(min(input_matrix)),ceiling(max(input_matrix)),0.01)) 
+
+# 获取分箱后的区间
+# Get the binning intervals
+rangeMat <- levels(tmp) 
+
+# 生成对应的分箱矩阵
+# Generate the corresponding binned matrix
+cutMat <- matrix(tmp, 
+                 byrow = F, 
+                 nrow = nrow(input_matrix),
+                 dimnames = dimnames(input_matrix)) 
+
+# 创建颜色渐变函数，使用RdYlBu颜色方案
+# Create a color gradient function using the RdYlBu color scheme
+rbPal <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdYlBu"))) 
+
+# 生成与区间数量对应的颜色向量
+# Generate a color vector corresponding to the number of intervals
+col.vec <- rbPal(length(rangeMat)) 
+
+# 为颜色向量命名，便于后续匹配
+# Name the color vector for later matching
+names(rangeMat) <- col.vec 
+
+# 生成和富集得分矩阵对应的颜色矩阵
+# Generate a color matrix corresponding to the enrichment score matrix
+col.mat <- matrix(NA,byrow = F,ncol = ncol(input_matrix),nrow = nrow(input_matrix)) 
+for (i in 1:nrow(input_matrix)) {
+  for (j in 1:ncol(input_matrix)) {
+    col.mat[i,j] <- names(rangeMat[rangeMat == cutMat[i,j]]) 
+  }
+}
+
+# 通过矩形块产生热图
+# Create the heatmap using rectangles
+x_size <- ncol(input_matrix)
+y_size <- nrow(input_matrix)
+
+# 计算各个矩形的坐标
+# Calculate coordinates for each rectangle
+my_xleft = rep(0:(x_size-1),each = y_size) 
+my_xright = my_xleft + 1 
+my_ybottom = rep((y_size-1):0, x_size) 
+my_ytop = my_ybottom + 1 
+
+# 绘制矩形形成热图
+# Draw rectangles to form the heatmap
+rect(xleft = my_xleft,
+     ybottom = my_ybottom,
+     xright = my_xright,
+     ytop = my_ytop,
+     col=col.mat, 
+     border = NA) 
+
+#-----------------------------------#
+# 画布区域4-10：绘制扇形图（共7个） #
+# Canvas Areas 4-10: Plot pie charts (7 in total) #
+#-----------------------------------#
+
+# 汇总相关性分析结果
+# Summarize correlation analysis results
+cor.dat <- NULL
+for (i in 1:length(cor.res)) {
+  tmp <- cor.res[[i]]
+  # 提取相关性系数绝对值
+  # Extract the absolute value of the correlation coefficient
+  # 计算1-相关性系数绝对值
+  # Calculate 1 minus the absolute value of the correlation coefficient
+  # 提取p值
+  # Extract the p-value
+  # 保存相关系数的符号（用于确定扇形颜色和方向）
+  # Save the sign of the correlation coefficient (used to determine pie chart color and direction)
+  cor.dat <- rbind.data.frame(cor.dat,data.frame(rho = abs(tmp$estimate),supp_rho = 1-abs(tmp$estimate),p = tmp$p.value,sign = ifelse(tmp$estimate > 0,"+","-"),stringsAsFactors = F))
+}
+rownames(cor.dat) <- row.names(enrich.go)
+
+# 循环绘制扇形图
+# Loop to draw pie charts
+for (i in 1:nrow(cor.dat)) {
+  if(cor.dat[i,"sign"] == "+") { 
+    # 正相关则顺时针填充扇形图
+    # Clockwise filling for positive correlation
+    clockwise = T 
+    # 根据相关性数决定rgb颜色中红色的透明度
+    # Determine the transparency of red in RGB based on correlation strength
+    piecol <- rgb(1,0,0,cor.dat[i,"rho"]) 
+  } else {
+    # 负相关则逆时针填充扇形图
+    # Counterclockwise filling for negative correlation
+    clockwise = F 
+    # 根据相关性数决定rgb颜色中绿色的透明度
+    # Determine the transparency of green in RGB based on correlation strength
+    piecol <- rgb(0,1,0,cor.dat[i,"rho"]) 
+  }
+  
+  # 设置参数，无边框，无边界距离
+  # Set parameters: no border, no margins
+  par(bty="n", mar = c(0,0,0,0))
+  
+  # 绘制扇形图
+  # Draw the pie chart
+  pie(c(cor.dat[i,"rho"],cor.dat[i,"supp_rho"]),
+      col = c(piecol,"white"), 
+      radius = 1, 
+      labels = NA, 
+      init.angle = 90, 
+      border = "grey40", 
+      clockwise = clockwise) 
+}
+
+#----------------#
+# 画布区域11：空 #
+# Canvas Area 11: Empty #
+#----------------#
+
+# 绘制空白画布
+# Draw an empty canvas
+plot(1,1,
+     col = "white", 
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n") 
+
+#--------------------------#
+# 画布区域12：绘制热图图例 #
+# Canvas Area 12: Plot the heatmap legend #
+#--------------------------#
+
+# 设置边距，允许绘图超出画布边界
+# Set margins and allow plotting outside the canvas
+par(mar=c(2.2,1,0.5,2),xpd = T)
+
+# 生成条形图图例
+# Generate a bar plot legend
+barplot(rep(1,length(col.vec)),border = "NA", space = 0, 
+        ylab="",
+        xlab="",
+        xlim=c(1,length(col.vec)),
+        axes = F, col=col.vec) 
+
+# 添加刻度标签
+# Add tick labels
+text(length(col.vec)/4,-0.9,"-0.5", adj=0.55,cex = 1.2) 
+text(length(col.vec)/2,-0.9,"0", adj=0.55,cex = 1.2) 
+text(length(col.vec)/4*3,-0.9,"0.5", adj=0.55,cex = 1.2) 
+
+#----------------#
+# 画布区域13：空 #
+# Canvas Area 13: Empty #
+#----------------#
+
+# 绘制空白画布
+# Draw an empty canvas
+plot(1,1,
+     col = "white", 
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n") 
+
+# 关闭图形设备
+# Close the graphics device
+invisible(dev.off())
+```
+
+![](complex heatmap with pie charts by baseplot.pdf)
+
+### 方法二：pheatmap + pie + PPT/AI（后期）
+
+**题外话：**个人觉得complexheatmap也能实现，但我在教程里没发现添加pie chart的例子，所以只能等待其他小伙伴去挖掘啦。
+
+方法二依赖输出子图再后期拼接的方式，方便快捷，对有PPT/AI基础的小伙伴很友好，推荐使用。
+
+###Method 2: pheatmap+pie+PPT/AI (later stage)
+
+**Off topic: * * I personally think complexheatmap can also be implemented, but I didn't find any examples of adding pie charts in the tutorial, so I can only wait for other friends to explore.
+
+Method 2 relies on outputting subgraphs and then concatenating them in the later stage, which is convenient and fast, and is very friendly to friends with PPT/AI foundation. It is recommended to use.
+
+```{r}
+# 输出子热图
+# 使用pheatmap包绘制富集分析结果的热图，不进行行列聚类，显示行名，使用指定的颜色渐变
+# Output a sub-heatmap showing the enrichment analysis results without clustering, displaying row names, and using the specified color gradient
+pheatmap(enrich.go,
+         cluster_rows = F,  # 不对行进行聚类（Do not cluster rows）
+         cluster_cols = F,  # 不对列进行聚类（Do not cluster columns）
+         show_rownames = T, # 显示行名（Show row names）
+         show_colnames = F, # 不显示列名（Hide column names）
+         color = col.vec,   # 使用之前定义的颜色向量（Use the pre-defined color vector）
+         main = "Special immune functions of TIM-3 (TCGA)", # 设置热图标题（Set the title of the heatmap）
+         filename = "subfigure of pheatmap.pdf") # 保存热图为PDF文件（Save the heatmap as a PDF file）
+
+# 循环输出每一张子扇形图pie
+# 为每个通路生成单独的扇形图，显示其与TIM-3基因表达的相关性
+# Generate individual pie charts for each pathway showing their correlation with TIM-3 gene expression
+for (i in 1:nrow(cor.dat)) {
+  if(cor.dat[i,"sign"] == "+") { # 判断相关系数符号（Determine the sign of the correlation coefficient）
+    clockwise = T # 若正相关则顺时针填充扇形图（Clockwise filling for positive correlation）
+    piecol <- rgb(1,0,0,cor.dat[i,"rho"]) # 根据相关性数决定rgb颜色中红色的透明度（Set red transparency based on correlation strength）
+  } else {
+    clockwise = F # 若负相关则逆时针填充扇形图（Counter-clockwise filling for negative correlation）
+    piecol <- rgb(0,1,0,cor.dat[i,"rho"]) # 根据相关性数决定rgb颜色中绿色的透明度（Set green transparency based on correlation strength）
+  }
+  
+  # 创建PDF文件，以通路名称命名（替换冒号为下划线以符合文件名规范）
+  # Create a PDF file named after the pathway (replacing colons with underscores for valid filenames)
+  pdf(paste0("subfigure of pie for ",gsub(":","_",rownames(cor.dat)[i]),".pdf"),width = 3,height = 3)
+  # 绘制扇形图，显示相关性比例
+  # Draw a pie chart showing the proportion of correlation
+  pie(c(cor.dat[i,"rho"],cor.dat[i,"supp_rho"]),
+      col = c(piecol,"white"), # 第一个为相关系数的对应颜色，互补区块为白色（Color for correlation and white for the rest）
+      radius = 1, # 扇形半径（Radius of the pie chart）
+      labels = c("",""), # 不显示任何图例（Hide labels）
+      init.angle = 90, # 填充扇形的初始角度，以保证从12点位置开始（Start filling from the 12 o'clock position）
+      border = "grey40", # 扇形外缘灰色（Grey border for the pie slices）
+      clockwise = clockwise) # 控制扇形方向（Control the direction of filling）
+  invisible(dev.off()) # 关闭PDF设备（Close the PDF device）
+}
+```
+
+当前文件夹会生成1个heatmap和多个pie的pdf文件
+
+The current folder will generate one heatmap and multiple pie PDF files
+
+![](subfigure of pheatmap.pdf)
+
+![](subfigure of pie for GO_0002842.pdf)
+
+```{r}
+sessionInfo()
+```
