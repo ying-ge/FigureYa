@@ -1,0 +1,285 @@
+---
+title: "FigureYa106immunotherapy"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 使用knitr包设置全局代码块选项
+# Set global chunk options using knitr package
+```
+
+## 需求描述
+
+复现原文中的方法，画出对比的热图。利用TIDE和GenePattern网站的submap算法预测单个样本或者某亚型对免疫治疗的响应可能性。
+
+##Requirement description
+
+Reproduce the method in the original text and draw a comparison heatmap. Using TIDE and GenePattern's submap algorithm to predict the likelihood of a single sample or subtype responding to immunotherapy.
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S1476558619301307>
+
+from<https://www.sciencedirect.com/science/article/pii/S1476558619301307>
+
+**注意：**由于包含原文数据，若涉及到注释文件亚型及其他相关数据的使用，请引用：
+Lu X, Jiang L, Zhang L, et al. Immune Signature-Based Subtypes of Cervical Squamous Cell Carcinoma Tightly Associated with Human Papillomavirus Type 16 Expression, Molecular Features, and Clinical Outcome[J]. Neoplasia, 2019, 21(6): 591-601.
+
+**Note: * * Due to the inclusion of original data, if it involves the use of annotation file subtypes and other related data, please cite:
+Lu X, Jiang L, Zhang L, et al. Immune Signature-Based Subtypes of Cervical Squamous Cell Carcinoma Tightly Associated with Human Papillomavirus Type 16 Expression, Molecular Features, and Clinical Outcome[J]. Neoplasia, 2019, 21(6): 591-601.
+
+## 应用场景
+
+预测单个样本或者某亚型对免疫治疗的响应可能性。
+
+TIDE算法网址 http://tide.dfci.harvard.edu/
+
+submap算法网址 https://cloud.genepattern.org/gp
+
+##Application scenarios
+
+Predict the likelihood of a single sample or subtype responding to immunotherapy.
+
+TIDE algorithm website http://tide.dfci.harvard.edu/
+
+Submap algorithm website https://cloud.genepattern.org/gp
+
+## 环境设置
+
+##Environment settings
+
+```{r}
+# 加载pheatmap包，用于绘制热图 | Load the pheatmap package for drawing heatmaps
+library(pheatmap)
+
+# 设置系统环境，使R显示英文错误信息 | Set system environment to display error messages in English
+Sys.setenv(LANGUAGE = "en") 
+
+# 全局选项设置：禁止将字符串自动转换为因子类型 | Global option: Prevent automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## TIDE预测单样本免疫检查点抑制剂响应性
+
+两个输入文件，处理成TIDE所需的格式，在线运行后输出TIDE_output.csv，然后检验免疫治疗响应性和亚型是否相关，p<0.05表示相关。
+
+easy_input_expr.txt，基因表达矩阵。
+
+easy_input_anno.txt，分组信息。示例数据里的C1和C2分别对应"HPV16-IMM"和"HPV16-KRT"。也可以是按某个基因的突变类型分组、或按某个基因表达量高低分组。
+
+两个文件的sample ID必须一致。这两个输入文件跟FigureYa105GDSC一样。
+
+##TIDE predicts single sample immune checkpoint inhibitor responsiveness
+
+Two input files are processed into the format required by TIDE, and after online execution, TIDEoutputting. csv is output. Then, immune therapy responsiveness and subtype are checked for correlation, with p<0.05 indicating correlation.
+
+easy_input_expr.txt， Gene expression matrix.
+
+easy_input_anno.txt， Grouping information. C1 and C2 in the example data correspond to "HPV16-IMM" and "HPV16-KRT", respectively. It can also be grouped according to the mutation type of a certain gene, or according to the high or low expression level of a certain gene.
+
+The sample IDs of the two files must be consistent. These two input files are the same as FigureYa105GDSC.
+
+```{r}
+# 表达矩阵 | Expression matrix
+# 从文本文件读取表达数据，设置制表符为分隔符，第一列作为行名，包含表头 | Read expression data from text file, set tab as separator, use first column as row names, include header
+dat <- read.table("easy_input_expr.txt",sep = "\t",row.names = 1,header = T,stringsAsFactors = F,check.names = F)
+# 查看数据前3行3列，用于数据质量检查 | View first 3 rows and 3 columns for data quality check
+dat[1:3, 1:3]
+
+# 分组信息 | Grouping information
+# 从文本文件读取样本注释信息，设置制表符为分隔符，第一列作为行名，包含表头 | Read sample annotation from text file, set tab as separator, use first column as row names, include header
+ann <- read.table("easy_input_anno.txt",sep = "\t",row.names = 1,header = T,stringsAsFactors = F,check.names = F)
+# 查看注释数据前几行 | View first few lines of annotation data
+head(ann)
+# 统计每个免疫聚类组的样本数量 | Count samples in each immune cluster group
+table(ann$ImmClust)
+```
+
+**注意：**TIDE网址首页提示数据需要一定的标准化
+
+**Attention: * * TIDE website homepage prompts that data needs to be standardized to a certain extent
+
+Note: The gene expression value should be normalized toward a control sample which could be either normal tissues related with a cancer type or mixture sample from diverse tumor samples. 
+
+The log2(RPKM+1) values from a RNA-seq experiment may not be meaningful unless a good reference control is available to adjust the batch effect and cancer type difference. 
+
+In our study, we used the all sample average in each study as the normalization control.
+
+```{r}
+# 创建TIDE分析用的数据副本 | Create copy of data for TIDE analysis
+TIDE <- dat
+
+# 这里为了得到比较好的结果，采用two direction median centered | Two-direction median centering for better results
+# 第一步：按列进行中位数中心化（减去样本中位数） | Step 1: Column-wise median centering (subtract sample median)
+TIDE <- sweep(TIDE, 2, apply(TIDE, 2, median, na.rm=T))
+# 第二步：按行进行中位数中心化（减去基因中位数） | Step 2: Row-wise median centering (subtract gene median)
+TIDE <- sweep(TIDE, 1, apply(TIDE, 1, median, na.rm=T))
+
+# 将处理后的矩阵写入文件，作为TIDE软件的输入 | Write processed matrix to file for TIDE software input
+write.table(TIDE, "TIDE_input.self_subtract", sep="\t", row.names=T, col.names=NA, quote=F)
+
+#------------------------------------#
+# 请参照文件夹中的TIDE使用教程.docx完成该部分#
+# Please refer to TIDE_manual.docx in folder for next steps #
+#------------------------------------#
+
+# 参照文件夹中TIDE使用教程得到输出文件TIDE_output.csv | Read TIDE software output after following tutorial
+TIDE.res <- read.csv("TIDE_output.csv", header=T, row.names=1, check.names=F, stringsAsFactors=F)
+
+# 将TIDE预测结果添加到样本注释表中 | Add TIDE prediction results to sample annotation table
+ann$TIDE <- TIDE.res[rownames(ann), "Responder"]
+
+# 统计TIDE响应性与免疫聚类的交叉表 | Contingency table of TIDE response vs immune clusters
+print(table(ann$TIDE, ann$ImmClust))
+
+# 检验免疫治疗响应性和亚型是否相关，p<0.05表示相关 | Fisher's exact test for association
+# p < 0.05 indicates significant association between response and subtypes
+print(fisher.test(table(ann$TIDE, ann$ImmClust)))
+```
+
+## submap预测亚型的免疫治疗响应性 ###
+
+输入表达矩阵和样品信息，整理成submap所需的格式，在线运行后输出SubMap_SubMapResult.txt用于画图。
+
+##Submap predicts immune therapy responsiveness of subtypes###
+
+Input the expression matrix and sample information, organize them into the format required for submap, run them online, and output SubMap_SubMapResult.exe for drawing.
+
+```{r}
+# 自定义函数用来产生submap需要的数据格式 | Custom function to generate SubMap input format
+# 参数说明 | Parameters:
+# in_gct: 输入的基因表达矩阵 | Input gene expression matrix
+# gct_file: 输出的GCT格式文件名 | Output GCT format file name
+# cls_file: 输出的CLS格式文件名 | Output CLS format file name
+# sam_info: 样本信息数据框 | Sample information data frame
+# type_name: 分组类型列名 | Column name for grouping type
+generateInputFileForSubMap <- function(in_gct, gct_file, cls_file, sam_info, type_name = "type"){
+  # 为表达矩阵添加基因ID和描述列 | Add gene ID and description columns to expression matrix
+  in_gct <- data.frame(GeneID=rownames(in_gct),
+                       description="na",
+                       in_gct, 
+                       stringsAsFactors = F,
+                       check.names = F)
+  # 写入GCT文件头部信息 | Write GCT file header
+  cat("#1.2\n", file = gct_file)
+  cat(nrow(in_gct),"\t",ncol(in_gct)-2,"\n", file = gct_file, append = T)
+  cat(paste(colnames(in_gct), collapse = "\t"),"\n", file = gct_file, append = T)
+  # 逐行写入表达数据 | Write expression data line by line
+  for(i in 1:nrow(in_gct)) cat(paste(in_gct[i,], collapse = "\t"),"\n", file = gct_file, append = T)
+  
+  # 写入CLS文件头部信息 | Write CLS file header
+  cat(nrow(sam_info),length(levels(factor(sam_info$rank))),1, "\n", file = cls_file )
+  cat("#", paste0(levels(factor(sam_info[, type_name])), collapse = " " ), "\n", file = cls_file, sep = "", append = T)
+  # 写入样本分组信息 | Write sample group information
+  cat(as.numeric(factor(sam_info[, type_name])), file = cls_file, append = T)
+}
+
+# 创建submap需要的数据格式 (SKCM) | Prepare SubMap input for SKCM dataset
+# 读取免疫治疗表达数据 | Read immunotherapy expression data
+skcm.immunotherapy.logNC <- read.table("skcm.immunotherapy.47samples.log2CountsNorm.txt",sep = "\t",row.names = 1,header = T,check.names = F,stringsAsFactors = F) 
+# 基因名大写以匹配其他数据集 | Convert gene names to uppercase for consistency
+rownames(skcm.immunotherapy.logNC) <- toupper(rownames(skcm.immunotherapy.logNC)) 
+# 读取样本信息 | Read sample information
+skcm.immunotherapy.info <- read.table("skcm.immunotherapy.47sampleInfo.txt",sep = "\t",row.names = 1,header = T,check.names = F,stringsAsFactors = F)
+
+# 按标签排序样本 | Sort samples by label
+skcm.immunotherapy.info <- skcm.immunotherapy.info[order(skcm.immunotherapy.info$label),]
+# 为不同治疗组分配等级 | Assign ranks to different treatment groups
+# 1: CTLA4_noR 2: CTLA4_R 3:PD1_noR 4:PD1_R
+skcm.immunotherapy.info$rank <- rep(c(1,2,3,4),times=as.character(table(skcm.immunotherapy.info$label))) 
+
+# 创建submap需要的数据格式 (TCGA) | Prepare SubMap input for TCGA dataset
+# 读取过滤后的表达矩阵 | Read filtered expression matrix
+tmp <- read.table("expr_data_lowfiltered.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1) 
+# 取两个数据集的基因交集 | Get intersecting genes between datasets
+GENELIST <- intersect(rownames(tmp),rownames(skcm.immunotherapy.logNC)) 
+
+# 设置样本信息 | Set sample information
+sam_info <- skcm.immunotherapy.info
+# 提取交集基因的表达数据 | Extract expression data for intersecting genes
+in_gct <- skcm.immunotherapy.logNC[GENELIST,rownames(skcm.immunotherapy.info)]
+
+# 产生输出数据的文件名 | Generate output file names
+gct_file <- "skcm.immunotherapy.for.SubMap.gct"
+cls_file <- "skcm.immunotherapy.for.SubMap.cls"
+# 生成SubMap输入文件 | Generate SubMap input files
+generateInputFileForSubMap(in_gct = in_gct, gct_file = gct_file, cls_file = cls_file, sam_info = sam_info, type_name = "rank")
+
+# 提取亚型的样本，顺序排列 | Extract samples for each subtype and sort
+samples.C1 <- rownames(ann[which(ann$ImmClust == "C1"),])
+samples.C2 <- rownames(ann[which(ann$ImmClust == "C2"),])
+
+# 创建亚型样本信息 | Create subtype sample information
+sam_info <- data.frame("ImmClust"=c(samples.C1,samples.C2),row.names = c(samples.C1,samples.C2))
+# 为不同亚型分配等级 | Assign ranks to different subtypes
+# 1: C1,即HPV16-IMM 2: C2,即HPV16-KRT
+sam_info$rank <- rep(c(1,2),times=c(length(samples.C1),length(samples.C2))) 
+
+# 产生输出数据的文件名 | Generate output file names
+gct_file <- "Immune2.for.SubMap.gct"
+cls_file <- "Immune2.for.SubMap.cls"
+
+# 对数转换表达数据以匹配示例格式 | Log-transform expression data to match example format
+in_gct <- log2(tmp[GENELIST,rownames(sam_info)] + 1) 
+# 生成SubMap输入文件 | Generate SubMap input files
+generateInputFileForSubMap(in_gct = in_gct, gct_file = gct_file, cls_file = cls_file, sam_info = sam_info, type_name = "rank")
+
+#--------------------------------------#
+# 请参照文件夹submap使用教程完成该部分 #
+# Please refer to SubMap tutorial for next steps #
+#--------------------------------------#
+
+# 参照文件夹中submap使用教程得到输出文件SubMap_SubMapResult.txt
+```
+
+## 开始画图
+
+## start plot
+
+```{r}
+# 定义热图颜色渐变 | Define color gradient for heatmap
+# 从紫色到黄色的渐变色 | Purple to yellow color gradient
+heatmap.YlGnPe <- c("#440259","#345F8C","#228C8A","#78CE51","#FAE71F")
+cherry    <- "#700353"  # 樱桃红色，用于注释 | Cherry red for annotations
+lightgrey <- "#dcddde"  # 浅灰色，用于注释 | Light grey for annotations
+
+# 把submap结果/130452/SubMap_SubMapResult.txt文件中的值填入相应的位置
+# Fill values from SubMap_SubMapResult.txt file into the matrix
+# 输入文件中的名义p值和校正p值绘制热图 | Heatmap of nominal and corrected p-values
+tmp <- matrix(c(0.937,0.453,0.967,0.001,0.284,0.261,0.194,0.997, 
+                1,1,1,0.008,1,1,1,1), # Bonferroni校正p值 | Bonferroni corrected p-values
+              nrow = 4, byrow = T, # 4行，按行填充数据 | 4 rows, fill matrix by row
+              # 设置行列名称 | Set row and column names
+              dimnames = list(c("HPV16-IMM_p","HPV16-KRT_p","HPV16-IMM_b","HPV16-KRT_b"), 
+                              c("CTAL4-noR","CTLA4-R","PD1-noR","PD1-R")))
+
+# 使用pheatmap包绘制热图 | Create heatmap using pheatmap package
+pheatmap(tmp, 
+         cellwidth = 30, cellheight = 30, # 设置单元格大小 | Set cell dimensions
+         cluster_rows = F, cluster_cols = F, # 不进行聚类 | Disable clustering
+         color = heatmap.YlGnPe[5:1], # 使用自定义颜色渐变 | Use custom color gradient
+         gaps_row = 2, # 在第2行后添加分隔线 | Add gap after 2nd row
+         # 添加行注释 | Add row annotations
+         annotation_row = data.frame(
+           pvalue = c("Nominal p value","Nominal p value","Bonferroni corrected","Bonferroni corrected"),
+           row.names = rownames(tmp)
+         ),
+         # 设置注释颜色 | Set annotation colors
+         annotation_colors = list(
+           pvalue = c("Nominal p value" = lightgrey, "Bonferroni corrected" = cherry)
+         ),
+         filename = "heatmap_submap.pdf") # 保存为PDF文件 | Save as PDF file
+
+# 原文中热图上的数值是AI后期加上去的 | Note: Numerical values were added manually in the original paper
+```
+
+![](heatmap_submap.pdf)
+
+```{r}
+sessionInfo()
+```
