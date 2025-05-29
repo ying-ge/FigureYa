@@ -1,0 +1,311 @@
+---
+title: "FigureYa102multipanelROC"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+FigureYa24ROC能拿到4个miRNA的ROC，每个miRNA一条线。这里的Figure5E是把上述4条miRNA都一起进行预测，Figure6根据4个miRNA建立logistic regression model，然后对不同病理分期的肿瘤阶段进行预测。
+
+##Requirement description
+
+Figure Ya24ROC can obtain ROC for 4 miRNAs, with one line for each miRNA. Figure 5E predicts all four miRNAs together, while Figure 6 establishes a logistic regression model based on the four miRNAs and predicts tumor stages at different pathological stages.
+
+![](example.png)
+
+出自<https://www.nature.com/articles/bjc2014489>
+
+from<https://www.nature.com/articles/bjc2014489>
+
+Figure 5. Receiver operating characteristic (ROC) curves for the ability of the four individual miRNAs (A–D) and **the 4-miRNA panel (E)** to differentiate the CAC patients from the control group in the training phase. Comparison of ROC curves for the ability of the 4-miRNA panel and carcinoembryonic antigen (CEA) (F) to differentiate the CAC patients from the control group in the validation phase.
+
+**对图的解读：**其中Figure 5E是多变量panel下逻辑回归的ROC，Figure 5F是该模型在验证集中的应用。Figure 5和6没有本质区别，只是响应变量改变了，模型没有变化。这里将提供构建multiple-biomarker的predictive model的方法，用ROC评价，及其在验证集中的performance，画出对比的ROC图。
+
+**Interpretation of the figures: * * Among them, Figure 5E is the ROC of logistic regression under multivariate panel, and Figure 5F is the application of the model in the validation set. There is no essential difference between Figures 5 and 6, only that the response variables have changed, while the model has not changed. Here we will provide a method for constructing a predictive model of multiple biomarkers, using ROC evaluation and its performance in the validation set, and draw a comparative ROC graph.
+
+## 应用场景
+
+利用训练集构建多变量二分类逻辑回归模型，将模型应用于测试集计算预测概率，比较二者的ROC，画图。
+
+如果需要计算并绘制单个biomarker的ROC，请参考FigureYa24ROC。
+
+##Application scenarios
+
+Build a multivariate binary logistic regression model using the training set, apply the model to the test set to calculate the prediction probability, compare the ROC of the two, and draw a graph.
+
+If you need to calculate and plot the ROC of a single biomarker, please refer to FigureYa24ROC.
+
+## 环境设置
+
+##Environment settings
+
+```{r}
+# 加载pROC包，用于ROC曲线分析和计算
+# Load the pROC package for ROC curve analysis and calculation
+library(pROC)
+
+# 设置环境语言为英文，确保错误信息以英文显示
+# Set the environment language to English to display error messages in English
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁用字符串自动转换为因子的功能
+# Disable the automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 输入文件
+
+easy_input_train.txt，easy_input_test.txt，训练集和测试集，格式一致。第一列是样本ID，第二列为分组（二分类），之后各列是基因表达量。不仅限于基因表达量，还可以是其他量化指标。
+
+##Input file
+
+easy_input_train.txt，easy_input_test.txt， The training set and test set have the same format. The first column is sample ID, the second column is grouping (binary classification), and the following columns are gene expression levels. Not limited to gene expression levels, it can also be other quantitative indicators.
+
+```{r}
+# 读取训练集数据，该数据集存储在制表符分隔的文本文件中
+# 读取时不检查列名有效性，禁止自动转换字符串为因子，使用首行为列名，首列为行名
+# Read the training dataset stored in a tab-separated text file
+# During reading, column names are not checked for validity, automatic conversion of strings to factors is disabled, 
+# the first row is used as column names, and the first column as row names
+train_df <- read.table("easy_input_train.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+
+# 显示训练集数据的前3行和前3列，用于快速查看数据结构
+# Display the first 3 rows and 3 columns of the training dataset for a quick data structure overview
+train_df[1:3,1:3]
+
+# 读取测试集数据，该数据集存储在制表符分隔的文本文件中
+# 读取时不检查列名有效性，禁止自动转换字符串为因子，使用首行为列名，首列为行名
+# Read the test dataset stored in a tab-separated text file
+# During reading, column names are not checked for validity, automatic conversion of strings to factors is disabled, 
+# the first row is used as column names, and the first column as row names
+test_df <- read.table("easy_input_test.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = 1)
+
+# 显示测试集数据的前3行和前3列，用于快速查看数据结构
+# Display the first 3 rows and 3 columns of the test dataset for a quick data structure overview
+test_df[1:3,1:3]
+```
+
+## 利用训练集构建多变量二分类逻辑回归模型
+
+##Constructing a Multivariate Binary Logistic Regression Model Using a Training Set
+
+```{r}
+# 获取训练集的所有列名（变量名）
+# Get all column names (variable names) of the training dataset
+n <- colnames(train_df) 
+
+# 动态生成逻辑回归模型的公式，排除目标变量Group
+# Dynamically generate the formula for the logistic regression model, excluding the target variable Group
+f <- as.formula(paste('Group ~', paste(n[!n %in% 'Group'], collapse = ' + '))) 
+
+# 构建二分类逻辑回归模型
+# 参数说明：
+# f: 使用前面生成的全变量公式
+# data: 指定训练数据集
+# family = binomial: 二分类问题使用二项式分布
+# Build a binary classification logistic regression model
+# Parameter description:
+# f: Use the full variable formula generated earlier
+# data: Specify the training dataset
+# family = binomial: Use binomial distribution for binary classification problems
+logit_model <- glm(f,data=train_df, family = binomial) 
+
+# 若不需要全变量模型，可手动选择纳入逻辑回归的变量，例如选择CD86和FOS
+# If you don't need a full variable model, you can manually select variables to include in the logistic regression, such as CD86 and FOS
+#logit_model <- glm(Group ~ CD86 + FOS, data=train_df,family = binomial)   
+
+# 使用逐步回归法筛选变量（向后消除法）
+# 参数说明：
+# logit_model: 初始的全变量模型
+# direction = 'backward': 指定向后逐步回归
+# 也可以选择'both'（双向）或'forward'（向前）方法
+# 也可以使用LASSO等其他变量筛选方法
+# Use stepwise regression for variable selection (backward elimination)
+# Parameter description:
+# logit_model: The initial full variable model
+# direction = 'backward': Specify backward stepwise regression
+# You can also choose 'both' (bidirectional) or 'forward' methods
+# Other variable selection methods such as LASSO can also be used
+logit_step <- step(logit_model, direction = 'backward') 
+
+# 查看逐步回归后的模型摘要
+# View the summary of the model after stepwise regression
+summary(logit_step)
+
+# 在训练集上进行预测并评估模型效能
+# 创建包含预测概率、真实标签的数据框
+# 参数说明：
+# Prob: 预测概率，保留四位小数
+# GoldStandard: 真实标签（训练集中的Group列）
+# Predict on the training set and evaluate model performance
+# Create a data frame containing predicted probabilities and true labels
+# Parameter description:
+# Prob: Predicted probabilities, rounded to four decimal places
+# GoldStandard: True labels (Group column in the training set)
+pred_train <- data.frame(Prob = round(predict(logit_step, newdata = train_df,type="response"),4), GoldStandard = train_df$Group, stringsAsFactors = F)
+
+# 计算训练集上的ROC曲线并绘制
+# 参数说明：
+# pred_train[,2]: 真实标签列
+# pred_train[,1]: 预测概率列
+# ylim=c(0,1): 设置Y轴范围为0到1
+# xlim=c(1,0): 设置X轴范围为1到0（传统ROC曲线方向）
+# smooth=F: 不绘制平滑曲线
+# ci=TRUE: 计算并显示置信区间
+# legacy.axes=T: 使用传统的ROC曲线坐标轴（1-specificity从0到1）
+# Calculate and plot the ROC curve on the training set
+# Parameter description:
+# pred_train[,2]: True label column
+# pred_train[,1]: Predicted probability column
+# ylim=c(0,1): Set the Y-axis range from 0 to 1
+# xlim=c(1,0): Set the X-axis range from 1 to 0 (traditional ROC curve direction)
+# smooth=F: Do not draw a smoothed curve
+# ci=TRUE: Calculate and display confidence intervals
+# legacy.axes=T: Use traditional ROC curve axes (1-specificity from 0 to 1)
+roc.train <- plot.roc(pred_train[,2], pred_train[,1], ylim=c(0,1),xlim=c(1,0), 
+              smooth=F, 
+              ci=TRUE, 
+              legacy.axes=T)
+```
+
+## 将模型应用于测试集计算预测概率
+
+##Apply the model to the test set to calculate the prediction probability
+
+```{r}
+# 在测试集上进行预测并准备评估数据
+# 创建包含预测概率和真实标签的数据框
+# Prob列存储预测概率（保留四位小数）
+# GoldStandard列存储真实标签（来自测试集的Group列）
+# Predict on the test set and prepare data for evaluation
+# Create a data frame containing predicted probabilities and true labels
+# The Prob column stores predicted probabilities (rounded to four decimal places)
+# The GoldStandard column stores true labels (from the Group column of the test set)
+pred_test <- data.frame(Prob = round(predict(logit_step, newdata = test_df,type="response"),4), GoldStandard = test_df$Group, stringsAsFactors = F)
+
+# 计算并绘制测试集的ROC曲线
+# 参数说明：
+# pred_test[,2]: 真实标签列
+# pred_test[,1]: 预测概率列
+# ylim=c(0,1): 设置Y轴范围为0到1
+# xlim=c(1,0): 设置X轴范围为1到0（传统ROC曲线方向）
+# smooth=F: 不使用平滑处理
+# ci=TRUE: 计算并显示置信区间
+# legacy.axes=T: 使用传统坐标轴（横轴为1-Specificity，从0到1）
+# Calculate and plot the ROC curve for the test set
+# Parameter description:
+# pred_test[,2]: True label column
+# pred_test[,1]: Predicted probability column
+# ylim=c(0,1): Set Y-axis limits from 0 to 1
+# xlim=c(1,0): Set X-axis limits from 1 to 0 (traditional ROC curve direction)
+# smooth=F: Do not use smoothing
+# ci=TRUE: Calculate and display confidence intervals
+# legacy.axes=T: Use traditional axes (X-axis is 1-Specificity, ranging from 0 to 1)
+roc.test <- plot.roc(pred_test[,2], pred_test[,1], ylim=c(0,1),xlim=c(1,0),
+                      smooth=F, # Draw a smooth curve
+                      ci=TRUE, 
+                      legacy.axes=T)# Use the plotting style of most papers, where the x-axis is "1-specificity" from 0 to 1
+```
+
+## ROC比较
+
+##ROC comparison
+
+```{r}
+# 比较训练集和测试集ROC曲线的差异
+# 使用bootstrap方法进行统计检验
+# 参数说明：
+# roc.train: 训练集ROC对象
+# roc.test: 测试集ROC对象
+# method="bootstrap": 使用自助法计算p值
+# Compare the ROC curves between training and test sets
+# Use bootstrap method for statistical testing
+# Parameter description:
+# roc.train: ROC object of the training set
+# roc.test: ROC object of the test set
+# method="bootstrap": Use bootstrap method to calculate p-value
+compare.roc <- roc.test(roc.train, roc.test, method="bootstrap")
+
+# 根据比较结果输出结论
+# 若p值大于0.05，说明训练集和测试集上的模型性能无显著差异
+# 若p值小于等于0.05，说明存在显著差异
+# Output the conclusion based on the comparison result
+# If p-value > 0.05, there is no significant difference in model performance between training and test sets
+# If p-value ≤ 0.05, there is a significant difference
+if(compare.roc$p.value > 0.05) {
+  cat(paste0("p = ",compare.roc$p.value,"\nNo statiscal difference in evaluating model performence on train dataset or test dataset!\n"))
+} else {
+  cat(paste0("p = ",compare.roc$p.value,"\nStatistical difference exsits in evaluating model performence on train dataset or test dataset!\n"))
+}
+```
+
+## 开始画图
+
+个人比较喜欢baseplot绘制ROC，这样更灵活。因为有时可能需要在图片上点出一个特定的灵敏度特异度组合（比如某专家的判断与金标准的比较）。
+
+##Start drawing
+
+I personally prefer baseplot to plot ROC, as it is more flexible. Because sometimes it may be necessary to highlight a specific combination of sensitivity and specificity on the image (such as comparing an expert's judgment with the gold standard).
+
+```{r}
+### 设置颜色 ###
+# Define colors using hexadecimal codes
+# 蓝色用于表示训练集
+# Blue color for the training set
+blue <- "#0093FF"
+# 桃红色用于表示测试集
+# Peach color for the test set
+peach  <- "#E43889"
+
+# 创建图例文本，包含训练集和测试集的AUC值及其95%置信区间
+# 以及两个ROC曲线比较的p值
+# Create legend text including AUC values with 95% confidence intervals
+# for both training and test sets, and the p-value from ROC comparison
+legend.paste <- c(paste0("Train dataset AUC: ",round(roc.train$auc,3), " (",paste0(round(roc.train$ci[1],3),"-",round(roc.train$ci[3],3)),")"),
+                  paste0("Test dataset AUC: ",round(roc.test$auc,3)," (",paste0(round(roc.test$ci[1],3),"-",round(roc.test$ci[3],3)),")"),
+                  paste0("Train vs. Test P ",ifelse(round(compare.roc$p.value,3) < 0.001,"< 0.001",paste0("= ",round(compare.roc$p.value,3)))))
+
+# 输出ROC曲线到PDF文件
+# Save the ROC curves to a PDF file
+pdf("multipanelROC.pdf",width = 4.5,height = 5)
+
+# 绘制训练集ROC曲线
+# Plot the ROC curve for the training set
+plot(1-roc.train$specificities, roc.train$sensitivities, 
+     col=blue, xlab="1-Specificity (FPR)", main="", ylab="Sensitivity (TPR)",
+     lwd=2, type="l",  xlim=c(0,1),ylim=c(0,1))
+
+# 添加测试集ROC曲线
+# Add the ROC curve for the test set
+lines(x=1-roc.test$specificities,y=roc.test$sensitivities, 
+      lwd=2,type="l",col=ggplot2::alpha(peach,0.7)) 
+
+# 添加参考线（对角线）
+# Add the reference line (diagonal)
+lines(x=c(0,1),y=c(0,1),lwd=1.5,lty=2,col="grey40")
+
+# 添加图例说明
+# Add legend
+legend("bottomright", bty="n", 
+       fill=c(blue,peach,"NA"), 
+       legend.paste,
+       cex=.8, border=NA, y.intersp=1, x.intersp=0.2 )
+
+# 关闭图形设备
+# Close the graphics device
+invisible(dev.off())
+```
+
+![](multipanelROC.pdf)
+
+```{r}
+sessionInfo()
+```
