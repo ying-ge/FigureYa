@@ -1,0 +1,444 @@
+---
+title: "FigureYa101PCA"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+RNA-seq的PCA图，同一组用相同颜色，多次重复（批次）用不同形状。我的分组很多，3次重复，不需要像FigureYa38PCA那样画圈画箭头。
+
+##Requirement description
+
+PCA plot of RNA seq, with the same color for the same group and different shapes for multiple repetitions (batches). I have many groups and repeat them three times, so I don't need to draw circles or arrows like in FigureYa38PCA.
+
+![](example.png)
+
+出自<http://genesdev.cshlp.org/content/32/2/96>
+
+from<http://genesdev.cshlp.org/content/32/2/96>
+
+## 应用场景
+
+场景一：每个分组内的样品较多，是不同批次获得的。如果能用各种形状来区分批次的话，就能一眼看出哪个批次远离其他批次，有助于判断批次效应的影响。
+
+场景二：每个分组内的样品是2到n次生物学重复获得的。如果能用各种形状来区分不同重复的话，就能一眼看出哪次重复远离其他重复，有助于判断去掉哪个离群样品。
+
+如果想画圈和箭头，或者无法提供重复或批次batch的信息，请使用FigureYa38PCA。
+
+不仅限于RNA-seq，同样适用于其他类型的数据。
+
+##Application scenarios
+
+Scenario 1: Each group has a large number of samples obtained from different batches. If various shapes can be used to distinguish batches, it can be seen at a glance which batch is far away from other batches, which helps to determine the impact of batch effects.
+
+Scenario 2: The samples within each group are obtained from 2 to n biological replicates. If various shapes can be used to distinguish different repetitions, it can be seen at a glance which repetition is far away from other repetitions, which helps to determine which outlier sample to remove.
+
+If you want to draw circles and arrows, or cannot provide information on duplicates or batches, please use FigureYa38PCA.
+
+Not limited to RNA seq, it also applies to other types of data.
+
+## 环境设置
+
+##Environment settings
+
+```{r}
+# 加载stringr包，提供强大的字符串处理功能
+# Load the stringr package, which provides powerful string processing functions
+library(stringr)
+
+# 设置系统环境，使R显示英文错误信息
+# Set the system environment to display English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 全局选项设置：禁止将字符型变量自动转换为因子类型
+# Global option setting: Prevent automatic conversion of character variables to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 自定义函数
+
+包括PCA分析过程以及出图，参数设置：
+
+- indata 是一个矩阵，列为样本，行为观测
+- batch 是一个数据框，必须提供批次的信息，否则请使用FigureYa38PCA
+- batchvar 是批次的变量名，这里默认batch的列名
+- position 是最后出图时图例的位置，从以下位置中选择："bottomright", "bottom", "bottomleft", "left", "topleft", "top", "topright", "right" and "center". 
+- pch.original 是用于映射replicate形状的，默认从pch=16实心原点开始，到pch=25，一共10种实心图案可供映射，也可以自己选择pch形状起始点，参考：http://www.sthda.com/english/wiki/r-plot-pch-symbols-the-different-point-shapes-available-in-r
+- withoutgrid 是一个逻辑变量，指示是否要绘制背景网格（例文的图有网格，个人不推荐）
+- 如果想输出样本ID，可以将showID设为TRUE，但样本量大的时候不推荐，图会看不清楚
+- 其他参数可保持默认
+- 函数细节可根据需要自己修改，比如batch的形状（pch参数）
+ 
+ ##Custom functions
+
+Including PCA analysis process and plotting, parameter settings:
+
+-Indata is a matrix with columns as samples and behavioral observations
+-Batch is a data box, and batch information must be provided. Otherwise, please use FigureYa38PCA
+-Batchvar is the variable name of the batch, which defaults to the column name of the batch
+-Position is the position of the legend when the final image is generated. Choose from the following positions: "bottomright", "bottom", "bottomleft", "left", "topleft", "top", "topright", "right", and "center"
+-PCH. Original is used to map replica shapes. By default, it starts from the solid origin at PCH=16 and ends at PCH=25. There are a total of 10 solid patterns available for mapping, or you can choose your own starting point for the PCH shape. Please refer to: http://www.sthda.com/english/wiki/r-plot-pch-symbols-the-different-point-shapes-available-in-r
+-Withoutgrid is a logical variable that indicates whether to draw a background grid (the example image has a grid, which I personally do not recommend)
+-If you want to output the sample ID, you can set showID to TRUE, but it is not recommended when the sample size is large, as the image may not be clear
+-Other parameters can remain default
+-The details of the function can be modified as needed, such as the shape of the batch (pch parameter)
+
+```{r}
+# 功能：基于主成分分析(PCA)绘制批次效应图
+# Function: Draw batch effect plot based on Principal Component Analysis (PCA)
+# 参数：
+# indata: 输入数据矩阵，行表示特征，列表示样本
+# batch: 批次信息数据框
+# batchvar: 批次变量名称，默认为批次数据框的列名
+# fig.dir: 图片输出目录
+# PCA.fig.title: PCA图的标题
+# pos1: 第一个图例的位置，默认为"bottomright"
+# pos2: 第二个图例的位置，默认为"topright"
+# xy: 要绘制的主成分，默认为前两个主成分
+# pch.orginal: 原始点的形状，默认为16
+# cols: 自定义颜色，默认为NULL
+# showID: 是否显示样本ID，默认为FALSE
+# cex: 点的大小，默认为1
+# showLegend: 是否显示图例，默认为TRUE
+# batch1move: 第一个批次图例的移动距离，默认为0.3
+# batch2move: 第二个批次图例的移动距离，默认为0.4
+# width: 图片宽度，默认为5
+# height: 图片高度，默认为5
+# withoutgrid: 是否不带网格，默认为TRUE
+# Parameters:
+# indata: Input data matrix with features as rows and samples as columns
+# batch: Data frame containing batch information
+# batchvar: Names of batch variables, default to column names of batch data frame
+# fig.dir: Directory to save figures
+# PCA.fig.title: Title for the PCA plot
+# pos1: Position of the first legend, default is "bottomright"
+# pos2: Position of the second legend, default is "topright"
+# xy: Principal components to plot, default is the first two components
+# pch.orginal: Original point shape, default is 16
+# cols: Custom colors, default is NULL
+# showID: Whether to show sample IDs, default is FALSE
+# cex: Point size, default is 1
+# showLegend: Whether to show legends, default is TRUE
+# batch1move: Movement distance for the first batch legend, default is 0.3
+# batch2move: Movement distance for the second batch legend, default is 0.4
+# width: Figure width, default is 5
+# height: Figure height, default is 5
+# withoutgrid: Whether to plot without grid, default is TRUE
+pca2batch <- function(indata, batch, batchvar = colnames(batch), fig.dir, PCA.fig.title, pos1 = "bottomright", pos2 = "topright", xy=c(1,2), pch.orginal=16, cols=NULL, showID=FALSE, cex=1, showLegend=T, batch1move=0.3, batch2move=0.4, width=5, height=5, withoutgrid=TRUE) {
+ 
+  # 加载ClassDiscovery包，用于PCA分析
+  # Load the ClassDiscovery package for PCA analysis
+  library(ClassDiscovery) 
+  
+  # 计算第一个批次变量的水平数
+  # Calculate the number of levels for the first batch variable
+  N.batch1 = length(unique(batch[,batchvar[1]]))    
+  # 计算第二个批次变量的水平数
+  # Calculate the number of levels for the second batch variable
+  N.batch2 = length(unique(batch[,batchvar[2]]))    
+  
+  # 检查是否提供了自定义颜色
+  # Check if custom colors are provided
+  if (is.null(cols)) { 
+    # 如果没有，使用彩虹色
+    # If not, use rainbow colors
+    cols <- rainbow(N.batch1) 
+  }else{
+    # 检查颜色数量是否与批次数量匹配
+    # Check if the number of colors matches the number of batches
+    if (length(cols) != N.batch1) {stop("cols length not equal to batch length")} 
+  }           
+  
+  # 移除数据中的缺失值
+  # Remove missing values from the data
+  indata=na.omit(indata)
+  # 执行PCA分析，不进行标准化
+  # Perform PCA analysis without standardization
+  pca <- SamplePCA(indata, usecor=F, center=F) 
+  # 计算第一个主成分的方差解释比例
+  # Calculate the variance explained by the first principal component
+  pct1 <- round (pca@variances[xy[1]]/sum(pca@variances), digits=3)*100 
+  # 计算第二个主成分的方差解释比例
+  # Calculate the variance explained by the second principal component
+  pct2 <- round (pca@variances[xy[2]]/sum(pca@variances), digits=3)*100 
+  # 设置X轴标签文本
+  # Set X-axis label text
+  xlab.text = paste("PC", xy[1], ": ", as.character(pct1), "% variance", sep="")
+  # 设置Y轴标签文本
+  # Set Y-axis label text
+  ylab.text = paste("PC", xy[2], ": ", as.character(pct2), "% variance", sep="")
+  
+  # 根据是否需要网格绘制不同的图形
+  # Draw different plots based on whether grid is needed
+  if(withoutgrid) {
+    # 设置不带网格的输出文件名
+    # Set output file name without grid
+    outfile = file.path(fig.dir, paste(PCA.fig.title, ".withoutgrid.pdf",sep="")) 
+    
+    # 创建PDF设备
+    # Create PDF device
+    pdf(file=outfile, width = width, height = height)
+    # 调整图形边距，为图例留出空间
+    # Adjust plot margins to make space for legends
+    par(mar = par()$mar + c(0,0,0,6)) 
+    # 绘制PCA散点图
+    # Plot PCA scatter plot
+    plot(pca@scores[,xy[1]], pca@scores[,xy[2]], 
+         cex=cex, xlab=xlab.text, ylab=ylab.text,
+         col=cols[factor(batch[,batchvar[1]])], 
+         pch=(pch.orginal:(pch.orginal-1+N.batch2))[factor(batch[,batchvar[2]])])
+    # 添加水平和垂直参考线
+    # Add horizontal and vertical reference lines
+    abline(h=0, v=0, col="brown", lty=2)
+  } else {
+    # 设置带网格的输出文件名
+    # Set output file name with grid
+    outfile = file.path(fig.dir, paste(PCA.fig.title, ".withgrid.pdf",sep="")) 
+    
+    # 保存到PDF文件
+    # Save to PDF file
+    pdf(file=outfile, width = width, height = height)
+    # 调整图形边距，为图例留出空间
+    # Adjust plot margins to make space for legends
+    par(mar = par()$mar + c(0,0,0,6)) 
+    # 先绘制一次固定视窗
+    # Plot once to fix the viewport
+    plot(pca@scores[,xy[1]], pca@scores[,xy[2]], 
+         cex=cex, xlab=xlab.text, ylab=ylab.text,
+         col=cols[factor(batch[,batchvar[1]])], 
+         pch=(pch.orginal:(pch.orginal-1+N.batch2))[factor(batch[,batchvar[2]])])
+    # 添加灰色背景
+    # Add gray background
+    rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = "gray80") 
+    
+    # 再画一次覆盖灰色背景
+    # Plot again to cover the gray background
+    par(new=TRUE)
+    plot(pca@scores[,xy[1]], pca@scores[,xy[2]], 
+         cex=cex, xlab=xlab.text, ylab=ylab.text,
+         col=cols[factor(batch[,batchvar[1]])], 
+         pch=(pch.orginal:(pch.orginal-1+N.batch2))[factor(batch[,batchvar[2]])])
+    # 添加白色网格线
+    # Add white grid lines
+    grid (lty = 1, col = "white",lwd=2)
+  }
+  
+  # 如果showID为TRUE，则在图上显示样本ID
+  # If showID is TRUE, display sample IDs on the plot
+  if (showID) { 
+    text(pca@scores[,xy[1]], pca@scores[,xy[2]], colnames(indata), lwd=1, cex=cex)
+  }
+  # 如果showLegend为TRUE，则添加图例
+  # If showLegend is TRUE, add legends
+  if(showLegend){ 
+    # 允许图形绘制超出边界
+    # Allow plotting outside the plot area
+    par(xpd = TRUE) 
+    # 添加第一个图例（批次1）
+    # Add the first legend (batch 1)
+    legend(pos1,fill = cols,
+           legend=names(table(factor(batch[,batchvar[1]]))),
+           inset=c(-batch1move,0), 
+           border = NA,bty = "n")
+    # 添加第二个图例（批次2）
+    # Add the second legend (batch 2)
+    legend(pos2,legend=names(table(factor(batch[,batchvar[2]]))),
+           border = NA,bty = "n",
+           inset=c(-batch2move,0), 
+           pch = (pch.orginal:(pch.orginal-1+N.batch2)))
+  }
+  # 关闭图形设备
+  # Close the graphics device
+  invisible(dev.off())
+}
+```
+
+下面根据场景举两个列子，便于小伙伴儿模仿。
+
+Below are two columns based on the scene for easy imitation by friends.
+
+## 场景一，多个批次
+
+### 输入文件
+
+需要两个输入文件：
+
+- easy_input_expr.csv，表达矩阵，包含多个基因在多个样本中的表达量。
+
+- easy_input_batch.csv，样品信息，第一列样品名，跟表达矩阵一致；后面两列是分组（batch1）和批次（batch2）。
+
+##Scenario 1, Multiple Batches
+
+###Input file
+
+Two input files are required:
+
+- easy_input_expr.csv， Expression matrix, containing the expression levels of multiple genes in multiple samples.
+
+- easy_input_batch.csv， Sample information, first column sample name, consistent with the expression matrix; The last two columns are grouping (batch1) and batch (batch2).
+
+```{r}
+# 读取表达矩阵数据
+# Read expression matrix data
+df <- read.csv("easy_input_expr.csv",header = T,row.names = 1,check.names = F, stringsAsFactors = F)
+# 查看表达矩阵前3行3列的数据
+# View the first 3 rows and 3 columns of the expression matrix
+df[1:3,1:3]
+
+# 读取样本批次信息
+# Read sample batch information
+batch <- read.csv("easy_input_batch.csv",header = T, row.names = 1, check.names = F,stringsAsFactors = F)
+# 查看批次信息前几行
+# View the first few rows of the batch information
+head(batch)
+
+# 根据需要决定是否进行标准化处理
+# Decide whether to perform standardization according to your needs
+# 注意：scale函数默认对列进行操作，因此需要两次转置
+# Note: The scale function operates on columns by default, so two transpositions are needed
+indata <- as.data.frame(t(scale(t(df),center = T,scale = T)))
+# 查看标准化后的数据前3行3列
+# View the first 3 rows and 3 columns of the standardized data
+indata[1:3,1:3]
+```
+
+### 调用函数画图
+
+###Call function drawing
+
+```{r}
+# 自定义颜色
+# Define custom colors
+# 定义足够多的颜色，用于展示分组
+# Define enough colors to display different groups
+mycol <- c("#223D6C","#D20A13","#088247","#FFD121","#11AA4D","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+
+# 直接出图 - 带网格背景的PCA图
+# Generate PCA plot directly - with grid background
+pca2batch(
+  indata = indata[, rownames(batch)],  # 使用匹配批次信息的表达数据 / Use expression data matching batch info
+  batch = batch,                      # 批次信息数据框 / Batch information data frame
+  fig.dir = ".",                      # 保存在当前文件夹 / Save in current directory
+  PCA.fig.title = "PCA.2batches",     # PCA图标题 / PCA plot title
+  cols = mycol[1:length(unique(batch$batch1))],  # 使用自定义颜色 / Use custom colors
+  showID = F,                         # 不显示样本ID / Do not show sample IDs
+  cex = 0.8,                          # 点的大小 / Point size
+  showLegend = T,                     # 显示图例 / Show legend
+  width = 6, height = 5,              # 图片宽高 / Image dimensions (width, height)
+  pos1 = "bottomright", pos2 = "topright", # 图例位置 / Legend positions
+  withoutgrid = F                     # 有网格背景（示例） / With grid background (example)
+)
+
+
+# 直接出图 - 不带网格背景的PCA图
+# Generate PCA plot directly - without grid background
+pca2batch(
+  indata = indata[, rownames(batch)],  # 使用匹配批次信息的表达数据 / Use expression data matching batch info
+  batch = batch,                      # 批次信息数据框 / Batch information data frame
+  fig.dir = ".",                      # 保存在当前文件夹 / Save in current directory
+  PCA.fig.title = "PCA.2batches",     # PCA图标题 / PCA plot title
+  cols = mycol[1:length(unique(batch$batch1))],  # 使用自定义颜色 / Use custom colors
+  showID = F,                         # 不显示样本ID / Do not show sample IDs
+  cex = 0.8,                          # 点的大小 / Point size
+  showLegend = T,                     # 显示图例 / Show legend
+  width = 6, height = 5,              # 图片宽高 / Image dimensions (width, height)
+  pos1 = "bottomright", pos2 = "topright", # 图例位置 / Legend positions
+  withoutgrid = T                     # 无网格背景（推荐） / No grid background (recommended)
+)
+```
+
+![](PCA.2batches.withoutgrid.pdf)
+
+![](PCA.2batches.withgrid.pdf)
+
+## 场景二，多次生物学重复
+
+### 输入文件
+
+- GSE125184_CCAB_RPKM_ExpMatrix.csv，基因表达矩阵，行为基因，列为sample。下载自<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE125184>，解压缩，跟FigureYa98STEMheatmap是同一套输入数据。
+
+- easy_input_meta.csv，样品信息，包括分组condition和重复的批次（batch）。
+
+##Scenario 2: Multiple biological repetitions
+
+###Input file
+
+- GSE125184_CCAB_RPKM_ExpMatrix.csv， Gene expression matrix, behavioral genes, listed as samples. Download from< https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE125184 >Decompress, it is the same set of input data as FigureYa98STEMheatmap.
+
+- easy_input_meta.csv， Sample information, including grouping conditions and repeated batches.
+
+```{r}
+## 表达矩阵
+# 读取表达矩阵数据，文件名为"GSE125184_CCAB_RPKM_ExpMatrix.csv"
+# check.names=F表示不检查列名的有效性，row.names=1表示第一列作为行名
+# Read the expression matrix data from "GSE125184_CCAB_RPKM_ExpMatrix.csv"
+# check.names=F means do not check the validity of column names, row.names=1 means use the first column as row names
+expr <- read.csv("GSE125184_CCAB_RPKM_ExpMatrix.csv.gz", check.names = F, row.names = 1)
+# 查看表达矩阵前3行3列的数据
+# View the first 3 rows and 3 columns of the expression matrix
+expr[1:3,1:3]
+
+## 样品信息
+# 读取样本元数据，文件名为"easy_input_meta.csv"
+# header=T表示第一行是列名，row.names=1表示第一列作为行名
+# Read the sample metadata from "easy_input_meta.csv"
+# header=T means the first row contains column names, row.names=1 means use the first column as row names
+metadata <- read.csv("easy_input_meta.csv", header = T, row.names = 1)
+# 查看元数据的前几行
+# View the first few rows of the metadata
+head(metadata)
+
+# 默认图例会根据分组名字按字母排序
+# By default, the legend will be sorted alphabetically by group names
+
+# 下面按照自己想要的顺序排序
+# Sort the groups in a custom order as follows
+
+# 将metadata数据框中的condition列转换为因子类型，并指定因子水平的顺序
+# Convert the 'condition' column in the metadata data frame to a factor, 
+# and specify the order of the factor levels
+metadata$condition <- factor(metadata$condition, levels = c("VM", "H", "P1", "P2", "YFB-S", "YFB-C", "YFB-L", "FB-S", "FB-CL"))
+```
+
+### 调用函数画图
+
+###Call function drawing
+
+```{r}
+# 定义足够多的颜色，用于展示分组
+# Define sufficient colors for displaying different groups
+mycol <- c("#223D6C","#D20A13","#088247","#FFD121","#11AA4D","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+
+# 直接出图
+# Directly generate PCA plot
+pca2batch(
+  indata = expr[, rownames(metadata)],  # 表达矩阵，选取与metadata匹配的样本 / Expression matrix, select samples matching metadata
+  batch = metadata,  # 样品信息数据框 / Sample metadata data frame
+  pch.orginal = 15,  # 起始点形状为15（正方形） / Starting point shape (15 = square)
+  fig.dir = ".",  # 图片保存路径为当前目录 / Save figures to current directory
+  PCA.fig.title = "PCA.replicates",  # PCA图标题 / PCA plot title
+  cols = mycol[1:length(unique(metadata$condition))],  # 为不同条件分配颜色 / Assign colors to different conditions
+  showID = F,  # 是否显示样本ID（如需显示则改为T） / Show sample IDs (change to T to display)
+  cex = 0.8,  # 点和文字大小 / Point and text size
+  showLegend = T,  # 是否显示图例 / Show legend
+  width = 6, height = 5,  # 图片宽高（英寸） / Figure dimensions (inches)
+  batch1move = 0.3,  # 微调第一个图例的位置 / Fine-tune position of first legend
+  batch2move = 0.36,  # 微调第二个图例的位置 / Fine-tune position of second legend
+  pos1 = "topright", pos2 = "bottomright",  # 两个图例的位置 / Positions of two legends
+  withoutgrid = T  # 无网格背景（推荐设置） / No grid background (recommended)
+)
+```
+
+![](PCA.replicates.withoutgrid.pdf)
+
+```{r}
+sessionInfo()
+```
