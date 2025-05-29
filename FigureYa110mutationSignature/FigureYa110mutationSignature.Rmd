@@ -1,0 +1,413 @@
+---
+title: "FigureYa110mutationSignature"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 使用knitr包设置全局代码块选项
+# Set global chunk options using knitr package
+```
+
+## 需求描述
+
+画出文章里的3个热图：
+
+##Requirement description
+
+Draw three heat maps from the article:
+
+![](example.png)
+
+出自<https://academic.oup.com/annonc/article/28/7/1597/3611460>
+
+from<https://academic.oup.com/annonc/article/28/7/1597/3611460>
+
+## 应用场景
+
+利用deconstructsigs计算突变签名模式，NMF做聚类分析，寻找亚型驱动签名，并绘制热图。
+
+**注意：若使用本众筹分析流程，请引用：**
+
+Alexandrov LB, Nik-Zainal S, Wedge DC, Aparicio SA, Behjati S, Biankin AV, et al. Signatures of mutational processes in human cancer. Nature 2013;500(7463):415.
+
+Rosenthal R, McGranahan N, Herrero J, Taylor BS, Swanton C. DeconstructSigs: delineating mutational processes in single tumors distinguishes DNA repair deficiencies and patterns of carcinoma evolution. Genome biology 2016;17(1):31.
+
+Gaujoux R , Seoighe C . A flexible R package for nonnegative matrix factorization[J]. BMC Bioinformatics, 2010, 11(1):367.
+
+##Application scenarios
+
+Using decortructsigs to calculate mutation signature patterns, NMF performs clustering analysis to find subtype driven signatures, and draws a heatmap.
+
+**Attention: If using this crowdfunding analysis process, please cite:**
+
+Alexandrov LB, Nik-Zainal S, Wedge DC, Aparicio SA, Behjati S, Biankin AV, et al. Signatures of mutational processes in human cancer. Nature 2013; 500(7463):415.
+
+Rosenthal R, McGranahan N, Herrero J, Taylor BS, Swanton C. DeconstructSigs: delineating mutational processes in single tumors distinguishes DNA repair deficiencies and patterns of carcinoma evolution. Genome biology 2016; 17(1):31.
+
+Gaujoux R , Seoighe C . A flexible R package for nonnegative matrix factorization[J]. BMC Bioinformatics, 2010, 11(1):367.
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("BSgenome")
+BiocManager::install("BSgenome.Hsapiens.UCSC.hg19")
+BiocManager::install("GenomeInfoDb")
+```
+
+deconstructsigs的安装：从github下载<https://github.com/raerose01/deconstructSigs>，解压缩，然后压缩为.tar.gz格式，本地安装。
+
+Installation of decorstructsigs: Download from GitHub< https://github.com/raerose01/deconstructSigs >Extract and compress to. tar.gz format for local installation.
+
+```bash
+tar -czvf deconstructSigs.tar.gz deconstructSigs-master
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载数据分析常用工具包
+# Load commonly used data analysis toolkits
+library(tidyverse)
+# 管道操作符包
+# Pipe operator package
+library(magrittr)
+# Excel文件读取包
+# Excel file reading package
+library(readxl)
+# 字符串处理包
+# String processing package
+library(stringr)
+# 因子处理包
+# Factor processing package
+library(forcats)
+# 突变特征分析包
+# Mutation signature analysis package
+library(deconstructSigs)
+# 人类基因组参考包（hg19）
+# Human genome reference package (hg19)
+library(BSgenome.Hsapiens.UCSC.hg19)
+# 非负矩阵分解包
+# Non-negative matrix factorization package
+library(NMF)
+
+# 设置环境变量使R显示英文错误信息
+# Set environment variable to display R error messages in English
+Sys.setenv(LANGUAGE = "en") 
+# 禁止将字符串自动转换为因子类型
+# Disable automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 输入文件
+
+blca.mut.maf.txt，基因突变数据。
+
+##Input file
+
+blca.mut.maf.txt， Genetic mutation data.
+
+```{r}
+### 读取BLCA突变数据 ###
+### Read BLCA mutation data ###
+# 从TSV文件读取maf格式的突变数据，跳过以#开头的注释行
+# Read mutation data in MAF format from a TSV file, skipping comment lines starting with '#'
+maf <- read_tsv("blca.mut.maf.txt", comment = "#")
+# 将tibble格式转换为传统data.frame格式
+# Convert tibble format to traditional data.frame format
+maf <- as.data.frame(maf)
+```
+
+## 开始画图
+
+## start plot
+
+```{r}
+# 定义保存突变特征细节图的文件夹路径
+# Define folder path to save mutation signature detail plots
+fig.path <- "Figures" 
+# 若指定文件夹不存在则创建
+# Create the directory if it does not exist
+if (!file.exists(fig.path)) { dir.create(fig.path) }
+
+# 设置绘图配色方案（JCO期刊风格）
+# Set color palette (Journal of Clinical Oncology style)
+# 蓝色、金色、红色、灰色
+# Blue, Gold, Red, Gray
+jco <- c("#2874C5","#EABF00","#C6524A","#868686")
+```
+
+### 计算96种三核苷酸变化 ###
+
+###Calculate 96 types of trinucleotide changes###
+
+```{r}
+# 是否移除沉默突变（可根据实际需求移除其他SNP类型）
+# Whether to remove silent mutations (other SNP types can also be removed based on requirements)
+# 移除则改为T（默认保留）
+# Set to T to remove silent mutations (default: retain)
+rmSilence = F 
+
+# 根据rmSilence参数过滤突变数据
+# Filter mutation data based on rmSilence parameter
+if (rmSilence) {
+  # 仅保留SNP且移除沉默突变
+  # Keep only SNPs and remove silent mutations
+  maf <- as.data.frame(maf[which(maf$Variant_Type == "SNP" & maf$Variant_Classification != "Silent"),]) 
+} else {
+  # 仅保留SNP类型突变（突变特征分析通常只考虑SNP）
+  # Keep only SNPs (mutation signature analysis typically focuses on SNPs)
+  maf <- as.data.frame(maf[which(maf$Variant_Type == "SNP"),]) 
+}
+
+# 确保染色体名称格式符合deconstructSigs包要求（添加"chr"前缀）
+# Ensure chromosome names match deconstructSigs input format (add "chr" prefix)
+maf$Chromosome <- paste0("chr",maf$Chromosome) 
+
+# 转换突变数据为突变特征分析所需的输入格式
+# Convert mutation data to input format required by deconstructSigs
+snp.count <- mut.to.sigs.input(
+  mut.ref = maf,                      # 输入的MAF格式突变数据框
+                                      # Input MAF format mutation dataframe
+  sample.id = "Tumor_Sample_Barcode", # 样本ID列名
+                                      # Column name for sample IDs
+  chr = "Chromosome",                 # 染色体列名
+                                      # Column name for chromosomes
+  pos = "Start_Position",             # 突变起始位置列名
+                                      # Column name for mutation start positions
+  ref = "Reference_Allele",           # 参考碱基列名（野生型）
+                                      # Column name for reference alleles (wild-type)
+  alt = "Tumor_Seq_Allele2",          # 突变碱基列名（突变型）
+                                      # Column name for alternate alleles (mutated)
+  bsg = BSgenome.Hsapiens.UCSC.hg19  # 指定hg19人类参考基因组
+                                      # Human reference genome (hg19)
+)
+
+# 将转换后的突变计数矩阵保存为制表符分隔文件
+# Save the converted mutation count matrix as a tab-separated file
+write.table(snp.count, "snp.count.txt", sep = "\t", row.names = T, col.names = NA)
+```
+
+### 计算单样本突变签名的权重 ###
+
+###Calculate the weight of a single sample mutation signature###
+
+```{r}
+# 设置突变特征贡献度阈值（默认6%，与参考论文一致）
+# Set threshold for signature contribution (default 6%, consistent with reference paper)
+cut.off <- 0.06 
+
+# 初始化数据结构存储结果
+# Initialize data structures to store results
+mut.wt <- data.frame()           # 存储各样本的突变特征权重矩阵
+                                 # Store signature weight matrix for each sample
+sigs.out.list <- list()          # 存储每个样本的突变特征分析结果
+                                 # Store signature analysis results for each sample
+index <- 1                       # 计数器，记录当前处理的样本序号
+                                 # Counter for tracking processed samples
+
+# 遍历每个样本进行突变特征分析
+# Iterate through each sample for mutation signature analysis
+for (sample in rownames(snp.count)) {
+  # 打印进度信息
+  # Print progress information
+  cat(paste0(sample," starts and ",length(rownames(snp.count))-index," samples remain to be analyzed!\n"))
+  
+  # 使用deconstructSigs包的whichSignatures函数进行突变特征分解
+  # Decompose mutation signatures using whichSignatures function from deconstructSigs
+  tmp <- whichSignatures(
+    tumor.ref = snp.count,                   # 输入的突变计数矩阵
+                                             # Input mutation count matrix
+    signatures.ref = signatures.cosmic,      # 参考的突变特征库（COSMIC特征）
+                                             # Reference signature library (COSMIC signatures)
+    sample.id = sample,                      # 当前分析的样本ID
+                                             # ID of the current sample
+    contexts.needed = TRUE,                  # 是否需要计算三核苷酸上下文
+                                             # Whether to calculate trinucleotide context
+    tri.counts.method = 'exome2genome',      # 外显子组数据标准化为全基因组的方法
+                                             # Method to normalize exome data to genome-wide
+    signature.cutoff = cut.off               # 特征贡献度阈值，低于此值的特征将被忽略
+                                             # Threshold for signature contribution
+  )
+  
+  index <- index + 1  # 更新计数器
+  
+  # 输出每个样本的突变特征细节图
+  # Generate and save detailed signature plots for each sample
+  pdf(file.path(fig.path,paste0(sample,"_plotSignatures.pdf")))
+  plotSignatures(tmp)                # 绘制特征贡献度柱状图
+                                     # Plot signature contribution bar chart
+  invisible(dev.off())
+  
+  # 输出每个样本的特征权重饼图
+  # Generate and save signature weight pie chart for each sample
+  pdf(file.path(fig.path,paste0(sample,"_weightPie.pdf")))
+  makePie(tmp)                       # 绘制特征权重饼图
+                                     # Plot signature weight pie chart
+  invisible(dev.off())
+  
+  # 生成并存储突变特征权重矩阵
+  # Generate and store mutation signature weight matrix
+  sigs.out.list[[sample]] <- tmp     # 保存完整分析结果
+                                     # Save full analysis results
+  tmp <- data.frame(c(tmp$weights,unknown=tmp$unknown),row.names = sample)
+                                     # 提取特征权重和未知成分
+                                     # Extract signature weights and unknown component
+  mut.wt <- rbind.data.frame(mut.wt,tmp)  # 合并到总权重矩阵
+                                          # Merge into overall weight matrix
+}
+
+# 将突变特征权重矩阵保存到文件
+# Save mutation signature weight matrix to file
+write.table(mut.wt, "mutsig.weightMatrix.txt", sep = "\t", row.names = T, col.names = NA)
+```
+
+### 非负矩阵分解识别驱动性signature并绘图 ###
+
+###Non negative matrix factorization for identifying driving signatures and plotting them###
+
+```{r}
+# 搜索最优NMF分解秩（聚类数量不宜过大）
+# Search for optimal NMF rank (number of clusters should not be too large)
+nmf.input <- t(mut.wt)  # 转置突变特征权重矩阵作为NMF输入
+                        # Transpose signature weight matrix as NMF input
+nmf.input <- nmf.input[setdiff(rownames(nmf.input),"unknown"),]  # 去除未知成分
+                                                                     # Remove unknown component
+ranks <- 2:5  # 测试不同的秩（聚类数量）范围
+              # Range of ranks (number of clusters) to test
+
+# 对每个秩进行NMF拟合并评估
+# Perform NMF fitting and evaluation for each rank
+estim <- lapply(ranks, function(r){
+  fit <- nmf(nmf.input, r, nrun = 5, seed = 4, method = "lee")  # 执行NMF分解（nrun设为5避免运行时间过长）
+                                                                     # Perform NMF decomposition (nrun=5 to limit runtime)
+  list(fit = fit, consensus = consensus(fit), .opt = "vp", coph = cophcor(fit))  # 保存拟合结果及评估指标
+                                                                                       # Save fitting results and evaluation metrics
+})
+names(estim) <- paste('rank', ranks)  # 命名结果列表
+                                       # Name result list entries
+
+# 绘制cophenetic系数随秩变化的曲线图，选择最优聚类数量
+# Plot cophenetic coefficient vs. rank to select optimal cluster number
+pdf("Cophenetic coefficient for seleting optimal nmf rank.pdf")
+par(cex.axis=1.5)  # 设置坐标轴字体大小
+                   # Set axis label font size
+plot(ranks, sapply(estim, '[[', 'coph'), xlab="", ylab="", type="b", col="red", lwd=4, xaxt="n")  # 绘制cophenetic系数曲线
+                                                                                                              # Plot cophenetic coefficient curve
+axis(side = 1, at=1:5)  # 设置x轴刻度
+                        # Set x-axis tick marks
+title(xlab="number of clusters", ylab="Cophenetic coefficient", cex.lab=1.5)  # 添加坐标轴标题
+                                                                                   # Add axis labels
+invisible(dev.off())
+
+# 根据cophenetic得分选择最优秩（聚类数量）
+# Select optimal rank (number of clusters) based on cophenetic score
+rank <- 4
+seed <- 2019620  # 设置随机种子确保结果可重复
+                 # Set random seed for reproducibility
+rownames(nmf.input) <- gsub("Signature","Sig",rownames(nmf.input))  # 简化行名（Signature→Sig）
+                                                                         # Simplify row names
+
+# 执行NMF分解，将样本分为4个亚型
+# Perform NMF decomposition to classify samples into 4 subtypes
+mut.nmf <- nmf(nmf.input, 
+               rank = rank, 
+               seed = seed, 
+               method = "lee")  # 使用Lee和Seung的乘性迭代算法
+                                # Use Lee and Seung multiplicative update algorithm
+
+# 提取每个聚类的驱动突变特征（原文使用特征占比筛选，此处使用NMF自身方法）
+# Extract driving signatures for each cluster (original paper used proportion threshold, here use NMF method)
+index <- extractFeatures(mut.nmf, "max")  # 提取每个聚类中贡献最大的特征
+                                           # Extract features with maximum contribution for each cluster
+                                           # 注：理论上每个亚型应有特征，但可能存在无显著特征的情况（输出NA）
+                                           # Note: Each subtype should have features, but may be NA if none significant
+                                           # 若更改提取方法请参考??extractFeatures
+                                           # Refer to ??extractFeatures for alternative methods
+sig.order <- unlist(index)  # 将特征列表展平为向量
+                            # Flatten feature list into vector
+
+# 使用筛选出的特征再次进行NMF分解
+# Perform NMF decomposition again using selected signatures
+nmf.input2 <- nmf.input[sig.order,]  # 仅保留筛选出的特征
+                                      # Keep only selected signatures
+mut.nmf2 <- nmf(nmf.input2, 
+                rank = rank, 
+                seed = seed, 
+                method = "lee")  # 再次执行NMF
+                                # Repeat NMF decomposition
+group <- predict(mut.nmf2)  # 预测样本所属聚类（亚型）
+                            # Predict sample clusters (subtypes)
+
+# 按聚类排序样本，用于后续热图展示
+# Sort samples by cluster for heatmap visualization
+sample.order <- names(group[order(group)])  # 按聚类编号升序排列样本
+                                            # Sort samples by cluster number
+
+# 绘制一致性矩阵热图，展示聚类稳定性
+# Plot consensus matrix heatmap to show clustering stability
+pdf(file = "consensusmap.pdf", width = 4, height = 4)
+consensusmap(mut.nmf2,
+             labRow = NA,  # 不显示行标签
+                           # Omit row labels
+             labCol = NA,  # 不显示列标签
+                           # Omit column labels
+             annCol = data.frame("cluster"=group[colnames(nmf.input)]),  # 添加列注释（聚类信息）
+                                                                          # Add column annotations (cluster information)
+             annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3],"4"=jco[4])))  # 设置聚类颜色
+                                                                                              # Set cluster colors
+invisible(dev.off())
+
+# 绘制基矩阵热图，展示特征-聚类关系
+# Plot basis matrix heatmap to show signature-cluster relationships
+pdf(file = "basismap.pdf", width = 4.5, height = 4)
+# 从此图可清晰看到各亚型的驱动特征（颜色越深表示贡献越大），对应下方的NMF热图
+# This plot shows driving signatures for each subtype (darker colors indicate higher contribution), corresponding to NMF heatmap below
+basismap(mut.nmf2,
+         cexCol = 1,  # 设置列标签字体大小
+                      # Set column label font size
+         cexRow = 0.3,  # 设置行标签字体大小
+                        # Set row label font size
+         annColors=list(c("1"=jco[1],"2"=jco[2],"3"=jco[3],"4"=jco[4])))  # 设置聚类颜色
+                                                                                # Set cluster colors
+invisible(dev.off())
+
+# 绘制NMF热图，展示样本-特征关系
+# Plot NMF heatmap to show sample-signature relationships
+aheatmap(as.matrix(nmf.input2[,sample.order]),  # 使用筛选的特征和排序后的样本
+         Rowv=NA,  # 不进行行聚类
+                   # Disable row clustering
+         Colv=NA,  # 不进行列聚类（已按聚类排序）
+                   # Disable column clustering (already sorted by cluster)
+         annCol = data.frame("cluster"=group[sample.order]),  # 添加列注释（聚类信息）
+                                                                 # Add column annotations (cluster information)
+         annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3],"4"=jco[4])),  # 设置聚类颜色
+                                                                                             # Set cluster colors
+         color=c("#EAF0FA","#6081C3","#3454A7"),  # 使用例文的蓝色渐变
+                                                     # Use blue gradient from example
+         revC=TRUE,  # 反转颜色映射
+                     # Reverse color mapping
+         cexCol = 0.3,  # 设置列标签字体大小
+                        # Set column label font size
+         cexRow = 0.3,  # 设置行标签字体大小
+                        # Set row label font size
+         filename = "NMF_heatmap.pdf")  # 保存为PDF文件
+                                        # Save as PDF file
+```
+
+```{r}
+sessionInfo()
+```
