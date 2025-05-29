@@ -1,0 +1,756 @@
+---
+title: "FigureYa94STEMbox_update"
+author: "Yuhui Li, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+# 需求描述
+
+时间序列数据，用STEM找出了profile，想用R画出文章里这样的图，右侧box plot要标出每两组之间的显著性。
+
+# Requirement Description
+
+Time series data, used STEM to find out the profile, want to use R to draw a plot like the one in the article, the right hand side box plot should be labeled with the significance between each of the two groups.
+
+![](example.png)
+
+出自<http://genesdev.cshlp.org/content/32/2/96>
+
+from<http://genesdev.cshlp.org/content/32/2/96>
+
+Figure 3. Time-resolved analysis of transcript levels of genes containing EBF1-occupied sites within ±25 kb of transcription start sites before and after EBF1 induction (A,B). Up-regulated and down-regulated genes that change transcript levels >10-fold between 0 h and the pro-B stage are shown in A and B, respectively. Genes that are regulated by twofold to 10-fold are shown in Supplemental Figure S4, A and B. Individual transcript levels are shown in Supplemental Table S1 (>10-fold changes) and Supplemental Table S2 (twofold to 10-fold changes). Genes are organized into different clusters based on expression pattern using Short Time-series Expression Miner (STEM) (Ernst and Bar-Joseph 2006). Line plots (left panels) and box plots (right panels) are used to show fold changes (log2 scale) and absolute expression levels (log2 scale), respectively. Representative genes of each cluster are listed at the right. In each line plot, one representative gene is highlighted in red. (FC) Fold change; (FPKM) fragments per kilobase per million reads.
+
+# 应用场景
+
+多个时间点的时间序列数据，例如多个发育时期、处理后多个时间点取样，用STEM找到profile后，同时展示基因表达变化趋势以及基因表达量的分布。
+
+STEM的用法和参数设置不是这里要讨论的内容，使用前请查看STEM软件自带的STEMmanual.pdf。
+
+#Application scenarios
+
+Time series data from multiple time points, such as multiple developmental stages and samples taken at multiple time points after processing, can be analyzed using STEM to find the profile and display the trend of gene expression changes and the distribution of gene expression levels.
+
+The usage and parameter settings of STEM are not the topics to be discussed here. Please refer to the STEMmanual. pdf provided with the STEM software before use.
+
+# 环境设置
+
+使用国内镜像安装包
+
+#Environment settings
+
+Use domestic image installation package
+
+```{r, eval=FALSE}
+# 设置CRAN镜像为清华大学镜像站（中国用户推荐使用，提升下载速度）
+# Set the CRAN mirror to Tsinghua University mirror (recommended for Chinese users to improve download speed)
+options("repos" = c(CRAN = "https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为中国科学技术大学镜像站（用于安装生物信息学相关包）
+# Set the Bioconductor mirror to University of Science and Technology of China mirror (for installing bioinformatics-related packages)
+options(BioC_mirror = "http://mirrors.ustc.edu.cn/bioc/")
+
+# 安装Cairo包（用于高质量图形渲染，支持多种输出格式如PDF、PNG等）
+# Install the Cairo package (for high-quality graphics rendering, supporting multiple output formats like PDF, PNG, etc.)
+install.packages("Cairo")
+
+# 安装extrafont包（用于在R图形中使用系统字体，解决中文显示等字体问题）
+# Install the extrafont package (for using system fonts in R graphics, solving font issues like Chinese display)
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载数据读取包（提供更高效的read_csv等函数）
+# Load the data reading package (provides more efficient functions like read_csv)
+library(readr)
+
+# 加载数据操作包（提供dplyr语法进行数据清洗和转换）
+# Load the data manipulation package (provides dplyr syntax for data cleaning and transformation)
+library(dplyr)
+
+# 加载数据可视化包（基于图层语法的绘图系统）
+# Load the data visualization package (plotting system based on the grammar of graphics)
+library(ggplot2)
+
+# 加载字符串处理包（提供字符串操作函数如str_split、str_detect等）
+# Load the string processing package (provides string operation functions like str_split, str_detect, etc.)
+library(stringr)
+
+# 加载管道操作符包（提供%>%管道符号简化代码流程）
+# Load the pipeline operator package (provides the %>% pipeline symbol to simplify code flow)
+library(magrittr)
+
+# 加载函数式编程包（提供map等函数处理迭代任务）
+# Load the functional programming package (provides functions like map for handling iterative tasks)
+library(purrr)
+
+# 加载数据整理包（提供tidyr语法进行数据重塑和整理）
+# Load the data tidying package (provides tidyr syntax for data reshaping and tidying)
+library(tidyr)
+
+# 加载数据框包（提供增强的tibble数据框类型）
+# Load the data frame package (provides the enhanced tibble data frame type)
+library(tibble)
+
+# 加载ggplot扩展包（提供ggplot2的增强功能如多图拼接）
+# Load the ggplot extension package (provides enhanced functions for ggplot2 like multi-plot拼接)
+library(ggpubr)
+
+# 加载颜色 brewer 包（提供专业配色方案如Set1、Paired等）
+# Load the Color Brewer package (provides professional color schemes like Set1, Paired, etc.)
+library(RColorBrewer)
+
+# 加载高质量图形渲染包（支持PDF/PNG等格式的抗锯齿图形输出）
+# Load the high-quality graphics rendering package (supports anti-aliased graphics output in PDF/PNG formats)
+library(Cairo)
+
+# 加载图形系统包（提供底层图形渲染支持）
+# Load the graphics system package (provides low-level graphics rendering support)
+# 注：通常ggplot2会自动依赖grid包，此处显式加载可确保兼容性
+# Note: ggplot2 usually depends on the grid package automatically, but explicit loading here ensures compatibility
+library(grid)
+
+# 设置系统环境变量：显示英文报错信息（便于搜索国际社区解决方案）
+# Set system environment variable: display English error messages (facilitates searching for solutions in international communities)
+Sys.setenv(LANGUAGE = "en") 
+
+# 配置全局选项：禁止将字符型向量自动转换为因子（避免数据类型隐式转换问题）
+# Configure global options: prevent automatic conversion of character vectors to factors (avoids implicit data type conversion issues)
+options(stringsAsFactors = FALSE)
+```
+
+# 输入文件的预处理
+
+## 输入文件的获得
+
+需要4个文件作为输入，分别是STEM的2个输入文件和STEM生成的2个文件：
+
+g27_1.txt，g27_2.txt，STEM的2个输入文件，为基因表达量矩阵，同一基因的多个点取median，**用来画右侧的box plot**。这里用STEM自带的示例文件，是时间序列表达数据，两次重复分别放在这两个文件中。自己的数据按照这个格式整理好。如果你有3次重复，按规律添加相应的代码即可。
+
+下载STEM，进入stem文件夹，用命令行方式运行STEM：
+
+#Preprocessing of input files
+
+##Obtaining input files
+
+Four files are required as input, namely two input files for STEM and two files generated by STEM:
+
+G27_1. txt, g27_2. txt, two input files for STEM, are gene expression level matrices. Multiple points of the same gene are taken as median and used to draw the box plot on the right. Here, we use the example files provided by STEM to represent data in time series format, with two repetitions placed in each file. Organize your own data in this format. If you have 3 repetitions, simply add the corresponding code according to the pattern.
+
+Download STEM, enter the STEM folder, and run STEM using the command line:
+
+```bash
+java -mx1024M -jar stem.jar -b defaultsGuilleminSample.txt output
+```
+
+output文件夹下会产生以下两个文件，**用来画左侧的profile**：
+
+The output folder will generate the following two files, * * used to draw the profile on the left side * *:
+
+defaultsGuilleminSample_profiletable.txt，profile table，**用来画红色线**。包含each profile ID, its corresponding expression pattern, the number of genes assigned, the number expected, and the p-value significance of the number of genes assigned.
+
+defaultsGuilleminSample_genetable.txt，gene table，**用来画灰色线**。包含the table of genes, the spot(s) which the gene was from, the profile to which the gene and its expression values after transformation.
+
+```{r}
+# ----------------------
+# 基因表达数据读取（Gene expression data reading）
+# ----------------------
+# 读取第一个重复样本的表达数据
+# Read the expression data of the first replicate sample
+# 参数说明（Parameter description）：
+# - "g27_1.txt"：输入文件路径（Input file path）
+# - check.names = F：禁止自动修正列名（如保留特殊字符）（Prevent automatic correction of column names, e.g., retain special characters）
+# - row.names = 1：指定第一列为行名（Set the first column as row names）
+# - colClasses = c("SPOT" = "character")：强制将"SPOT"列解析为字符型（Force parse the "SPOT" column as character type）
+exp_rep1 <- read.delim("g27_1.txt", check.names = F, row.names = 1,
+                       colClasses = c("SPOT" = "character"))
+head(exp_rep1)  # 查看数据前6行（View the first 6 rows of the data）
+
+# 读取第二个重复样本的表达数据（逻辑同上）
+# Read the expression data of the second replicate sample (same logic as above)
+exp_rep2 <- read.delim("g27_2.txt", check.names = F, row.names = 1,
+                       colClasses = c("SPOT" = "character"))
+
+
+# ----------------------
+# 提取时间点信息（Extract time point information）
+# ----------------------
+# 从第一个样本的列名中提取时间点（排除第一列"SPOT"）
+# Extract time points from the column names of the first sample (exclude the first column "SPOT")
+# colnames(exp_rep1)[2:ncol(exp_rep1)]：选取第2列到最后一列的列名（Select column names from column 2 to the last column）
+tp <- colnames(exp_rep1)[2:ncol(exp_rep1)]
+
+
+# ----------------------
+# 读取元数据表格（Read metadata tables）
+# ----------------------
+# 读取样本信息表（如样本分组、处理条件等）
+# Read the sample information table (e.g., sample groups, treatment conditions, etc.)
+profiletable <- read.delim("defaultsGuilleminSample_profiletable.txt", check.names = F)
+head(profiletable)  # 查看样本信息表前6行（View the first 6 rows of the sample information table）
+
+# 读取基因信息表（如基因注释、分类等）
+# Read the gene information table (e.g., gene annotations, classifications, etc.)
+genetable <- read.delim("defaultsGuilleminSample_genetable.txt", check.names = F)
+# 重命名基因信息表的列名（从第4列开始）为时间点序号
+# Rename the column names of the gene information table (from column 4 onwards) as time point sequence numbers
+# as.character(seq(1:length(tp) - 1))：生成从1到（时间点数量-1）的字符型序列
+# 注：假设时间点数量为length(tp)，此处减1可能与数据结构相关，需根据实际数据验证逻辑
+# Note: Assuming the number of time points is length(tp), subtracting 1 here may be related to the data structure and needs to be validated against the actual data
+colnames(genetable)[4:ncol(genetable)] <- as.character(seq(1:length(tp) - 1))
+head(genetable)  # 查看基因信息表前6行（View the first 6 rows of the gene information table）
+dim(genetable)   # 查看基因信息表的维度（行数和列数）（View the dimensions (number of rows and columns) of the gene information table）
+```
+
+## 只保留进入profile的基因表达矩阵，用于画box plot
+
+有些gene symbol对应多个SPOT，又有些SPOT没有gene symbol，defaultsGuilleminSample_genetable.txt把同一gene symbol对应的多个SPOT合并在一起，下面都围绕gene symbol来操作。
+
+只有部分gene symbol进入STEM的profile，因此，精简表达矩阵，只保留进入profile的gene symbol，忽略没有gene symbol的SPOT。
+
+##Only retain the gene expression matrix entered into the profile for box plot purposes
+
+Some gene symbols correspond to multiple SPOT, while others do not have a gene symbol. defaultsGuilleminSample_genetable.exe merges multiple SPOT corresponding to the same gene symbol together, and the following operations revolve around the gene symbol.
+
+Only some gene symbols enter the STEM profile, therefore, the expression matrix is simplified by retaining only the gene symbols that enter the profile and ignoring SPOT without gene symbols.
+
+```{r}
+# ----------------------
+# 合并重复样本数据（Merge replicate sample data）
+# ----------------------
+# 说明：将两次重复的表达数据按行合并，后续用于计算中位数
+# Note: Row-wise merge of two replicate expression datasets for subsequent median calculation
+exp_all <- rbind(exp_rep1, exp_rep2)
+
+# 重命名表达数据的列名（从第2列开始）为时间点序号
+# Rename column names of the expression data (from column 2 onwards) as time point sequence numbers
+# 注：假设时间点数量为length(tp)，此处减1需根据实际数据验证（可能排除某列）
+# Note: Subtraction of 1 here needs verification with actual data (may exclude a column)
+colnames(exp_all)[2:ncol(exp_all)] <- as.character(seq(1:length(tp) - 1))
+
+
+# ----------------------
+# 提取共同基因符号（Extract common gene symbols）
+# ----------------------
+# 筛选同时存在于基因表和表达数据中的基因符号
+# Filter gene symbols present in both the gene table and expression data
+# base::intersect：取两个向量的交集（避免dplyr包函数同名冲突）
+# base::intersect: Take the intersection of two vectors (avoids dplyr package function name conflicts)
+GeneSymbolp <- base::intersect(genetable$`Gene Symbol`, exp_all$`Gene Symbol`)
+length(GeneSymbolp)  # 查看共有基因数量（Check the number of common genes）
+
+
+# ----------------------
+# 过滤并聚合表达数据（Filter and aggregate expression data）
+# ----------------------
+# 仅保留在共有基因列表中的记录
+# Keep only records in the common gene list
+exp_all <- exp_all[exp_all$`Gene Symbol` %in% GeneSymbolp, ]
+
+# 按基因符号分组，对每个基因的多个SPOT值取中位数（处理重复SPOT）
+# Group by gene symbol and take the median of expression values for multiple SPOTs per gene (handle duplicate SPOTs)
+# aggregate(.~`Gene Symbol`, ...)：按"Gene Symbol"分组，对所有数值列应用中位数函数
+# aggregate(.~`Gene Symbol`, ...): Group by "Gene Symbol" and apply the median function to all numeric columns
+exp_all <- aggregate(.~`Gene Symbol`, exp_all, median)
+dim(exp_all)  # 查看聚合后数据维度（Check dimensions after aggregation）
+head(exp_all)  # 查看前6行数据（View the first 6 rows of data）
+
+
+# ----------------------
+# 关联基因所属的Profile信息（Associate gene profile information）
+# ----------------------
+# 从基因表中提取"Gene Symbol"和"Profile"列，与表达数据右连接
+# Extract "Gene Symbol" and "Profile" columns from the gene table and right-join with expression data
+# right_join：以表达数据（exp_all）为基准，保留所有记录，匹配对应的Profile
+# right_join: Use expression data (exp_all) as the benchmark to retain all records and match corresponding Profiles
+exp_all.pro <- genetable %>% 
+  select(`Gene Symbol`, Profile) %>%  # 选取需要的列（Select required columns）
+  right_join(exp_all, by = "Gene Symbol")  # 按基因符号连接（Join by gene symbol）
+head(exp_all.pro)  # 查看合并后数据前6行（View the first 6 rows of merged data）
+dim(exp_all.pro)  # 查看合并后数据维度（Check dimensions of merged data）
+```
+
+## 为画左侧profile的红线做准备
+
+每个profile红线的纵坐标被写进`profiletable`中一列里`Profile.Model`，所以需要分开：每个时间点单独一列。
+
+##Prepare to draw the red line for the left profile
+
+The vertical axis of each profile red line is written into a column called 'Profile. Model' in the 'profiletable', so it needs to be separated: a separate column for each time point.
+
+```{r}
+# 处理profiletable数据，将Profile Model列按逗号分隔为多列
+# Process the profiletable data by splitting the Profile Model column into multiple columns by commas
+# 参数说明:
+#   col = `Profile Model`: 要分割的列名
+#   into = as.character(seq(1:length(tp) - 1)): 分割后的新列名，使用时间点序号
+#   sep = ",": 使用逗号作为分隔符
+#   convert = TRUE: 尝试将分割后的值转换为合适的数据类型
+# Parameter description:
+#   col = `Profile Model`: The column to split
+#   into = as.character(seq(1:length(tp) - 1)): Names for the new columns after splitting, using time point indices
+#   sep = ",": Use comma as the delimiter
+#   convert = TRUE: Attempt to convert the split values to appropriate data types
+profiletable %<>% separate(col = `Profile Model`, 
+                          into = as.character(seq(1:length(tp) - 1)), 
+                          sep = ",", convert = TRUE) %>% 
+  # 选择需要保留的列，并重命名Profile ID列为Profile
+  # Select the columns to keep and rename the Profile ID column to Profile
+  select(Profile = `Profile ID`, 
+         `Cluster (-1 non-significant)`, 
+         `# Genes Assigned`, 
+         `p-value`, 
+         as.character(seq(1:length(tp) - 1)))
+
+head(profiletable)  
+```
+
+## 分组并宽转长根据变量`Profile`分组，然后宽转长。
+
+##Group and convert width to length according to the variable 'Profile', and then convert width to length.
+
+```{r}
+# 定义一个函数，进行宽转长，并改变变量类型为数字
+# Define a function to convert wide-format data to long-format and convert variables to numeric
+myfun <- function(df) {
+  df %<>% gather(key = "x", value = "y", as.character(seq(1:length(tp) - 1))) %>% 
+    # 将时间点列（宽格式）转换为长格式，生成x(时间点)和y(表达量)两列
+    # Convert time point columns (wide format) to long format, creating two columns: x(time point) and y(expression value)
+    mutate(x1 = as.numeric(x)) %>% select(-x) %>% rename(x = x1)
+    # 将时间点从字符型转换为数值型
+    # Convert time points from character to numeric type
+  return(df)
+}
+
+# 提取显著性分析相关的列
+# Extract columns related to significance analysis
+sig_num <- profiletable %>% select(Profile, `Cluster (-1 non-significant)`, `# Genes Assigned`, `p-value`)
+
+# 处理profiletable数据：移除聚类信息列，按Profile分组并嵌套数据
+# Process profiletable data: Remove clustering information columns, group by Profile, and nest the data
+profiletable %<>% select(- `Cluster (-1 non-significant)`, -`# Genes Assigned`, -`p-value`) %>% 
+  group_by(Profile) %>% nest() 
+# 对每个Profile应用myfun函数进行宽转长
+# Apply the myfun function to each Profile to convert from wide to long format
+profiletable$red <- map(profiletable$data, myfun)
+profiletable %<>% ##
+  select(Profile, red) %>% 
+  # 与显著性数据左连接
+  # Left join with significance data
+  left_join(sig_num, by = "Profile")
+
+# 处理genetable数据：按Profile分组并嵌套
+# Process genetable data: Group by Profile and nest
+genetable %<>% ##
+  group_by(Profile) %>% nest()
+# 对每个Profile应用myfun函数进行宽转长
+# Apply the myfun function to each Profile to convert from wide to long format
+genetable$grey <- map(genetable$data, myfun)
+genetable %<>% select(Profile, grey) 
+
+# 处理exp_all.pro数据：按Profile分组并嵌套
+# Process exp_all.pro data: Group by Profile and nest
+exp_all.pro %<>% ##
+  group_by(Profile) %>% nest()
+# 对每个Profile应用myfun函数进行宽转长
+# Apply the myfun function to each Profile to convert from wide to long format
+exp_all.pro$box <- map(exp_all.pro$data, myfun)
+exp_all.pro %<>%  select(Profile, box)
+```
+
+## `nest`合并
+
+根据变量`Profile`，合并`genetable`, `profiletable`,`exp_all.pro`数据，后面画图所需要的数据就都存放在nest里了。
+
+##Nest Merge
+
+According to the variable 'Profile', merge the data of 'genetable', 'profiletable', and 'exp_all. pro', and store all the data needed for drawing in nest.
+
+```{r}
+# 合并三个数据集：genetable, profiletable和exp_all.pro
+# Merge three datasets: genetable, profiletable, and exp_all.pro
+# 按Profile列进行左连接，保留所有Profile信息
+# Left join by Profile column to retain all Profile information
+nest <- genetable %>% 
+  left_join(profiletable, by = "Profile") %>% 
+  left_join(exp_all.pro, by = "Profile") %>%
+  # 按聚类信息排序（-1表示非显著聚类，从小到大排列）
+  # Sort by cluster information (-1 indicates non-significant clusters, sort ascending)
+  arrange(`Cluster (-1 non-significant)`) 
+
+# 将`Profile`变量转变成因子，以便分面后一一对应
+# Convert the `Profile` variable to a factor for proper facetting
+Profile <- nest$Profile %>% as.character()
+Profile_2 <- as.factor(Profile)
+# 设置因子水平与原始顺序一致
+# Set factor levels to match the original order
+levels(Profile_2) <- Profile
+# 将排序后的因子重新赋值给nest数据框
+# Assign the sorted factor back to the nest dataframe
+nest$Profile <- Profile_2 %>% sort() 
+```
+
+## 挑选profile
+
+STEM定义significnat的profile会在Cluster (-1 non-significant)列标为不是-1的数。此处挑选这样的profile画出。
+
+##Select profile
+
+The STEM definition of significant profile will be marked as a number other than -1 in the Cluster (-1 non significant) column. Select such a profile here and draw it.
+
+```{r}
+# 筛选出显著聚类的Profile（排除Cluster值为-1的非显著Profile）
+# Filter significant profiles (exclude non-significant profiles with Cluster value -1)
+nest_part <- nest[nest$`Cluster (-1 non-significant)` != (-1),]
+nrow(nest_part)  # 查看筛选后的Profile数量
+
+# 或者，你还可以自己指定画哪几个profile
+# Alternatively, you can manually specify which profiles to plot
+# myprofile <- c("38", "43", "41", "42", "48")
+# nest_part <- nest[nest$Profile %in% myprofile,]
+```
+
+# 开始画图
+
+分别画左侧折线图和右侧box plot，写文字，最后用grid拼图。
+
+#Start drawing
+
+Draw a line chart on the left and a box plot on the right, write text, and finally use a grid puzzle.
+
+## 左侧折线图
+
+用分面来画多个profile
+
+##Left line chart
+
+Draw multiple profiles using facets
+
+```{r}
+# 创建基因表达模式可视化图表
+# Create visualization plot for gene expression patterns
+plot_line <- 
+  ggplot(data = nest_part %>% select(Profile, grey, `# Genes Assigned`) %>% unnest()) + 
+  # 绘制所有基因的表达趋势（灰色线条）
+  # Plot expression trends for all genes (grey lines)
+  geom_line(aes(x = x, y = y, group = `Gene Symbol`), color = "grey") + 
+  # 绘制每个Profile的中位表达模式（红色线条）
+  # Plot median expression pattern for each profile (red line)
+  geom_line(data = nest_part %>% select(Profile, red, `# Genes Assigned`) %>% unnest(), 
+            aes(x = x, y = y), color = "red") + 
+  # 按Profile分面展示
+  # Facet plots by Profile
+  facet_grid(rows = vars(Profile)) + 
+  # 设置x轴刻度标签为实际时间点
+  # Set x-axis tick labels to actual time points
+  scale_x_continuous(breaks = seq(1:length(tp) - 1), 
+                     labels = tp) + 
+
+  # 自定义图表主题
+  # Customize plot theme
+theme(
+    panel.background = element_rect(fill = "white", color = "black"),  # 白色背景，黑色边框 / White background with black border
+    axis.title = element_blank(),  # 隐藏坐标轴标题 / Hide axis titles
+    axis.text.x = element_text(angle = 45, hjust = .5, vjust = .5),  # 调整x轴标签角度为45度并居中对齐 / Rotate x-axis labels by 45 degrees and center-align
+    strip.background = element_blank(),  # 隐藏分面标题背景 / Hide facet title background
+    strip.text = element_blank(),  # 隐藏分面标题 / Hide facet titles
+    axis.line = element_blank(),  # 隐藏坐标轴线条 / Hide axis lines
+    panel.border = element_rect(linetype = "solid", color = "black", fill = NA)  # 添加面板黑色实线边框 / Add solid black border around panels
+  ) 
+
+# plot_line  # 取消注释以显示图表 / Uncomment to display the plot
+```
+
+## 右侧箱线图
+
+p值小于0.001标记为`**`, 大于0.001且小于0.05标记为`*`, 大于0.05不标记。 
+
+##Right side box line diagram
+
+A p-value less than 0.001 is marked as' * * ', a p-value greater than 0.001 and less than 0.05 is marked as' *', and a p-value greater than 0.05 is not marked.
+
+```{r}
+# 自定义差异性分析的时间点比较组合
+# Define time point comparisons for differential analysis
+# 如果有超过5个时间点，可按排列组合规律继续添加
+# Extend this list following combination rules if there are >5 time points
+compaired <- list(
+  c("1", "2"), c("1", "3"), c("1", "4"), c("1", "5"),
+  c("2", "3"), c("2", "4"), c("2", "5"),
+  c("3", "4"), c("3", "5"),
+  c("4", "5")
+)
+
+# 准备箱线图数据
+# Prepare data for boxplot visualization
+nest_part_new <- nest_part
+nest_part_new %<>% select(Profile, box) %>% unnest() 
+x2 <- as.character(nest_part_new$x) %>% as.factor()
+levels(x2) <- seq(1:length(tp) - 1)
+nest_part_new$x2 <- x2
+
+# 创建基因表达箱线图
+# Create boxplot for gene expression across time points
+plot_box <- 
+  nest_part_new %>% 
+  ggplot(aes(x = x2, y = y, fill = x2, group = x2)) + 
+  # 绘制箱线图，设置箱体大小和隐藏异常点
+  # Draw boxplots, set box size and hide outliers
+  geom_boxplot(size = 0.25, 
+               outlier.color = NA, # 隐去箱线图上的异常点
+               # 或者用下面这行设置离群值点大小和颜色
+               # outlier.size = 1, outlier.color = "grey", 
+               show.legend = FALSE) + 
+  
+  # 标注差异显著性
+  # Add statistical significance annotations
+  # 默认使用wilcox.test，可通过method参数修改统计检验方法
+  # Defaults to wilcox.test, modify with method = parameter
+  stat_compare_means(comparisons = compaired,
+                     bracket.size = 0.25, size = 2,
+                     label = "p.signif", hide.ns = TRUE, 
+                     symnum.args = list(
+                       cutpoints = c(0, 0.001, 0.05, 1), 
+                       symbols = c("**", "*", " "))) + 
+  
+  # 按Profile分面展示
+  # Facet by Profile
+  facet_grid(rows = vars(Profile)) + 
+  # 设置x轴刻度标签为实际时间点
+  # Set x-axis tick labels to actual time points
+  scale_x_discrete(breaks = seq(1:length(tp) - 1), 
+                   labels = tp) + 
+  # 使用Set2配色方案
+  # Apply Set2 color palette
+  scale_fill_brewer(palette = "Set2") + 
+  # 自定义图表主题
+  # Customize plot theme
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    axis.title = element_blank(), 
+    axis.text.x = element_text(angle = 45, hjust = .5, vjust = .5),
+    axis.line.x.bottom = element_line(color = "black"), # 调整x轴线条
+    strip.background = element_blank(),
+    strip.text = element_blank(),
+    axis.line = element_blank(),
+    panel.border = element_rect(linetype = "solid", color = "black", fill = NA)
+  ) 
+
+# plot_box  # 取消注释以显示图表
+```
+
+## 用geom_text写y轴title
+
+因为折线图和box plot都是用分面画的，要像例图那样每个都单独显示纵坐标，就需要另外添加。
+
+因此，图中的文字，全部使用`geom_text()`手动添加。
+
+##Write y-axis title using geome_text
+
+Because both line charts and box plots are drawn using facets, in order to display the vertical axis separately like in the example chart, additional additions are required.
+
+Therefore, all the text in the figure is manually added using 'geom_text()'.
+
+```{r}
+# 创建显示Profile编号和基因数量的文本图表
+# Create text plot showing Profile ID and number of genes
+plot_text_1 <- 
+  nest_part %>% select(Profile, `# Genes Assigned`) %>% unnest() %>% 
+  # 添加固定的x和y坐标列（所有行都为1）
+  # Add fixed x and y coordinates (all rows set to 1)
+  add_column(., x = rep(1, nrow(.))) %>% 
+  add_column(., y = rep(1, nrow(.))) %>% 
+  ggplot() + 
+  # 使用geom_text在固定位置显示Profile编号和基因数量
+  # Use geom_text to display Profile ID and gene count at fixed position
+  geom_text(mapping = aes(x = x, y = x, 
+                          label = paste0("U", Profile, "\n(", `# Genes Assigned`, ")"))) + 
+  facet_grid(rows = vars(Profile)) + 
+  # 隐藏所有图表元素，只保留文本
+  # Hide all plot elements except text
+  theme(panel.background = element_blank(),
+        axis.title = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) 
+
+#plot_text_1  # 取消注释以显示图表
+
+# 创建折线图的y轴标题图表
+# Create y-axis title plot for line chart
+plot_text_2 <- nest_part %>% select(Profile, `# Genes Assigned`) %>% unnest() %>% 
+  add_column(., x = rep(1, nrow(.))) %>% 
+  add_column(., y = rep(1, nrow(.))) %>% 
+  ggplot() + 
+  # 显示Log2FC作为y轴标题（旋转90度）
+  # Display Log2FC as y-axis title (rotated 90 degrees)
+  geom_text(mapping = aes(x = x, y = x), 
+            size = 3, 
+            label = expression('Log'[2]*'FC'), angle = 90) + 
+  facet_grid(rows = vars(Profile)) + 
+  theme(panel.background = element_blank(),
+        axis.title = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) 
+
+#plot_text_2  # 取消注释以显示图表
+
+# 创建箱线图的y轴标题图表
+# Create y-axis title plot for boxplot
+plot_text_3 <- nest_part %>% select(Profile, `# Genes Assigned`) %>% unnest() %>% 
+  add_column(., x = rep(1, nrow(.))) %>% 
+  add_column(., y = rep(1, nrow(.))) %>% 
+  ggplot() + 
+  # 显示Log2(signal)作为y轴标题（旋转90度）
+  # Display Log2(signal) as y-axis title (rotated 90 degrees)
+  geom_text(mapping = aes(x = x, y = x), 
+            size = 3,
+            label = expression('Log'[2]*'(signal)'), angle = 90) + 
+  facet_grid(rows = vars(Profile)) + 
+  theme(panel.background = element_blank(),
+        axis.title = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) 
+
+#plot_text_3  
+
+```
+
+## Representative基因名
+
+Representative genes of each cluster are listed at the right.
+
+每一张图对应几十个基因，甚至上百个基因，而图中只显示了4个，文献中并没有说明是如何筛选出这4个基因的。我们这里使用自定义函数筛选，数据框输入。
+
+或者不运行这部分，最后出图后可自行添加基因名。
+
+**如果读者有其它筛选方式，只需要修改自定义函数就行了**。 
+
+##Representative gene name
+
+Representative genes of each cluster are listed at the right.
+
+Each image corresponds to dozens or even hundreds of genes, but only four are shown in the image, and the literature does not explain how these four genes were selected. We use custom function filtering and data box input here.
+
+Alternatively, you can choose not to run this section and add the gene name yourself after the final image is generated.
+
+**If readers have other filtering methods, they only need to modify the custom function.
+
+```{r}
+# 自定义基因筛选函数 - 随机从每个Profile中选择4个基因
+# Custom gene filtering function - randomly select 4 genes from each profile
+myfilter <- function(df) {
+  Gene_four <- df$`Gene Symbol` %>% unique() %>%
+    sample(size = 4, replace = TRUE) %>%  # 从唯一基因符号中随机抽样4个，允许重复 / Randomly sample 4 unique gene symbols with replacement
+    paste0(collapse = "\n")  # 将4个基因名用换行符拼接成字符串 / Concatenate with line breaks
+  return(Gene_four)  # 返回拼接后的基因名字符串 / Return concatenated string
+}
+
+# 对每个Profile应用基因筛选函数
+# Apply gene filtering function to each profile
+Gene_part <- nest_part %>% select(Profile, grey)  # 选取Profile列和基因表达数据列 / Select Profile and gene expression data
+Gene_part$Gene_four <- map(Gene_part$grey, myfilter)  # 对每个Profile的基因数据应用筛选函数 / Apply filter to each profile
+Gene_part %<>% select(Profile, Gene_four) %>% unnest()  # 提取结果并展开数据框 / Extract and unnest results
+
+# 创建显示随机筛选基因名称的文本图表
+# Create text plot with randomly selected gene names
+plot_text_4 <- Gene_part %>% 
+  add_column(., x = rep(1, nrow(.))) %>%  # 添加固定x坐标列（全为1） / Add fixed x-coordinate column
+  add_column(., y = rep(1, nrow(.))) %>%  # 添加固定y坐标列（全为1） / Add fixed y-coordinate column
+  ggplot() + 
+  geom_text(mapping = aes(x = x, y = y, label = Gene_four),  # 在固定位置显示基因名 / Display genes at fixed coordinates
+            size = 3) +  # 字体大小 / Font size
+  facet_grid(rows = vars(Profile)) +  # 按Profile分面排列 / Facet by Profile
+  theme(panel.background = element_blank(),  # 移除面板背景 / Remove panel background
+        axis.title = element_blank(),  # 隐藏坐标轴标题 / Hide axis titles
+        axis.text = element_blank(),  # 隐藏坐标轴刻度标签 / Hide axis labels
+        axis.ticks = element_blank(),  # 隐藏坐标轴刻度线 / Hide axis ticks
+        strip.background = element_blank(),  # 移除分面背景 / Remove facet background
+        strip.text = element_blank())  # 隐藏分面标题 / Hide facet titles
+
+#plot_text_4  
+```
+
+## 拼图并输出
+
+这里使用`grid`包拼图。
+
+##Puzzle and output
+
+Here we use the 'grid' package for puzzles.
+
+```{r, fig.width=6, fig.height=14}
+# 使用CairoPDF设备创建高质量PDF输出
+# Create high-quality PDF output using CairoPDF device
+CairoPDF(file = "STEMbox.pdf", width = 6, height = 14)
+
+# 创建新的绘图页面
+# Create a new plotting page
+grid.newpage() 
+
+# 定义1行6列的网格布局，设置各列宽度比例
+# Define a 1x6 grid layout with column width ratios
+layout_1 <- grid.layout(nrow = 1, ncol = 6, 
+                        widths = c(0.3, 0.2, 1, 0.2, 1, 0.5)) 
+
+# 应用定义的布局
+# Apply the defined layout
+pushViewport(viewport(layout = layout_1)) 
+
+# 将各个子图按布局排列并打印
+# Arrange and print each subplot according to the layout
+print(plot_text_1, vp = viewport(layout.pos.col = 1))  # 显示Profile编号和基因数量标签 / Display Profile IDs and gene count labels
+print(plot_text_2, vp = viewport(layout.pos.col = 2))  # 显示折线图y轴标题 / Display line plot y-axis title
+print(plot_line, vp = viewport(layout.pos.col = 3))    # 显示基因表达趋势折线图 / Display gene expression trend line plot
+print(plot_text_3, vp = viewport(layout.pos.col = 4))  # 显示箱线图y轴标题 / Display box plot y-axis title
+print(plot_box, vp = viewport(layout.pos.col = 5))     # 显示基因表达箱线图 / Display gene expression box plot
+print(plot_text_4, vp = viewport(layout.pos.col = 6))  # 显示随机选择的基因名称（可选） / Display randomly selected gene names (optional)
+
+# 关闭PDF设备，完成绘图
+# Close the PDF device to finalize the plot
+dev.off()
+```
+
+![](STEMbox.pdf)
+
+# 后期处理
+
+输出的pdf文件是矢量图，可以用Illustrator等软件打开、编辑、导出其他图片格式。
+
+**参考资料：**   
+
+* [ggsignif差异性分析](https://mp.weixin.qq.com/s?__biz=MzI3Mzc1MzczMA==&mid=2247484318&idx=1&sn=aeeb47d5f0cc6ce0971032f4709393ef&chksm=eb1f3073dc68b9651aa3fe1fed06db66ade6231c5f9790868ffcf680e76f67e329e04f823da3&scene=21)   
+* [ggpubr差异性分析](https://rpkgs.datanovia.com/ggpubr/)   
+* [ggboxplot函数](https://rpkgs.datanovia.com/ggpubr/reference/ggboxplot.html)   
+* [Add P-values and Significance Levels to ggplots](http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/76-add-p-values-and-significance-levels-to-ggplots/)   
+* [R语言可视化学习笔记之添加p-value和显著性标记](https://zhuanlan.zhihu.com/p/27491381)
+
+#Post processing
+
+The output PDF file is a vector image that can be opened, edited, and exported in other image formats using software such as Illustrator.
+
+**Reference materials:**
+
+*[GGSignif Differential Analysis]（ https://mp.weixin.qq.com/s?__biz=MzI3Mzc1MzczMA==&mid=2247484318&idx=1&sn=aeeb47d5f0cc6ce0971032f4709393ef&chksm=eb1f3073dc68b9651aa3fe1fed06db66ade6231c5f9790868ffcf680e76f67e329e04f823da3&scene=21 )   
+*Differential analysis of gpubr（ https://rpkgs.datanovia.com/ggpubr/ )   
+*[ggboxplot function]（ https://rpkgs.datanovia.com/ggpubr/reference/ggboxplot.html )   
+* [Add P-values and Significance Levels to ggplots]( http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/76-add-p-values-and-significance-levels-to-ggplots/ )   
+*[Adding p-values and saliency markers to visualized learning notes in R language]（ https://zhuanlan.zhihu.com/p/27491381 )
+
+```{r}
+sessionInfo()
+```
