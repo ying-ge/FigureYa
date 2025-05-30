@@ -1,0 +1,422 @@
+---
+title: "FigureYa121MethCGIcluster"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+## 需求描述
+
+用DNA甲基化数据做分型，画出这个图。
+
+##Requirement description
+
+Use DNA methylation data for typing and draw this graph.
+
+![](example.png)
+
+出自<https://link.springer.com/article/10.1007%2Fs00401-018-1854-7>
+
+from<https://link.springer.com/article/10.1007%2Fs00401-018-1854-7>
+
+## 应用场景
+
+DNA甲基化450k数据挑选出CpG位点，然后取高变异的探针，做无监督聚类分子分型。
+
+可用于挖掘TCGA的DNA甲基化数据。
+
+##Application scenarios
+
+Select CpG sites from 450k DNA methylation data, and then use highly variable probes for unsupervised clustering molecular typing.
+
+Can be used to mine DNA methylation data of TCGA.
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install("ChAMP")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载数据处理包
+# Load data processing package
+library(data.table)
+# 加载表观基因组分析包
+# Load epigenomic analysis package
+library(ChAMP)
+# 加载聚类分析包
+# Load cluster analysis package
+library(ClassDiscovery)
+# 加载高级热图绘制包
+# Load advanced heatmap plotting package
+library(pheatmap)
+# 加载基础绘图工具包
+# Load basic plotting tools package
+library(gplots)
+# 加载复杂热图绘制包
+# Load complex heatmap plotting package
+library(ComplexHeatmap)
+
+# 设置系统环境变量使报错信息显示为英文
+# Set system environment variable to display error messages in English
+Sys.setenv(LANGUAGE = "en")
+# 全局选项设置：禁止字符串自动转换为因子类型
+# Global option setting: Disable automatic conversion of strings to factors
+options(stringsAsFactors = FALSE)
+```
+
+## 输入文件的准备
+
+- HumanMethylation450.gz，甲基化由于数据庞大，这里选择了TCGA中样本量比较小的子宫肉瘤UCS为示例
+
+数据于XENA平台下载，进入<https://xenabrowser.net/datapages/>，点击你感兴趣的癌症。此处以UCS为例，因此点击GDC TCGA Uterine Carcinosarcoma (UCS) (12 datasets)，点击DNA methylation下Illumina Human Methylation 450 (n=57) GDC Hub，<https://xenabrowser.net/datapages/?dataset=TCGA.UCS.sampleMap%2FHumanMethylation450&host=https%3A%2F%2Ftcga.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>，点击download右侧的链接，下载得到HumanMethylation450.gz，解压到当前文件夹，无后缀名
+
+- easy_input_age.txt，年龄，非必需，仅用于模仿例文的图，还可以是其他数据，可参考FigureYa71ssGSEA获得临床信息。
+##Preparation of input files
+
+- HumanMethylation450.gz， Due to the large amount of data involved in methylation, we chose UCS, a uterine sarcoma with a relatively small sample size in TCGA, as an example
+
+Download the data from XENA platform and enter< https://xenabrowser.net/datapages/ >Click on the cancer that interests you. Taking UCS as an example, click on GDC TCGA Uterine Carcinosarcoma (UCS) (12 datasets), then click on Illumina Human Methylation 450 (n=57) GDC Hub under DNA methylation< https://xenabrowser.net/datapages/?dataset=TCGA.UCS.sampleMap%2FHumanMethylation450&host=https%3A%2F%2Ftcga.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443 >Click on the link on the right side of the download to obtain HumanMethylation450.gz. Extract it to the current folder without any extension
+
+- easy_input_age.txt， Age is not necessary and is only used to mimic the example text. It can also be other data, and clinical information can be obtained by referring to FigureYa71ssGSEA.
+
+```{r}
+# 读取原始甲基化谱数据
+# Read original methylation profile data
+orgmeth <- fread("TCGA.UCS.sampleMap_HumanMethylation450.gz")  # 使用fast read快速读取大文件（适用于高效处理大数据）
+# Use fast read to quickly read large files (suitable for efficient processing of big data)
+
+# 数据格式转换与预处理
+# Data format conversion and preprocessing
+orgmeth <- as.data.frame(orgmeth); rownames(orgmeth) <- orgmeth[,1]; orgmeth <- orgmeth[,-1]
+# 将数据转换为数据框格式，设置第一列为行名，并删除第一列原始数据
+# Convert data to data frame format, set the first column as row names, and delete the first column of original data
+
+# 查看数据前3行3列的样本（用于初步检查数据结构）
+# View the first 3 rows and 3 columns of the data (for initial data structure inspection)
+orgmeth[1:3,1:3]
+
+
+# ----------------------- 模拟年龄数据（注释中说明为模拟数据，实际使用时可取消注释） -----------------------
+# ----------------------- Simulate age data (note that it is simulated data, uncomment when actually using) -----------------------
+# 生成模拟年龄数据（在ncol(orgmeth)个样本中，生成30-60岁的随机整数年龄）
+# Generate simulated age data (generate random integer ages between 30-60 for ncol(orgmeth) samples)
+#Sinfo <- data.frame(age = floor(runif(ncol(orgmeth),min = 30,max = 60)),row.names = colnames(orgmeth),stringsAsFactors = F)
+# 将模拟年龄数据写入文本文件（便于后续读取）
+# Write simulated age data to a text file (for subsequent reading)
+#write.table(Sinfo, "easy_input_age.txt", sep = "\t", quote = F)
+
+
+# 读取实际年龄数据文件（从文本文件中加载样本年龄信息）
+# Read actual age data file (load sample age information from text file)
+Sinfo <- read.table("easy_input_age.txt", header = T, row.names = 1)
+# 查看年龄数据的前几行（检查数据读取是否正确）
+# View the first few rows of age data (check if data reading is correct)
+head(Sinfo)
+```
+
+## 挑选出CpG位点
+
+利用champ包做探针过滤，探针主要包括CpG、XY染色体和SNPs，我们只保留CpG位点。
+
+**题外话：**champ包功能强大，尤其是在差异甲基化功能富集上，感兴趣的小伙伴可以自行学习
+
+##Select CpG sites
+
+Using the champ package for probe filtering, the probes mainly include CpG, XY chromosomes, and SNPs, while we only retain CpG sites.
+
+**Off topic: The Champ package has powerful features, especially in the enrichment of differential methylation functions. Interested friends can learn it on their own
+
+```{r}
+# 使用champ.filter函数对甲基化数据进行探针过滤
+# Filter methylation probes using champ.filter function
+myFilter <- champ.filter(
+  beta           = orgmeth,         # 输入的beta值矩阵（甲基化水平矩阵）
+                                 # Input beta value matrix (methylation level matrix)
+  pd             = NULL,            # 样本信息数据框（因仅进行探针过滤，无需样本信息）
+                                 # Sample information data frame (not needed for probe filtering)
+  # 以下过滤参数基于参考文献46设置，主要针对CpG、SNP及性染色体探针
+  # The following filtering parameters are based on reference 46, targeting CpG, SNP, and sex chromosome probes
+  autoimpute     = F,               # 不进行缺失值填补（保持原始数据）
+                                 # Do not impute missing values (keep original data)
+  filterDetP     = F,               # 不基于检测p值过滤探针（保留所有检测到的探针）
+                                 # Do not filter probes by detection p-value
+  fixOutlier     = F,               # 不修正离群值（因缺少样本信息，设置为T会报错）
+                                 # Do not fix outliers (setting T will cause error without sample info)
+  filterMultiHit = T,               # 过滤多重比对探针（移除可能比对到多个基因组位置的探针）
+                                 # Filter probes with multiple genomic alignments
+  filterNoCG     = T,               # 仅保留CpG位点探针（排除非CpG甲基化位点）
+                                 # Retain only CpG site probes
+  filterSNPs     = T,               # 过滤含有SNP的探针（避免SNP干扰甲基化检测）
+                                 # Filter probes overlapping with SNPs
+  filterXY       = T,               # 过滤性染色体上的探针（排除性别相关的甲基化差异）
+                                 # Filter probes on sex chromosomes (exclude sex-related differences)
+  arraytype      = "450K"           # 指定芯片类型为Illumina 450K
+                                 # Specify microarray type as Illumina 450K
+)
+
+# 查看过滤后数据的维度（行数=探针数，列数=样本数）
+# Check dimensions of filtered data (rows = probes, columns = samples)
+dim(myFilter$beta)
+
+
+### 挑选感兴趣区域（启动子CpG Island） ###
+### Select regions of interest (promoter CpG Islands) ###
+
+# 如果需要筛选特定基因组区域的探针，可加载注释文件并获取探针注释信息
+# If you need to filter probes in specific genomic regions, load annotation files
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)  # 加载450K芯片注释包
+                                 # Load annotation package for Illumina 450K array
+data("IlluminaHumanMethylation450kanno.ilmn12.hg19")    # 加载注释数据
+                                 # Load annotation data
+anno <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)  # 获取注释信息
+                                 # Retrieve probe annotation information
+
+# 筛选位于启动子区域的CpG岛探针
+# Select probes located in promoter CpG islands
+prompb <- rownames(anno[
+  which(
+    anno$Relation_to_Island == "Island" &    # 探针必须位于CpG岛区域
+                                  # Probes must be within CpG islands
+    grepl("TSS", anno$UCSC_RefGene_Group)     # 探针必须与转录起始位点(TSS)相关
+                                  # Probes must be associated with transcription start sites (TSS)
+  ),
+])
+
+# 从过滤后的甲基化数据中提取感兴趣的探针数据
+# Extract data of selected probes from filtered methylation data
+indata <- myFilter$beta[prompb, ]
+```
+
+## 取高变异的探针（此处取2500个）
+
+##Take probes with high variability (here take 2500 probes)
+
+```{r}
+k <- 2500  # 选择变异程度最高的前k个探针（此处k设为2500）
+          # Select the top k probes with highest variability (k=2500 here)
+
+# 计算每个探针在所有样本中的标准差（衡量甲基化水平变异程度）
+# Calculate standard deviation for each probe across all samples (measure of methylation variability)
+var <- apply(indata, 1, sd)
+
+# 对标准差从大到小排序（降序排列）
+# Sort standard deviations in descending order
+var <- sort(var, decreasing = T)
+
+# 提取变异程度最高的前k个探针的甲基化数据
+# Extract methylation data for the top k probes with highest variability
+topcgimeth <- indata[names(var[1:k]), ]
+
+# 查看前3行3列数据（检查提取结果是否正确）
+# View first 3 rows and 3 columns of the extracted data (check results)
+topcgimeth[1:3, 1:3]
+```
+
+## 无监督分子分型
+
+##Unsupervised molecular subtyping
+
+```{r}
+# 对样本进行层次聚类（基于高变异性CpG岛探针的甲基化数据）
+# Hierarchical clustering of samples based on methylation data of highly variable CpG island probes
+hcg <- hclust(
+  distanceMatrix(t(topcgimeth), "euclidean"),  # 计算样本间欧氏距离矩阵（需转置数据）
+                                              # Calculate Euclidean distance matrix between samples (transpose data)
+  "ward.D"                                    # 使用Ward方差最小化法进行聚类（使类内方差最小）
+                                              # Use Ward's method for hierarchical clustering (minimize within-cluster variance)
+)
+
+# 手动触发垃圾回收（释放内存，尤其在处理大型数据集后）
+# Manually trigger garbage collection to free up memory (especially after processing large datasets)
+gc()
+
+# 对探针进行层次聚类（基于甲基化模式的相似性）
+# Hierarchical clustering of probes based on similarity of methylation patterns
+hcs <- hclust(
+  distanceMatrix(topcgimeth, "euclidean"),  # 计算探针间欧氏距离矩阵
+                                           # Calculate Euclidean distance matrix between probes
+  "ward.D"                                 # 使用Ward方法进行聚类
+                                           # Use Ward's method for clustering
+)
+
+# 将样本分为3个聚类组（可根据实际需求调整聚类数量）
+# Divide samples into 3 clusters (adjust the number of clusters according to requirements)
+group <- cutree(hcs, 3)
+
+# 将聚类结果转换为"C1"、"C2"、"C3"格式的组标签
+# Convert cluster numbers to group labels in the format of "C1", "C2", "C3"
+group <- paste0("C", as.character(group))
+names(group) <- colnames(topcgimeth)  # 将组标签与样本名称关联
+                                      # Associate group labels with sample names
+```
+
+## 开始画图
+
+这里提供两种画法：
+
+- 画法一用pheatmap，简单易用，如果不画age，这个就够了。
+- 画法二用complexheatmap，复现原图。
+
+### 画法一：pheatmap
+
+##Start drawing
+
+Here are two painting methods provided:
+
+-Using pheatmap for drawing is simple and easy to use. If you don't draw age, this is enough.
+-Use complexheatmap for drawing method two to reproduce the original image.
+
+###Drawing Method 1: Pheatmap
+
+```{r}
+### 设置颜色 ###
+### Set Colors ###
+blue   <- "#5bc0eb"  # 定义蓝色（用于聚类C1）
+                    # Define blue color (for cluster C1)
+yellow <- "#fde74c"  # 定义黄色（用于聚类C3）
+                    # Define yellow color (for cluster C3)
+green  <- "#9bc53d"  # 定义绿色（用于聚类C2）
+                    # Define green color (for cluster C2)
+
+
+# 绘制甲基化聚类热图（可参考FigureYa91cluster_heatmap）
+# Draw methylation clustering heatmap (refer to FigureYa91cluster_heatmap)
+annCol <- data.frame(
+  MethClust = group,  # 样本聚类分组信息
+                    # Sample clustering group information
+  row.names = names(group),  # 设置行名为样本名称
+                          # Set row names as sample names
+  stringsAsFactors = F  # 禁止自动转换字符串为因子
+                     # Disable automatic conversion of strings to factors
+)
+
+# 定义注释列的颜色映射（为不同聚类组指定颜色）
+# Define color mapping for annotation columns (assign colors to different clusters)
+annColors <- list(
+  "Methylation group" = c(
+    "C1" = blue,    # 聚类C1映射为蓝色
+                   # Cluster C1 mapped to blue
+    "C2" = green,   # 聚类C2映射为绿色
+                   # Cluster C2 mapped to green
+    "C3" = yellow   # 聚类C3映射为黄色
+                   # Cluster C3 mapped to yellow
+  )
+)
+
+# 使用pheatmap绘制热图
+# Draw heatmap using pheatmap
+pheatmap(
+  topcgimeth,  # 输入数据：高变异性CpG岛探针的甲基化数据
+             # Input data: Methylation data of highly variable CpG island probes
+  color = bluered(64),  # 使用蓝红渐变调色板（64个颜色梯度）
+                     # Use blue-red gradient color palette (64 color levels)
+  cluster_rows = hcg,  # 使用预先计算的探针层次聚类结果
+                    # Use precomputed hierarchical clustering for rows (probes)
+  cluster_cols = hcs,  # 使用预先计算的样本层次聚类结果
+                    # Use precomputed hierarchical clustering for columns (samples)
+  cutree_cols = 3,  # 将样本列聚类分为3组（与前面的cutree结果一致）
+                  # Cut column clustering into 3 groups (consistent with previous cutree result)
+  annotation_col = annCol,  # 添加样本聚类注释列
+                          # Add sample cluster annotation column
+  annotation_colors = annColors,  # 指定注释列的颜色映射
+                               # Specify colors for annotation columns
+  show_rownames = F,  # 不显示行名（探针ID）
+                    # Do not show row names (probe IDs)
+  show_colnames = F,  # 不显示列名（样本ID）
+                    # Do not show column names (sample IDs)
+  filename = "methylation_cgi_clustering_pheatmap.pdf"  # 保存热图为PDF文件
+                                                        # Save heatmap as PDF file
+)
+```
+
+![](methylation_cgi_clustering_pheatmap.pdf)
+
+### 画法二：complexheatmap
+
+###Drawing Method 2: Complex Heatmap
+
+```{r}
+# 创建顶部注释（用于ComplexHeatmap可视化）
+# Create top annotation for ComplexHeatmap visualization
+column_ha <- HeatmapAnnotation(
+  df = data.frame(
+    MethClust = as.character(group[colnames(topcgimeth)]),  # 甲基化聚类分组注释
+                                                           # Methylation cluster annotation
+    row.names = colnames(topcgimeth)  # 设置行名为样本名称
+                                   # Set row names as sample names
+  ),
+  col = list(
+    "MethClust" = c("C1" = "steelblue", "C2" = "red", "C3" = "grey40")  # 聚类分组颜色映射
+                                                                           # Color mapping for clusters
+  ),
+  age = anno_points(
+    as.numeric(Sinfo$age),  # 年龄数值注释（以散点形式展示）
+                          # Age numerical annotation (displayed as points)
+    axis_param = list(
+      side = "left",  # 坐标轴显示在左侧
+                     # Axis displayed on the left
+      at = c(30, 40, 50),  # 坐标轴刻度位置
+                         # Axis tick positions
+      labels = c("30", "40", "50")  # 坐标轴刻度标签
+                                 # Axis tick labels
+    )
+  ),
+  height = unit(2.7, "cm"),  # 注释区域高度
+                           # Height of annotation area
+  show_annotation_name = T  # 显示注释名称
+                          # Show annotation names
+)
+
+# 创建ComplexHeatmap对象
+# Create ComplexHeatmap object
+hm <- Heatmap(
+  topcgimeth,  # 输入数据：高变异性CpG岛探针的甲基化数据
+             # Input data: Methylation data of highly variable CpG island probes
+  name = "CpG methylation level",  # 热图标题（颜色条名称）
+                                 # Heatmap title (color bar name)
+  col = bluered(64),  # 使用蓝红渐变调色板（64个颜色梯度）
+                     # Use blue-red gradient color palette (64 color levels)
+  cluster_columns = hcs,  # 使用预计算的样本层次聚类结果
+                       # Use precomputed hierarchical clustering for columns (samples)
+  cluster_rows = hcg,  # 使用预计算的探针层次聚类结果
+                    # Use precomputed hierarchical clustering for rows (probes)
+  show_column_names = F,  # 不显示列名（样本ID）
+                       # Do not show column names (sample IDs)
+  show_row_names = F,  # 不显示行名（探针ID）
+                    # Do not show row names (probe IDs)
+  top_annotation = column_ha  # 添加顶部注释
+                           # Add top annotation
+)
+
+# 保存热图为PDF文件
+# Save heatmap as PDF file
+pdf("methylation_cgi_clustering_complexheatmap.pdf", width = 8, height = 7)
+draw(hm)
+invisible(dev.off())
+```
+
+![](methylation_cgi_clustering_complexheatmap.pdf)
+
+```{r}
+sessionInfo()
+```
