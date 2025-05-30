@@ -1,0 +1,278 @@
+---
+title: "FigureYa86SNPmotif"
+author: "Ying Ge, Taojun Ye"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+# 需求描述
+
+突变会影响转录因子结合吗？作出判断，并同时画出motif logo和SNP的图。
+
+#Requirement description
+
+Does mutation affect transcription factor binding? Make a judgment and draw the motif logo and SNP diagram simultaneously.
+
+![](example.png)
+
+出自<http://cancerres.aacrjournals.org/content/77/7/1649>
+
+from<http://cancerres.aacrjournals.org/content/77/7/1649>
+
+# 应用场景
+
+在基因组上同时展示突变位点和motif，为突变影响转录因子结合提供量化（pvalue、score）和可视化的证据。
+
+在“小丫画图”公众号回复“SNP”，查看这个图在更多paper里的应用。
+
+运行下面这行，查看motifbreakR的官方手册
+
+#Application scenarios
+
+Simultaneously displaying mutation sites and motifs on the genome provides quantitative (p-value, score) and visual evidence for the impact of mutations on transcription factor binding.
+
+Reply to "SNP" on the "Xiaoya Painting" official account to check the application of this picture in more papers.
+
+Run the following line to view the official manual of motionbreakR
+
+```{r eval=FALSE}
+# 打开motifbreakR包的示例文档浏览器（中文注释）
+# Open the vignette browser for the motifbreakR package (English comment)
+browseVignettes("motifbreakR")
+```
+
+motifbreakR还可以跟其他工具结合使用，一系列结果图作为证据，帮你充实文章。看这篇：[Variant Annotation Workshop with FunciVAR, StateHub and MotifBreakR](https://www.simoncoetzee.com/bioc2017.html)
+
+MotifbreakR can also be used in conjunction with other tools, with a series of result graphs as evidence to help enrich your article. Read this article: [Variant Annotation Workshop with FunciVAR, StateHub, and MotifBreakR]（ https://www.simoncoetzee.com/bioc2017.html )
+
+# 环境设置
+
+使用国内镜像安装包
+
+#Environment settings
+
+Use domestic image installation package
+
+```{r eval=FALSE}
+# 设置R包安装源为清华大学镜像（中文注释）
+# Set R package installation source to Tsinghua University mirror (English comment)
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor包镜像为清华大学镜像（中文注释）
+# Set Bioconductor package mirror to Tsinghua University mirror (English comment)
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+# 检查是否安装了BiocManager包，如果没有则安装（中文注释）
+# Check if BiocManager package is installed, install if not (English comment)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+# 使用BiocManager安装motifbreakR包（中文注释）
+# Install the motifbreakR package using BiocManager (English comment)
+BiocManager::install("motifbreakR")
+
+# 如果你只提供rs ID，就需要安装这个包（中文注释）
+# If you only provide rs IDs, you need to install this package (English comment)
+# SNP locations and alleles for Homo sapiens extracted from NCBI dbSNP Build 151. The source data files used for this package were created by NCBI between February 16-22, 2018, and contain SNPs mapped to reference genome GRCh38.p7
+# 这个版本的SNP文件480M，其他版本更大，建议下载后本地安装，<http://bioconductor.org/packages/3.8/data/annotation/src/contrib/SNPlocs.Hsapiens.dbSNP142.GRCh37_0.99.5.tar.gz>
+# This version of the SNP file is 480M, other versions are even larger. It is recommended to download and install locally. <http://bioconductor.org/packages/3.8/data/annotation/src/contrib/SNPlocs.Hsapiens.dbSNP142.GRCh37_0.99.5.tar.gz>
+BiocManager::install("SNPlocs.Hsapiens.dbSNP142.GRCh37")
+
+# 如果你提供bed或vcf，有下面这个包就够了（中文注释）
+# If you provide bed or vcf files, this package is sufficient (English comment)
+# Full genome sequences for Homo sapiens (Human) as provided by UCSC (hg19, Feb. 2009) and stored in Biostrings objects.
+BiocManager::install("BSgenome.Hsapiens.UCSC.hg19")
+```
+
+其他物种到<http://www.bioconductor.org/packages/3.8/data/annotation>查找相应的包的名字。
+
+你的电脑可能需要安装GhostScript，参考<https://github.com/Simon-Coetzee/motifBreakR>里的Prepairing to install
+
+加载包
+
+Other species to< http://www.bioconductor.org/packages/3.8/data/annotation >Search for the name of the corresponding package.
+
+Your computer may need to install GhostScript, refer to< https://github.com/Simon-Coetzee/motifBreakR >Preparing to install in
+
+Library Package
+
+```{r}
+# 加载motifbreakR包 - 用于分析SNP对转录因子结合位点的影响（中文注释）
+# Load the motifbreakR package - for analyzing the impact of SNPs on transcription factor binding sites (English comment)
+library(motifbreakR)
+
+# 加载人类SNP位点信息包（基于GRCh37/hg19基因组和dbSNP142数据库）（中文注释）
+# Load the human SNP locations package (based on GRCh37/hg19 genome and dbSNP142 database) (English comment)
+# 包含约8400万个SNPs的位置、参考等位基因和常见变异等位基因信息（中文注释）
+# Contains location, reference alleles, and common variant alleles for ~84 million SNPs (English comment)
+library(SNPlocs.Hsapiens.dbSNP142.GRCh37)
+
+# 加载人类基因组序列包（基于UCSC hg19版本）（中文注释）
+# Load the human genome sequence package (based on UCSC hg19 version) (English comment)
+library(BSgenome.Hsapiens.UCSC.hg19)
+
+# 设置环境变量，使R显示英文错误信息（便于查找解决方案）（中文注释）
+# Set environment variable to display R error messages in English (easier for troubleshooting) (English comment)
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止R自动将字符向量转换为因子类型（中文注释）
+# Prevent R from automatically converting character vectors to factors (English comment)
+# 因子类型在数据分析中可能导致意外结果，通常建议关闭此自动转换（中文注释）
+# Factors can cause unexpected results in data analysis, it's generally recommended to disable this automatic conversion (English comment)
+options(stringsAsFactors = FALSE)
+```
+
+# 输入数据
+
+motifbreakR可以用SNP的rs ID，或bed文件，或vcf文件作为输入。
+
+#Input data
+
+MotifbreakR can use SNP's rs ID, bed file, or vcf file as input.
+
+## 提供SNP的rs ID
+
+输入文件可以只提供SNP的rsID，例如rs1006140
+
+##Provide rs ID for SNP
+
+The input file can only provide the rsID of SNP, for example rs1006140
+
+```{r}
+#SNPID <- read.table("easy_input_rs.txt")$V1
+#SNPID
+# 从文件读取SNP ID列表（当前已注释掉，使用下面的单个SNP ID）（中文注释）
+# Read SNP ID list from file (currently commented out, using single SNP ID below) (English comment)
+#SNPID <- read.table("easy_input_rs.txt")$V1
+#SNPID
+
+# 直接指定单个SNP ID进行分析（中文注释）
+# Directly specify a single SNP ID for analysis (English comment)
+SNPID <- "rs1927914"
+
+# 从dbSNP数据库中获取指定SNP的详细信息（中文注释）
+# Retrieve detailed information for the specified SNP from dbSNP database (English comment)
+# 参数说明（Parameter explanation）:
+# - rsid: 要查询的SNP ID (The SNP ID to query)
+# - dbSNP: 使用的dbSNP数据库版本 (The version of dbSNP database to use)
+# - search.genome: 参考基因组 (Reference genome)
+SNPinfo <- snps.from.rsid(rsid = SNPID, 
+                           dbSNP = SNPlocs.Hsapiens.dbSNP142.GRCh37, 
+                           search.genome = BSgenome.Hsapiens.UCSC.hg19)
+
+# 显示获取的SNP信息（中文注释）
+# Display the retrieved SNP information (English comment)
+SNPinfo
+```
+
+## 提供突变位点的bed或vcf文件
+
+easy_input.bed，整理自例文里的Table S1
+
+##Provide bed or vcf files for mutation sites
+
+easy_input.bed， Organize Table S1 from the example text
+
+```{r eval=FALSE}
+# 从BED格式文件中批量读取SNP信息（中文注释）
+# Read SNP information in bulk from a BED format file (English comment)
+
+# 参数说明（Parameter explanation）:
+# - file: 输入的BED格式文件路径 (Path to the input BED format file)
+# - search.genome: 参考基因组 (Reference genome)
+# - format: 输入文件格式，支持"BED"或"VCF" (Input file format, supports "BED" or "VCF")
+# SNPinfo <- snps.from.file(file = "easy_input.bed", # 输入BED格式文件 (Input BED format file)
+#                           search.genome = BSgenome.Hsapiens.UCSC.hg19,
+#                           format = "bed") # 也可以选择"vcf"格式 (Can also choose "vcf" format)
+```
+
+# 判断SNP对motif的影响
+
+#Assessing the impact of SNPs on motif
+
+```{r}
+# 运行motifbreakR分析SNP对转录因子结合位点的影响（中文注释）
+# Run motifbreakR to analyze the impact of SNPs on transcription factor binding sites (English comment)
+
+# 参数说明（Parameter explanation）:
+# - snpList: 包含SNP信息的对象 (Object containing SNP information)
+# - filterp: 是否过滤p值 (Whether to filter by p-value)
+# - pwmList: 使用的位置权重矩阵库 (Position Weight Matrix library to use)
+# - threshold: 显著性阈值 (Significance threshold)
+# - method: 评分方法 (Scoring method)
+# - bkg: 背景碱基频率 (Background base frequencies)
+# - BPPARAM: 并行计算参数 (Parallel computation parameters)
+hocomoco <- query(MotifDb, "HOCOMOCO")
+results <- motifbreakR(snpList = SNPinfo, filterp = TRUE,
+                       pwmList = hocomoco,
+                       threshold = 1e-4,
+                       method = "ic",
+                       bkg = c(A=0.25, C=0.25, G=0.25, T=0.25),
+                       BPPARAM = BiocParallel::bpparam())
+
+# 提取特定SNP(rs1927914)的分析结果（中文注释）
+# Extract analysis results for a specific SNP (rs1927914) (English comment)
+result1 <- results[names(results) %in% "rs1927914"]
+
+# 去除结果中的重复行（中文注释）
+# Remove duplicate rows from the results (English comment)
+result1 <- unique(result1)
+
+# 计算每个motif预测的p值（中文注释）
+# Calculate p-values for each motif prediction (English comment)
+result1pval <- calculatePvalue(result1)
+
+# 显示计算得到的p值（中文注释）
+# Display the calculated p-values (English comment)
+result1pval
+
+# 计算突变型与野生型结合分数的差异（Altscore-Refscore）（中文注释）
+# Calculate the difference in binding scores between mutant and wild-type (Altscore-Refscore) (English comment)
+result1pval$score <- result1pval$scoreAlt-result1pval$scoreRef
+
+# 将最终分析结果保存为CSV文件（中文注释）
+# Save the final analysis results to a CSV file (English comment)
+# write.csv(result1pval, "output.csv", quote = F)
+```
+
+# 开始画图
+
+#Start drawing
+
+```{r}
+# 保存结果为PDF文件（当前已注释掉，直接显示图形）（中文注释）
+# Save results as PDF file (currently commented out, displaying graph directly) (English comment)
+#pdf("SNPmotif.pdf")
+#grid.newpage()
+
+# 可视化特定SNP(rs1927914)对motif结合的影响（中文注释）
+# Visualize the impact of a specific SNP (rs1927914) on motif binding (English comment)
+
+# 参数说明（Parameter explanation）:
+# - results: 包含motif分析结果的对象 (Object containing motif analysis results)
+# - rsid: 要可视化的SNP ID (SNP ID to visualize)
+# - effect: 显示的效应强度阈值，"strong"显示强效应，"weak"显示所有效应 (Threshold for effect strength to display, "strong" shows strong effects, "weak" shows all effects)
+plotMB(results = result1, rsid = "rs1927914", 
+       effect = "strong") # 也可以选择"weak"显示所有预测结果 (Can also choose "weak" to show all predictions)
+
+# 关闭PDF设备（当前已注释掉）（中文注释）
+# Close the PDF device (currently commented out) (English comment)
+#dev.off()
+```
+
+# 后期加工
+
+根据output.csv中的最后一列score，向图中添加每个转录因子的Altscore-Refscore
+
+#Post processing
+
+Add the Altscore Refscore for each transcription factor to the graph based on the last column score in the output. csv
+
+```{r}
+sessionInfo()
+```
