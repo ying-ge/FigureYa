@@ -1,0 +1,292 @@
+---
+title: "FigureYa34 count2FPKMv2"
+author: "Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 需求描述
+### requirement description
+
+RNA-seq read count转换成FPKM。
+
+RNA-seq read count converted to FPKM.
+
+### 应用场景
+### application scenario
+
+只能拿到RNA-seq数据的read count，想转换成FPKM。
+
+注：FPKM的计算方式最好是直接从原始的FASTQ文件开始计算
+
+在嘉因公众号回复“TPM”，查看TPM、FPKM、read count的优缺点。
+
+You can only get the read count of the RNA-seq data and want to convert to FPKM.
+
+Note: The best calculation method of FPKM is to start directly from the original FASTQ file.
+
+Reply "TPM" on Jiayin's official account to check the advantages and disadvantages of TPM, FPKM and read count.
+
+### 计算基因长度
+### Calculate gene length
+
+这步比较耗时。建议：
+
+- 使用TCGA数据的小伙伴可以直接使用压缩包里的`gene_length.csv`文件，就可以跳过这步，直接从“输入数据”开始运行。
+
+- 每个物种每个基因组注释版本的基因长度是相同的，下面这部分代码你只需要运行一次，保存好生成的`eff_length.csv`文件，标注好基因组版本。当你需要做count到FPKM或TPM的转换时，就可以跳过“计算基因长度”这步，直接从“read count转FPKM”开始运行。
+
+此处以TCGA的read count作为输入，因此，用跟TCGA一致的注释文件提取外显子长度。
+
+去<https://api.gdc.cancer.gov/data/fe1750e4-fc2d-4a2c-ba21-5fc969a24f27>下载gtf文件，解压缩到当前文件夹。
+
+计算基因长度的代码作者：biotrainee tang
+
+This step is more time consuming. Suggestion:
+
+- If you are using TCGA data, you can directly use the `gene_length.csv` file in the zip package, you can skip this step, and run directly from “Input data”.
+
+- Each species has the same gene length for each annotated version of the genome, so you only need to run this part of the code once, save the generated `eff_length.csv` file, and annotate the genome version. When you need to do the conversion from count to FPKM or TPM, you can skip the step of “Calculate gene length”, and start running directly from “read count to FPKM”.
+
+Here, the read count of TCGA is used as input, so the exon lengths are extracted from the same annotation file as TCGA.
+
+Go to <https://api.gdc.cancer.gov/data/fe1750e4-fc2d-4a2c-ba21-5fc969a24f27> to download the gtf file and extract it to the current folder.
+
+Code to calculate gene length by biotrainee tang
+
+```r
+###获取gene有效长度 用来计算FPKM TPM  RPKM
+###get the effective length of the gene and use it to calculate FPKM, TPM, RPKM
+rm(list = ls())
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("GenomicFeatures")
+library(GenomicFeatures)
+#导入GTF 或者GFF3文件，ensembl或者gencode网站GTF注释皆可
+#import GTF or GFF3 files, either ensembl or gencode GTF annotations.
+txdb <- makeTxDbFromGFF("gencode.v22.annotation.gtf",format="gtf")
+#获取外显子
+#obtain exons
+exons_gene <- exonsBy(txdb, by = "gene")
+##并行计算
+##parallel computing
+#install.packages('parallel')
+library(parallel)
+#检测核心数
+#detect the number of cores
+cores<-detectCores(logical = F)
+#设定个核心
+#set a core
+cl <- makeCluster(cores)
+#对外显子重叠部分通过reduce 去冗余，并计算总长度
+#for the overlapping parts of exons, perform redundancy reduction using reduce and calculate the total length
+results <- parLapply(cl,exons_gene,function(x){sum(width(reduce(x)))})
+stopCluster(cl)#停止 stop
+gene_length22 <- do.call(rbind,lapply(results, data.frame))
+#或者plyr得到结果
+#or plyr to get the result
+#install.packages('plyr')
+library (plyr)
+gene_length22<- ldply(results, data.frame)
+colnames(gene_length22)<-c('gene_id','eff_length')
+write.csv(gene_length22, "gene_length.csv", row.names = TRUE)
+```
+
+### 数据的准备
+### Data preparation
+
+如果你自己的RNA-seq数据已经保存成`easy_input.csv`的格式，就跳过这步，直接进入“输入数据”
+
+此处下载TCGA RNA-seq的read count和FPKM，前者用于演示代码，后者用于对比结果。
+
+sample跟`FigureYa22 FPKM2TPM`、`FigureYa23 count2TPM`一致
+
+If your own RNA-seq data has been saved as `easy_input.csv`, skip this step and go directly to "Input data".
+
+Download TCGA RNA-seq read count and FPKM here, the former is used to demonstrate the code, the latter is used to compare the results.
+
+The sample is the same as `FigureYa22 FPKM2TPM` and `FigureYa23 count2TPM`.
+
+#### 先下载read count，用于转换成FPKM
+#### download read count first, and use it to convert to FPKM
+
+```r
+library(TCGAbiolinks)
+expquery <- GDCquery(project = "TCGA-LIHC", 
+                data.category = "Transcriptome Profiling",
+                data.type = "Gene Expression Quantification",
+                workflow.type = "HTSeq - Counts",
+                barcode = c("TCGA-DD-A11D-01A-11R-A131-07","TCGA-DD-AACT-01A-11R-A41C-07","TCGA-G3-AAUZ-01A-11R-A38B-07","TCGA-EP-A26S-11A-12R-A16W-07")#去掉这行，就能提取所有sample的数据 remove this line and you can extract all the sample data
+                )
+GDCdownload(expquery)
+expquery2 <- GDCprepare(expquery)
+expMatrix <- TCGAanalyze_Preprocessing(expquery2)
+
+write.csv(expMatrix, "easy_input.csv", quote=F, row.names=T)
+```
+
+#### 再下载同样4个Sample的FPKM，用于对比从TCGA下载的FPKM跟用read count转成的FPKM
+#### Download the FPKM of the same 4 samples, to compare the FPKM downloaded from TCGA with the FPKM converted by read count
+
+TCGA GDC提供多种表达值类型：read count、HTSeq - FPKM、HTSeq - FPKM-UQ。后两者有什么区别？
+
+“上四分位点 FPKM（FPKM-UQ）是一种改进的 FPKM 计算方法，其中蛋白质编码总读数被样本的第 75 百分位读数值所取代"。
+
+出自<https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/>
+
+此处下载HTSeq - FPKM
+
+TCGA GDC provides several types of expression values: read count, HTSeq - FPKM, HTSeq - FPKM-UQ. what is the difference between the latter two?
+
+"The upper quartile FPKM (FPKM-UQ) is a modified FPKM calculation in which the total protein-coding read count is replaced by the 75th percentile read count value for the sample."
+
+from<https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/>
+
+Download HTSeq - FPKM here
+
+```r
+expquery <- GDCquery(project = "TCGA-LIHC", 
+                data.category = "Transcriptome Profiling",
+                data.type = "Gene Expression Quantification",
+                workflow.type = "HTSeq - FPKM",
+                barcode = c("TCGA-DD-A11D-01A-11R-A131-07","TCGA-DD-AACT-01A-11R-A41C-07","TCGA-G3-AAUZ-01A-11R-A38B-07","TCGA-EP-A26S-11A-12R-A16W-07")#去掉这行，就能提取所有sample的数据 remove this line and you can extract all the sample data
+                )
+GDCdownload(expquery)
+expquery2 <- GDCprepare(expquery)
+expMatrix <- TCGAanalyze_Preprocessing(expquery2)
+
+write.csv(expMatrix, "TCGA_FPKM.csv", quote=F, row.names=T)
+```
+
+### 输入数据
+### Input data
+
+每行一个基因，每列一个sample
+
+One gene per row, one sample per column
+
+```{r}
+expMatrix <- read.csv("easy_input.csv",
+                        row.names = 1, header = TRUE, as.is = T)
+#查看前三个基因的read count
+##view the read count of the first three genes
+expMatrix[1:3,]
+```
+
+### read count转FPKM
+### read count to FPKM
+
+首先要保证表达矩阵的行名和存放基因长度向量的名字一致, 这一步非常重要。
+
+It is very important to make sure that the names of the rows of the expression matrix are the same as the names of the gene length vectors.
+
+```{r}
+eff_length2 <-read.csv("gene_length.csv", row.names = 1, header = T)
+rownames(eff_length2)<-eff_length2$gene_id 
+colnames(eff_length2)<-c("gene_id","eff_length")
+rownames(eff_length2) <- do.call(rbind,strsplit(as.character(eff_length2$gene_id),'\\.'))[,1]
+
+# 从输入数据里提取基因名
+# extract gene names from input data
+feature_ids <- rownames(expMatrix)
+
+# 检查gtf文件和表达量输入文件里基因名的一致性
+# check the consistency of gene names in the gtf file and expression input file
+if (! all(feature_ids %in% rownames(eff_length2))){
+  tbl <- table(feature_ids %in% rownames(eff_length2))
+  msg1 <- sprintf("%i gene is shared, %i gene is specified", tbl[[2]],tbl[[1]])
+  warning(msg1)
+} 
+
+if (! identical(feature_ids, rownames(eff_length2))){
+  msg2 <- sprintf("Given GTF file only contain %i gene, but experssion matrix has %i gene", nrow(eff_length2), nrow(expMatrix))
+  warning(msg2)
+}
+
+# 修剪表达矩阵和有效基因长度
+# trim the expression matrix and effetive gene length
+expMatrix <- expMatrix[feature_ids %in% rownames(eff_length2),]
+mm <- match(rownames(expMatrix), rownames(eff_length2))
+eff_length2 <- eff_length2[mm, ]
+
+if (identical(rownames(eff_length2), rownames(expMatrix))){
+  print("GTF and expression matix now have the same gene and gene in same order")
+}
+```
+
+如果上面代码运行时有警告，主要是因为GTF里面的基因数少于表达矩阵，请换一个更新版本的GTF文件。为了让二者基因数量一致，会删减表达矩阵的行数（基因数）。
+
+写个count转FPKM的函数，来源 ：<https://haroldpimentel.wordpress.com/2014/05/08/what-the-fpkm-a-review-rna-seq-expression-units/>
+
+If the above code runs with a warning, mainly because the number of genes inside the GTF is less than the expression matrix, please change to a newer version of the GTF file. The number of rows (genes) in the expression matrix will be trimmed down in order to make the number of genes in both the same.
+
+Write a count to FPKM function, source: <https://haroldpimentel.wordpress.com/2014/05/08/what-the-fpkm-a-review-rna-seq-expression-units/>
+
+```{r}
+countToFpkm <- function(counts, effLen){
+  N <- sum(counts)
+  exp( log(counts) + log(1e9) - log(effLen) - log(N) )
+}
+```
+
+最后执行下面的代码，从read count转成FPKM：
+
+Finally execute the following code to switch from read count to FPKM:
+
+```{r}
+fpkms <- apply(expMatrix, 2, countToFpkm, effLen = eff_length2$eff_length)
+fpkms.m<-data.frame(fpkms)
+colnames(fpkms.m)<-colnames(expMatrix)
+dim(fpkms.m)
+#查看前三个基因的TPM值
+#view TPM values for the first three genes
+fpkms.m[1:3,]
+
+#把算好的FPKM保存到本地
+#save the calculated FPKM locally
+write.table(fpkms.m, "output_count2fpkm.txt", sep="\t", quote=F, row.names=T)
+```
+
+### 结果对比
+### Comparison of results
+
+直接比较count转成的FPKM 和 从TCGA下载的FPKM，你或许会发现两者的结果有一些差异。这和你选择的GTF版本以及FPKM的生成方式有关，下面比较相关性。
+
+Directly comparing the FPKM converted by count and the FPKM downloaded from TCGA, you may find some differences between the two results. This is related to the version of GTF you chose and the way FPKM is generated, compare the correlation below.
+
+```{r}
+#导入从TCGA下载的FPKM
+#import FPKM downloaded from TCGA
+TCGAfpkm <- read.csv("TCGA_FPKM.csv", row.names = 1)
+head(TCGAfpkm[1:3,])
+# 将原始计数与计数的FPKM进行比较
+# compare raw count with FPKM from count
+cor(x=expMatrix[,1], y=fpkms.m[,1])
+# 将原始计数与TCGA的FPKM进行比较
+# compare raw count with FPKM from TCGA
+cor(x=expMatrix[,1],
+    y=TCGAfpkm$TCGA.DD.A11D.01A.11R.A131.07)
+# 将TCGA的FPKM与计数的FPKM进行比较
+# compare FPKM from TCGA with FPKM from count
+cor(x=fpkms.m[,1],
+    y=TCGAfpkm$TCGA.DD.A11D.01A.11R.A131.07)
+```
+
+以第一个sample为例，raw count 和 count转成的FPKM的相关系数是0.898；
+
+raw count 和 从TCGA直接下载的FPKM的相关系数是 0.898。
+
+而count转成的FPKM和从TCGA下载的FPKM的相关系数是1, 证明了count2FPKM的代码是有效的。
+
+Taking the first sample as an example, the correlation coefficient between the raw count and the FPKM converted from the count is 0.898;
+
+The correlation coefficient between raw count and FPKM downloaded directly from TCGA is 0.898.
+
+The correlation coefficient between the FPKM converted from count and the FPKM downloaded from TCGA is 1, which proves that the code of count2FPKM is valid.
+
+```{r}
+sessionInfo()
+```
