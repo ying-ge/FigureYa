@@ -172,7 +172,7 @@ One gene per row, one sample per column
 expMatrix <- read.csv("easy_input.csv",
                         row.names = 1, header = TRUE, as.is = T)
 #查看前三个基因的read count
-##view the read count of the first three genes
+#view the read count of the first three genes
 expMatrix[1:3,]
 ```
 
