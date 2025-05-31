@@ -1,0 +1,284 @@
+---
+title: "FigureYa37CorrelationV2_update"
+author: "Zhaodong Hao, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# requirement description
+
+用⭕️的方式展示correlation，画出像paper里这样的图
+
+Show the correlation using ⭕️ to draw a graph like the one in the paper
+
+![](example.png)
+
+出自<https://doi.org/10.1080/2162402X.2017.1382792>
+
+from<https://doi.org/10.1080/2162402X.2017.1382792>
+
+# 应用场景
+# application scenario
+
+展示每两个基因之间的相关关系，连线的颜色和宽度代表相关系数。
+
+更多用法：
+
+- 从TCGA数据挖相关基因，可参考这篇：<https://mp.weixin.qq.com/s/92tdCfZVR-cO2IuOf9Wh0A>
+
+- 找转录因子的靶基因、找哪个转录因子调控你的基因，做进一步筛选，可参考这篇末尾的“浓缩策略”：<https://mp.weixin.qq.com/s/UFbF5Ru8Pd67AcxCLODsfw>
+
+Demonstrate the correlation between each two genes, with the color and width of the connecting line representing the correlation coefficient.
+
+More usage:
+
+- Extract relevant genes from TCGA data, you can refer to this article: <https://mp.weixin.qq.com/s/92tdCfZVR-cO2IuOf9Wh0A>
+
+- To find the target genes of transcription factors, to find which transcription factors regulate your genes, and to do further filtering, please refer to the “condensed strategy” at the end of this article: <https://mp.weixin.qq.com/s/UFbF5Ru8Pd67AcxCLODsfw>
+
+# 环境设置
+# environment setting
+
+使用国内镜像安装包
+
+use the domestic mirror installation package
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+#安装circlize包
+#install the circlize package
+#install.packages("circlize")
+```
+
+加载包
+
+load package
+
+```{r}
+library(circlize)
+library(ggsci)
+library(parallel)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+加载自定义函数
+
+load custom function
+
+```{r}
+# 计算相关系数的函数
+# function to calculate correlation coefficients
+genecor.parallel <- function(data,gene,cl){
+  cl <- makeCluster(cl)
+  y <- as.numeric(data[gene,])
+  rownames <- rownames(data)
+  dataframes <- do.call(rbind, parLapply(cl=cl,rownames, function(x){
+    dd  <- cor.test(as.numeric(data[x,]), y, type="spearman")
+    data.frame(Gene_1=gene, Gene_2=x, cor=dd$estimate, p.value=dd$p.value)
+  }))
+  stopCluster(cl)
+  return(dataframes)
+}
+
+# 画图的函数
+# graphing function
+genecor_circleplot <- function(x){
+  Corr <- data.frame(rbind(data.frame(Gene=x[,1], Correlation=x[,3]), 
+                           data.frame(Gene=x[,2], Correlation=x[,3])), stringsAsFactors = F)      
+  Corr$Index <- seq(1,nrow(Corr),1) #记录基因的原始排序，记录到Index列 record the original ordering of the gene to the Index column
+  Corr <- Corr[order(Corr[,1]),] #按照基因名排序 sort by gene name
+  corrsp <- split(Corr,Corr$Gene)
+  corrspe <- lapply(corrsp, function(x){x$Gene_Start<-0
+  
+  #依次计算每个基因的相关系数总和，作为基因终止位点
+  #the sum of correlation coefficients for each gene is calculated in turn as the gene termination site
+  if (nrow(x)==1){x$Gene_End<-1}else{
+    x$Gene_End<-sum(abs(x$Correlation))} 
+  x})
+  GeneID <- do.call(rbind,corrspe)
+  GeneID <- GeneID[!duplicated(GeneID$Gene),]
+  
+  #基因配色
+  #gene color matching
+  mycol <- pal_d3("category20c")(20)
+  n <- nrow(GeneID)
+  GeneID$Color <- mycol[1:n]
+  
+  #连线的宽度是相关系数的绝对值
+  #the width of connecting line is the absolute value of the correlation coefficient
+  Corr[,2] <- abs(Corr[,2]) 
+  corrsl <- split(Corr,Corr$Gene)
+  aaaaa <- c()
+  corrspl <- lapply(corrsl,function(x){nn<-nrow(x)
+  for (i in 1:nn){
+    aaaaa[1] <- 0
+    aaaaa[i+1] <- x$Correlation[i]+aaaaa[i]}
+  bbbbb <- data.frame(V4=aaaaa[1:nn],V5=aaaaa[2:(nn+1)])
+  bbbbbb <- cbind(x,bbbbb)
+  bbbbbb
+  })
+  Corr <- do.call(rbind,corrspl)
+  
+  #根据Index列，把基因恢复到原始排序
+  #restore genes to original ordering based on Index columns
+  Corr <- Corr[order(Corr$Index),]
+  
+  #V4是起始位置，V5是终止位置
+  #把它写入Links里，start_1和end_1对应Gene_1，start_2和end_2对应Gene_2
+  #V4 is the start position and V5 is the end position
+  #Write it into Links, start_1 and end_1 correspond to Gene_1, start_2 and end_2 correspond to Gene_2
+  x$start_1 <- Corr$V4[1:(nrow(Corr)/2)]
+  x$end_1 <- Corr$V5[1:(nrow(Corr)/2)]
+  x$start_2 <- Corr$V4[(nrow(Corr)/2 + 1):nrow(Corr)]
+  x$end_2 <- Corr$V5[(nrow(Corr)/2 + 1):nrow(Corr)]
+  
+  #连线（相关系数）的配色
+  #相关系数最大为1，最小-1，此处设置201个颜色
+  #-1到0就是前100，0到1就是后100
+  #Color matching for connecting lines (correlation coefficient)
+  #the maximum correlation coefficient is 1 and the minimum is -1. 201 colors are set here
+  #-1 to 0 is the first 100, 0 to 1 is the next 100
+  color <- data.frame(colorRampPalette(c("#67BE54", "#FFFFFF", "#F82C2B"))(201))
+  #根据相关系数的数值，给出相应的颜色
+  #according to the value of the correlation coefficient, provide the corresponding color
+  for (i in 1:nrow(x)){
+    x[i,8] <- substring(color[x[i,3] * 100 + 101, 1], 1, 7)
+  }
+  names(x)[8] <- "color"
+  
+  #绘图区设置
+  #drawing area setting
+  #par(mar=rep(0,4))
+  circos.clear()
+  circos.par(start.degree = 90, #从哪里开始画，沿着逆时针顺序 where to start drawing, in counterclockwise order
+             gap.degree = 5, #基因bar之间的间隔大小 spacer size between gene bar
+             track.margin = c(0,0.23), #值越大，基因跟连线的间隔越小 the larger the value, the smaller the spacing between the genes and the line
+             cell.padding = c(0,0,0,0)
+  )
+  circos.initialize(factors = GeneID$Gene,
+                    xlim = cbind(GeneID$Gene_Start, GeneID$Gene_End))
+  
+  #先画基因
+  #draw the gene first
+  circos.trackPlotRegion(ylim = c(0, 1), factors = GeneID$Gene, 
+                         track.height = 0.05, #基因线条的胖瘦 genetic lines of fat and thin
+                         panel.fun = function(x, y) {
+                           name = get.cell.meta.data("sector.index") 
+                           i = get.cell.meta.data("sector.numeric.index") 
+                           xlim = get.cell.meta.data("xlim")
+                           ylim = get.cell.meta.data("ylim")
+                           circos.text(x = mean(xlim), y = 1,
+                                       labels = name,
+                                       cex = 1, #基因ID文字大小 gene ID text size
+                                       niceFacing = TRUE, #保持基因名的头朝上 keep the head of the gene name facing up
+                                       facing = "bending", #基因名沿着圆弧方向，还可以是reverse.clockwise the gene name is along the arc of the circle, and can also be reverse.clockwise
+                                       adj = c(0.5, -2.8), #基因名所在位置，分别控制左右和上下 the gene names are located in positions that control left, right, and up and down, respectively
+                                       font = 2 #加粗 bold
+                           )
+                           circos.rect(xleft = xlim[1], 
+                                       ybottom = ylim[1],
+                                       xright = xlim[2], 
+                                       ytop = ylim[2],
+                                       col = GeneID$Color[i],
+                                       border = GeneID$Color[i])
+                           
+                           circos.axis(labels.cex = 0.7, 
+                                       direction = "outside"
+                           )})
+  
+  #画连线
+  #draw the connecting line
+  for(i in 1:nrow(x)){
+    circos.link(sector.index1 = x$Gene_1[i], 
+                point1 = c(x[i, 4], x[i, 5]),
+                sector.index2 = x$Gene_2[i], 
+                point2 = c(x[i, 6], x[i, 7]),
+                col = paste(x$color[i], "C9", sep = ""), 
+                border = FALSE, 
+                rou = 0.7
+    )}
+  
+  #画图例
+  #draw legend
+  i <- seq(0,0.995,0.005)
+  rect(-1+i/2, #xleft
+       -1, #ybottom
+       -0.9975+i/2, #xright
+       -0.96, #ytop
+       col = paste(as.character(color[,1]), "FF", sep = ""),
+       border = paste(as.character(color[,1]), "FF", sep = ""))
+  text(-0.97, -1.03, "-1")
+  text(-0.51, -1.03, "1")
+}
+```
+
+# 输入文件
+# Input file
+
+not_easy_input.csv，基因表达矩阵。每行一个sample，每列一个基因。
+
+如果你已经算好了相关系数，可直接进入“开始画图”。
+
+not_easy_input.csv, gene expression matrix. One sample per row, one gene per column.
+
+If you have already calculated the correlation coefficients, you can go directly to “Start drawing”.
+
+```{r}
+inputtemp <- read.csv("not_easy_input.csv", row.names = 1)
+dim(inputtemp)
+head(inputtemp)
+```
+
+# 计算相关系数
+# Calculate the correlation coefficient
+
+```{r}
+genecorl <- lapply(colnames(inputtemp),function(x){
+  ddd <- genecor.parallel(data = t(inputtemp), cl=2, gene=x) #一定要注意cl参数根据自己电脑cpu线程调整 be sure to pay attention to the cl parameter according to your own computer cpu thread adjustment
+  ddd  
+})
+genecor <- do.call(rbind, genecorl)
+
+# 删掉p value = 0的，也就是自己跟自己配对
+# delete p value = 0, that is, pair it with yourself
+genecorr <- genecor[-which(genecor$p.value==0),]
+
+# 删掉A vs B 和 B vs A其中一个
+# delete either A vs B and B vs A
+genecorrr<-genecorr[!duplicated(genecorr$cor),]
+
+# 保存到文件
+# save to file
+genecorrr$p.value <- NULL
+write.table(genecorrr, "easy_input.txt", sep = "\t", quote = F, row.names = F)
+```
+
+# 开始画图
+# Start drawing
+
+```{r}
+genecorrr <- read.table("easy_input.txt", header = TRUE, sep = "\t",as.is = T)
+genecor_circleplot(genecorrr)
+
+# 输出到PDF文件
+# output to PDF file
+pdf("correlation.pdf", width = 5, height = 5)
+genecor_circleplot(genecorrr)
+dev.off()
+
+# 读入V2版本的输入文件
+# read the input file for the V2 version
+Links <- read.table("easy_input_V2.txt", header = TRUE, sep = "\t",as.is = T)
+genecor_circleplot(Links)
+```
+
+```{r}
+sessionInfo()
+```
