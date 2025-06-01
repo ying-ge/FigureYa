@@ -1,0 +1,468 @@
+---
+title: "FigureYa72biomarker"
+author: "Wen Wang, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr的全局代码块选项 / Set global chunk options for knitr
+```
+
+## 需求描述
+
+复现原文的nearest shrunken centroid classification找biomarker，画出文章里的图。
+
+## Requirement Description
+
+Reproduce the original article's nearest shrunken centroid classification to find the biomarker and draw the graph in the article.
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41598-017-14314-y>
+
+from<https://www.nature.com/articles/s41598-017-14314-y>
+
+## 应用场景
+
+找癌症分型的biomarker。不限于例文的DNA甲基化数据，经典的用法是根据表达数据分型。
+
+参考资料：Robert Tibshirani, Trevor Hastie, Balasubramanian Narasimhan, and Gilbert Chu. 2002. Diagnosis of multiple cancer types by shrunken centroids of gene expression PNAS 99: 6567-6572.
+
+## Application Scenarios
+
+Finding biomarkers for cancer typing. not limited to DNA methylation data in the example text, classic usage is typing based on expression data.
+
+Ref: Robert Tibshirani, Trevor Hastie, Balasubramanian Narasimhan, and Gilbert Chu. 2002. Diagnosis of multiple cancer types by shrunken centroids of gene expression PNAS 99: 6567-6572.
+
+## 环境设置
+
+使用国内镜像安装包
+
+## Environment settings
+
+Installation of packages using domestic mirrors
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("pamr")
+install.packages('R.utils') # required by data.table::fread to read gipped file
+install.packages("data.table")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载PAMR包 - 用于微阵列数据分类分析 / Load PAMR package - for microarray data classification
+library(pamr)  
+
+# 加载data.table包 - 提供高性能数据处理功能 / Load data.table package - for high-performance data manipulation
+library(data.table)
+
+# 设置系统语言环境为英文 - 使报错信息显示为英文 / Set system language to English - for English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 设置全局选项 - 防止自动将字符串转换为因子 / Set global option - prevent automatic conversion of strings to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 参数设置
+
+## Parameter setting
+
+```{r}
+# 定义颜色向量 - 用于后续可视化 / Define color vector - for visualization purposes
+cols = c("red", "green")  
+
+# 定义分组标签 - 对应两种样本类型 / Define group labels - for two sample types
+labels = c("Solid Tissue Normal", "Primary Tumor")  
+
+# 设置抽样参数说明：
+# 全量计算会消耗极大内存（注释掉的原说明）
+# Sampling parameters setting:
+# Using full data will consume huge memory (original commented explanation)
+
+# 固体正常组织样本抽样数（设为0表示不抽样）
+# Number of solid tissue normal samples to sample (0 means no sampling)
+STN_number <- 50  
+
+# 原发性肿瘤样本抽样数（设为0表示不抽样） 
+# Number of primary tumor samples to sample (0 means no sampling)
+PT_number <- 50   
+
+# 重要警告注释：
+# 1. 不抽样（设为0）将导致极高内存使用（>5GB）
+# 2. 普通笔记本电脑可能无法处理
+# Important warnings:
+# 1. No sampling (set to 0) will cause extremely high memory usage (>5GB)
+# 2. Regular laptops may not handle it
+
+# 设置随机数种子 - 保证抽样结果可重复
+# Set random seed - ensures reproducible sampling results
+set.seed(6666)  
+```
+
+## 输入数据预处理
+
+做nearest shrunken centroid classification需要两种信息：分类（例如normal和tumor）和特征数据（表达矩阵、DNA甲基化等等）。例文用TCGA KIRC的DNA甲基化芯片数据找区分tumor跟normal的biomarker。
+
+从[UCSC xena](https://xenabrowser.net/datapages/)下载Kidney Clear Cell Carcinoma (KIRC)处理好的甲基化芯片数据和表型注释文件。下载地址：
+
+- DNA甲基化芯片：<https://gdc.xenahubs.net/download/TCGA-KIRC/Xena_Matrices/TCGA-KIRC.methylation450.tsv.gz>
+- 表型：<https://tcga.xenahubs.net/download/TCGA.KIRC.sampleMap/KIRC_clinicalMatrix.gz>
+
+## Input data preprocessing
+
+To do nearest shrunken centroid classification, we need two kinds of information: classification (e.g. normal and tumor) and feature data (expression matrix, DNA methylation, etc.). In the example, DNA methylation microarray data from TCGA KIRC is used to find the biomarker that distinguishes tumor from normal.
+
+Download Kidney Clear Cell Carcinoma (KIRC) processed methylation microarray data and phenotype annotation files from [UCSC xena](https://xenabrowser.net/datapages/). Download address:
+
+- DNA methylation microarray: <https://gdc.xenahubs.net/download/TCGA-KIRC/Xena_Matrices/TCGA-KIRC.methylation450.tsv.gz>
+- Phenotypes: <https://tcga.xenahubs.net/download/TCGA.KIRC.sampleMap/KIRC_clinicalMatrix.gz>
+
+### 表型
+
+### Phenotype
+
+```{r}
+# 读取表型数据 - 从压缩的临床数据文件中提取样本类型信息
+# Read phenotype data - extract sample type information from compressed clinical data file
+phenotype <- read.table(
+  file = gzfile("TCGA-KIRC.clinical.tsv.gz"),  # 读取gzip压缩文件 / Read gzipped file
+  header = TRUE,                            # 第一行作为列名 / First row as column names
+  sep = "\t",                               # 制表符分隔 / Tab-delimited
+  # colClasses = c("character", rep("NULL",82), "integer", rep("NULL",37)),  # 只读取第一列和84列 / Only read 1st and 84th columns
+  row.names = 1                             # 第一列作为行名 / Use first column as row names
+)
+phenotype <- phenotype[,c(1, ncol(phenotype))]
+head(phenotype)  # 查看前几行数据 / Check first few rows
+
+# 读取甲基化数据样本信息
+# Read methylation data sample information
+sample <- read.table(
+  file = gzfile("TCGA-KIRC.methylation450.tsv.gz"),  # 甲基化数据文件 / Methylation data file
+  sep = "\t",                                        # 制表符分隔 / Tab-delimited
+  stringsAsFactors = FALSE,                          # 不转换字符串为因子 / Don't convert strings to factors
+  nrows = 1,                                        # 只读第一行(样本名) / Only read first row (sample names)
+  row.names = 1                                     # 第一列作为行名 / Use first column as row names
+)
+
+# 匹配样本类型信息
+# Match sample type information
+sample_type <- phenotype[substr(sample, 1, 15), "tissue_type.samples"]  # 提取前15字符匹配 / Match first 15 characters
+
+# 识别正常组织和原发肿瘤样本
+# Identify normal and tumor samples
+STN_samples <- which(sample_type == "Normal")  
+PT_samples <- which(sample_type == "Tumor")    
+
+# 样本抽样处理 - 考虑内存限制
+# Sample sampling processing - considering memory limitations
+
+# 正常组织样本抽样
+# Solid Tissue Normal sampling
+if(STN_number == 0){
+  STN_samples_select <- STN_samples  # 不抽样，使用全部样本 / No sampling, use all samples
+  STN_number <- length(STN_samples)  # 记录样本总数 / Record total sample count
+} else {
+  STN_samples_select <- sample(STN_samples, STN_number)  # 随机抽样 / Random sampling
+}
+
+# 原发肿瘤样本抽样
+# Primary Tumor sampling
+if(PT_number == 0){
+  PT_samples_select <- PT_samples    # 不抽样，使用全部样本 / No sampling, use all samples
+  PT_number <- length(PT_samples)    # 记录样本总数 / Record total sample count
+} else {
+  PT_samples_select <- sample(PT_samples, PT_number)  # 随机抽样 / Random sampling
+}
+```
+
+### DNA甲基化数据
+
+### DNA methylation data
+
+```{r}
+full_data <- fread("TCGA-KIRC.methylation450.tsv.gz", sep="\t", header = T, stringsAsFactors = F)
+# 读取TCGA-KIRC项目的甲基化450K芯片数据（中文注释）
+# Read methylation 450K array data from TCGA-KIRC project (English comment)
+# 读取normal和tumor各50个样本，共485577个CpG位点（中文注释）
+# Read 50 normal and 50 tumor samples, total 485577 CpG sites (English comment)
+# select参数+1是因为fread的列选择从1开始（中文注释）
+# select parameter +1 because fread column selection starts from 1 (English comment)
+# methylation_matrix <- fread(file="TCGA-KIRC.methylation450.tsv.gz", sep="\t", stringsAsFactors = F, header = T, select = c(STN_samples_select, PT_samples_select) + 1)
+cols_to_select <- c(STN_samples_select, PT_samples_select + 1)
+methylation_matrix <- full_data[, ..cols_to_select]
+dim(methylation_matrix)
+
+# 读取所有CpG位点的ID（第一列）（中文注释）
+# Read IDs of all CpG sites (first column) (English comment)
+# cgList <- fread(file = "TCGA-KIRC.methylation450.tsv.gz", sep = "\t", stringsAsFactors = F, header = T, select = 1)
+cgList <- full_data[[1]]
+head(cgList)
+
+# 获取每个样本的表型信息（肿瘤或正常）（中文注释）
+# Get phenotype information for each sample (tumor or normal) (English comment)
+sample_select <- substr(sample[c(STN_samples_select, PT_samples_select)], 1, 15)
+head(sample_select)
+(sample_type_select <- phenotype[sample_select, "tissue_type.samples"])
+
+# 数据预处理：过滤在所有样本中都有缺失值的CpG位点（中文注释）
+# Data preprocessing: Filter out CpG sites with missing values in all samples (English comment)
+# 保留所有样本中均无缺失值的位点（中文注释）
+# Keep sites with no missing values in all samples (English comment)
+cgList_selector <- apply(methylation_matrix, 1, function(x) {sum(is.na(x)) == 0})
+cgList_select <- unlist(cgList[cgList_selector])
+```
+
+## nearest shrunken centroid classification
+
+先把上面各种信息存到metylation.data里，然后用到pamr包里的两个函数：pamr.train和pamr.predict。
+
+用?pamr.train查看对输入的要求
+
+## nearest shrunken centroid classification
+
+First, we saved the above information into metylation.data, and then we used two functions from the pamr package: pamr.train and pamr.predict.
+
+Use ?pamr.train to see the requirements for the inputs
+
+- x- an expression genes in the rows, samples in the columns)
+- y- a vector of the class labels for each sample. Optional components- genenames, a vector of gene names, and geneid- a vector of gene identifiers.
+
+用?pamr.predict查看对输入的要求
+
+Use ?pamr.predict to see the requirements for inputs
+
+- fit. The result of a call to pamr.train
+- newx. Matrix of features at which predictions are to be made
+- threshold. The desired threshold value
+
+```{r}
+# 使用pamr包训练最近收缩质心模型（中文注释）
+# Train a nearest shrunken centroid model using pamr package (English comment)
+# pamr.train函数专为基因表达（微阵列）数据设计（中文注释）
+# The pamr.train function is designed for gene expression (microarray) data (English comment)
+methylation_matrix_filtered <- as.matrix(methylation_matrix[apply(methylation_matrix, 1, function(x) sum(is.na(x)) == 0), ])
+rownames(methylation_matrix_filtered) <- cgList_select
+metylation.data <- list(
+  x = methylation_matrix_filtered,
+  y = sample_type_select,                                      # 样本类型标签（肿瘤/正常）（中文注释）
+  # Sample type labels (tumor/normal) (English comment)
+  genenames = cgList_select,                                   # CpG位点名称（中文注释）
+  # CpG site names (English comment)
+  geneid = cgList_select,                                      # CpG位点ID（中文注释）
+  # CpG site IDs (English comment)
+  samplelabels = sample_select,                                # 样本标签（中文注释）
+  # Sample labels (English comment)
+  batchlabels = NULL                                           # 批次标签（无批次信息）（中文注释）
+  # Batch labels (no batch information) (English comment)
+)
+
+# 释放内存：删除不再需要的大对象并执行垃圾回收（中文注释）
+# Free memory: Remove large objects that are no longer needed and perform garbage collection (English comment)
+# rm(methylation_matrix, cgList); gc()
+
+# 显示训练结果并存储模型（中文注释）
+# Display training results and store the model (English comment)
+(metylation.train <- pamr.train(data = metylation.data))
+
+# 自定义函数：从最近收缩质心模型中提取特征基因/CpG位点（中文注释）
+# Custom function: Extract feature genes/CpG sites from the nearest shrunken centroid model (English comment)
+# pamr.getGenes - 根据给定阈值获取有显著差异的特征（中文注释）
+# pamr.getGenes - Get significant features based on a given threshold (English comment)
+pamr.getGenes <- function (fit, data, threshold) {
+  x = data$x[fit$gene.subset, fit$sample.subset]           # 提取模型使用的子集数据（中文注释）
+  # Extract subset of data used by the model (English comment)
+  geneid = data$geneid[fit$gene.subset]                    # 提取对应的基因/CpG ID（中文注释）
+  # Extract corresponding gene/CpG IDs (English comment)
+  aa = pamr.predict(fit, x, threshold = threshold, type = "nonzero")  # 预测非零系数的特征（中文注释）
+  # Predict features with non-zero coefficients (English comment)
+  g1 = geneid[aa]                                            # 获取筛选后的特征ID（中文注释）
+  # Get IDs of filtered features (English comment)
+  rm(x, geneid, aa)                                          # 释放临时变量占用的内存（中文注释）
+  # Free memory occupied by temporary variables (English comment)
+  gc()
+  return(as.character(g1))                                   # 返回字符型的特征ID列表（中文注释）
+  # Return a character list of feature IDs (English comment)
+}
+
+# 使用阈值17筛选出前11个最具判别力的CpG位点（中文注释）
+# Use threshold 17 to select the top 11 most discriminative CpG sites (English comment)
+# 阈值越大，筛选出的特征越少，判别力越强（中文注释）
+# Larger threshold results in fewer but more discriminative features (English comment)
+cgsites <- pamr.getGenes(metylation.train, metylation.data, threshold = 3)
+cgsites
+```
+
+cg25247520, cg11201447 in cgsites
+
+## 开始画图
+
+## plot
+
+```{r}
+# 遍历筛选出的每个CpG位点，绘制其在肿瘤和正常样本中的甲基化水平分布图（中文注释）
+# Loop through each selected CpG site and plot its methylation levels in tumor and normal samples (English comment)
+for(i in 1:length(cgsites)){
+  cgsite <- cgsites[i]  # 获取当前CpG位点ID（中文注释）
+  # Get the current CpG site ID (English comment)
+  
+  # 从甲基化数据中提取该位点在所有样本中的甲基化值（中文注释）
+  # Extract methylation values for this site across all samples (English comment)
+  methylValue <- metylation.data$x[which(cgList_select==cgsite), ]
+  
+  # 创建PDF文件保存可视化结果（中文注释）
+  # Create PDF file to save visualization results (English comment)
+  pdf(paste0("groupMethylation_",cgsite,".pdf"))
+  
+  # 绘制正常样本的甲基化水平散点图（中文注释）
+  # Plot methylation levels for normal samples (English comment)
+  plot(1:STN_number, methylValue[1:STN_number], pch=1, col=cols[1], main=cgsite,
+       xlim=c(1, length(methylValue)), ylim=c(0,1),  # 设置坐标轴范围（中文注释）
+       # Set axis ranges (English comment)
+       yaxs="i", xaxs="i", xlab="", xaxt="n", ylab="Methylated levels")  # 隐藏x轴刻度（中文注释）
+       # Hide x-axis tick marks (English comment)
+  
+  # 添加肿瘤样本的甲基化水平散点图（中文注释）
+  # Add methylation levels for tumor samples (English comment)
+  points((STN_number+1):length(methylValue), methylValue[(STN_number+1):length(methylValue)], 
+         pch=1, col=cols[2])
+  
+  # 添加分隔线区分正常和肿瘤样本（中文注释）
+  # Add a vertical line to separate normal and tumor samples (English comment)
+  abline(v=STN_number+0.5, lty=2, lwd=2)
+  
+  # 添加图例说明不同颜色代表的样本类型（中文注释）
+  # Add legend to indicate sample types by color (English comment)
+  legend("topright", pch=1, col=cols, legend=labels, bty="n")
+  
+  # 关闭PDF设备（中文注释）
+  # Close the PDF device (English comment)
+  dev.off()
+}
+```
+
+在当前文件夹会看到生成了11个pdf文件，每个cgsites对应一个pdf文件。
+
+In the current folder will see the generation of 11 pdf files, each cgsites corresponds to a pdf file.
+
+## 原图复现
+
+原文选出的4个位点，有两个（cg25247520和cg11201447）出现在我们找到的cgsites当中。
+
+下面画原文选出的这4个位点。只要提供KIRC.methylation450.tsv.gz和KIRC_clinicalMatrix.gz两个文件，就能直接画图。
+
+## Original image reproduction
+
+Two of the 4 loci selected in the original article (cg25247520 and cg11201447) appear among the cgsites we found.
+
+These 4 loci selected in the original article are drawn below. As long as the files KIRC.methylation450.tsv.gz and KIRC_clinicalMatrix.gz are provided, we can draw the graph directly.
+
+```{r}
+# 定义要分析的CpG位点列表（中文注释）
+# Define the list of CpG sites to analyze (English comment)
+cgsites = c("cg08995609", "cg25247520", "cg13309012", "cg11201447")
+
+# 设置绘图颜色和标签（中文注释）
+# Set colors and labels for plotting (English comment)
+cols = c("red", "green")
+labels = c("Normal", "Tumor")
+
+
+phenotype <- read.table(
+  file = gzfile("TCGA-KIRC.clinical.tsv.gz"),  # 读取gzip压缩文件 / Read gzipped file
+  header = TRUE,                            # 第一行作为列名 / First row as column names
+  sep = "\t",                               # 制表符分隔 / Tab-delimited
+  # colClasses = c("character", rep("NULL",82), "integer", rep("NULL",37)),  # 只读取第一列和84列 / Only read 1st and 84th columns
+  row.names = 1                             # 第一列作为行名 / Use first column as row names
+)
+
+# 读取样本ID列表（中文注释）
+# Read sample ID list (English comment)
+# 只读取第一行（列名）（中文注释）
+# Read only the first row (column names) (English comment)
+sample <- read.table(
+  file = gzfile("TCGA-KIRC.methylation450.tsv.gz"),  # 甲基化数据文件 / Methylation data file
+  sep = "\t",                                        # 制表符分隔 / Tab-delimited
+  stringsAsFactors = FALSE,                          # 不转换字符串为因子 / Don't convert strings to factors
+  nrows = 1,                                        # 只读第一行(样本名) / Only read first row (sample names)
+  row.names = 1                                     # 第一列作为行名 / Use first column as row names
+)
+
+sample_type <- phenotype[substr(sample, 1, 15), "tissue_type.samples"]  # 提取前15字符匹配 / Match first 15 characters
+sample_list <- !is.na(sample_type)
+sample_type <- na.omit(sample_type)
+# 识别正常组织和原发肿瘤样本
+# Identify normal and tumor samples
+ 
+
+normal_number <- length(which(sample_type == "Normal"))  # 正常样本数量（中文注释）
+# Number of normal samples (English comment)
+isTumor <- sample_type == "Tumor"  # 肿瘤样本逻辑索引（中文注释）
+# Logical index for tumor samples (English comment)
+isNormal <- sample_type == "Normal"  # 正常样本逻辑索引（中文注释）
+# Logical index for normal samples (English comment)
+
+# 获取所有CpG位点列表（中文注释）
+# Get the list of all CpG sites (English comment)
+cgList <- read.table(file = gzfile("TCGA-KIRC.methylation450.tsv.gz"),
+                     sep="\t", stringsAsFactors = F, header = T,
+                     colClasses = c("character", rep("NULL", ncol(sample)-1)))
+str(cgList)  # 查看数据结构（中文注释）
+# Check data structure (English comment)
+
+# 循环绘制每个指定CpG位点的甲基化水平分布图（中文注释）
+# Loop to plot methylation levels for each specified CpG site (English comment)
+for(i in 1:length(cgsites)){
+  cgsite <- cgsites[i]  # 当前分析的CpG位点（中文注释）
+  # Current CpG site being analyzed (English comment)
+  
+  # 从大文件中读取特定CpG位点的甲基化数据（中文注释）
+  # Read methylation data for a specific CpG site from the large file (English comment)
+  methylValue <- read.table(file = gzfile("TCGA-KIRC.methylation450.tsv.gz"), sep = "\t",
+                            skip = which(cgList[,1] %in% cgsite),  # 跳过到目标行（中文注释）
+                            # Skip to the target row (English comment)
+                            nrows = 1, row.names = 1)  # 只读取一行（中文注释）
+                            # Read only one row (English comment)
+  methylValue <- methylValue[,sample_list]
+  # 创建PDF文件保存可视化结果（中文注释）
+  # Create PDF file to save visualization results (English comment)
+  pdf(paste0("groupMethylation_", cgsite, "_4.pdf"))
+  
+  # 绘制正常样本的甲基化水平散点图（中文注释）
+  # Plot methylation levels for normal samples (English comment)
+  plot(1:normal_number, methylValue[, which(isNormal)],
+       pch = 1, col = cols[1], main = cgsite,  # 设置点形状和颜色（中文注释）
+       # Set point shape and color (English comment)
+       xlim = c(1, length(methylValue)), ylim = c(0,1),  # 设置坐标轴范围（中文注释）
+       # Set axis ranges (English comment)
+       yaxs = "i", xaxs = "i", xlab = "", xaxt = "n", ylab = "Methylated levels")  # 隐藏x轴刻度（中文注释）
+       # Hide x-axis tick marks (English comment)
+  
+  # 添加肿瘤样本的甲基化水平散点图（中文注释）
+  # Add methylation levels for tumor samples (English comment)
+  points((normal_number + 1):length(methylValue), as.numeric(methylValue[1, which(isTumor)]),
+         pch=1, col=cols[2])
+  
+  # 添加分隔线区分正常和肿瘤样本（中文注释）
+  # Add a vertical line to separate normal and tumor samples (English comment)
+  abline(v=normal_number + 0.5, lty = 2, lwd = 2)
+  
+  # 添加图例说明不同颜色代表的样本类型（中文注释）
+  # Add legend to indicate sample types by color (English comment)
+  legend("topright", pch = 1, col = cols, legend = labels, bty="n")
+  
+  # 关闭PDF设备（中文注释）
+  # Close the PDF device (English comment)
+  dev.off()
+}
+```
+
+```{r}
+sessionInfo()
+```
