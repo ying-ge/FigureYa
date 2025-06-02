@@ -1,0 +1,305 @@
+---
+title: "FigureYa105GDSC"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 使用knitr包设置全局代码块选项
+# Set global chunk options using knitr package
+```
+
+## 需求描述
+
+利用pRRophetic算法，根据GDSC<www.cancerrxgene.org/>细胞系表达谱和TCGA基因表达谱构建岭回归模型预测药物IC50（使用原文数据，复现原图）
+
+提示：pRRophetic的示例可参考：https://github.com/paulgeeleher/pRRophetic/blob/master/vignetteOutline.pdf
+
+##Requirement description
+
+Using the pRRophetic algorithm, a ridge regression model was constructed based on the expression profiles of GDSC<www.cancerrxgene. org/>cell lines and TCGA gene expression profiles to predict drug IC50 (using the original data and reproducing the original image)
+
+Tip: For an example of pRRophetic, please refer to: https://github.com/paulgeeleher/pRRophetic/blob/master/vignetteOutline.pdf
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S1476558619301307>
+
+from<https://www.sciencedirect.com/science/article/pii/S1476558619301307>
+
+**注意：**由于包含原文数据，若涉及到注释文件亚型及其他相关数据的使用，请引用：
+Lu X, Jiang L, Zhang L, et al. Immune Signature-Based Subtypes of Cervical Squamous Cell Carcinoma Tightly Associated with Human Papillomavirus Type 16 Expression, Molecular Features, and Clinical Outcome[J]. Neoplasia, 2019, 21(6): 591-601.
+
+**Note: * * Due to the inclusion of original data, if it involves the use of annotation file subtypes and other related data, please cite:
+Lu X, Jiang L, Zhang L, et al. Immune Signature-Based Subtypes of Cervical Squamous Cell Carcinoma Tightly Associated with Human Papillomavirus Type 16 Expression, Molecular Features, and Clinical Outcome[J]. Neoplasia, 2019, 21(6): 591-601.
+
+## 应用场景
+
+预测病人对药物的IC50，画box plot图对比不同分组。
+
+还可以通过批量计算，筛选出组间差异显著的药物。
+
+##Application scenarios
+
+Predict the IC50 of the patient for the drug and draw a box plot to compare different groups.
+
+It is also possible to screen drugs with significant differences between groups through batch calculations.
+
+## 环境设置
+
+使用国内镜像安装包
+
+##Environment settings
+
+Use domestic image installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+BiocManager::install(c("car", "ridge", "preprocessCore", "genefilter", "sva"))
+```
+
+GDSC数据库里的内容可以用R包pRRophetic来访问和计算。
+
+<!-- 点击链接下载pRRophetic_0.5.tar.gz：<https://osf.io/dwzce/?action=download>，然后本地安装。 -->
+# 上述链接的R包有误，有问题，如要用pRRophetic包请用果子公众号更新维护版本<https://github.com/ixxmu/mp_duty/issues/2691>
+#The R package of the above link is incorrect. If you want to use the pRRophic package, please update the maintenance version with the fruit official account< https://github.com/ixxmu/mp_duty/issues/2691 >
+
+加载包
+
+The content in the GDSC database can be accessed and calculated using the R package pRRophetic.
+
+Click on the link to download pRRophetic_0.5.tar.gz:< https://osf.io/dwzce/?action=download >Then install it locally.
+
+Load Package
+
+```{r}
+install.packages("./pRRophetic 2/resource/pRRophetic_Guozi/", repos = NULL,type = "source")
+# 加载pRRophetic包，用于药物反应预测和分析
+# Load the pRRophetic package for drug response prediction and analysis
+library(pRRophetic)
+
+# 加载ggplot2包，用于创建优雅的统计图形
+# Load the ggplot2 package for creating elegant statistical graphics
+library(ggplot2)
+
+# 加载cowplot包，用于组合和排列ggplot图形
+# Load the cowplot package for combining and arranging ggplot graphics
+library(cowplot)
+
+# 设置环境语言为英文，使报错信息以英文显示
+# Set the environment language to English to display error messages in English
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止字符串自动转换为因子，保持数据原始格式
+# Disable automatic conversion of strings to factors to maintain original data format
+options(stringsAsFactors = FALSE) 
+```
+
+## 输入文件
+
+需要三个文件：表达数据、分组信息和药物名字，前两个文件的sample ID必须一致。
+
+easy_input_expr.txt，基因表达矩阵。
+
+easy_input_anno.txt，分组信息。示例数据里的C1和C2分别对应"HPV16-IMM"和"HPV16-KRT"。也可以是按某个基因的突变类型分组、或按某个基因表达量高低分组。
+
+drug.txt，要计算和画图的药物的名字，药物名必须存在与GDSC数据库中。**具体选哪个药物呢？**可以基于背景知识来选择合适的药物，就像例文那样；也可以批量筛选组间差异显著的药物做深入研究。
+
+getCGPinfo函数内部是2016版药物的名字，共251种；GDSC数据库的网站上2019版的药物名字有266种：<https://www.cancerrxgene.org/translation/Drug#t-all>；然而pRRopheticPredict函数的drug参数the name of the drug for which you would like to predict sensitivity, one of...，其中的药物名字只有138个，下面就对这138种药物进行计算和画图。把pRRopheticPredict函数的drug参数中的药物整理后保存在drug.txt文件中。
+
+##Input file
+
+Three files are required: expression data, grouping information, and drug names. The sample IDs of the first two files must be consistent.
+
+easy_input_expr.txt， Gene expression matrix.
+
+easy_input_anno.txt， Grouping information. C1 and C2 in the example data correspond to "HPV16-IMM" and "HPV16-KRT", respectively. It can also be grouped according to the mutation type of a certain gene, or according to the high or low expression level of a certain gene.
+
+drug.txt， To calculate and plot the names of drugs, the drug names must exist in the GDSC database. **Which medication should be chosen specifically? **Suitable drugs can be selected based on background knowledge, as in the example text; It is also possible to conduct in-depth research by batch screening drugs with significant differences between groups.
+
+The getCGPinfo function contains the names of 251 drugs from the 2016 version; On the website of GDSC database, there are 266 drug names in the 2019 version:< https://www.cancerrxgene.org/translation/Drug#t -all>； However, the drug parameter of the pRRopheticRedis function the name of the drug for which you would like to predict sensitivity, one of...， There are only 138 drug names among them. Below, we will calculate and plot these 138 drugs. Sort and save the drugs in the drug parameter of the pRRopheticRedis function in the drug.exe file.
+
+```{r}
+# 读取表达矩阵数据，假设文件格式为制表符分隔，第一列作为行名，第一行为列名
+# Read expression matrix data, assuming tab-separated format with row names in first column and column names in first row
+dat <- read.table("easy_input_expr.txt",sep = "\t",row.names = 1,header = T,stringsAsFactors = F,check.names = F)
+
+# 查看表达矩阵前3行和前3列，用于数据质量检查
+# View the first 3 rows and 3 columns of the expression matrix for data quality check
+dat[1:3, 1:3]
+
+# 读取样本分组信息，假设文件格式为制表符分隔，第一列作为行名，第一行为列名
+# Read sample annotation data, assuming tab-separated format with row names in first column and column names in first row
+ann <- read.table("easy_input_anno.txt",sep = "\t",row.names = 1,header = T,stringsAsFactors = F,check.names = F)
+
+# 查看分组信息的前几行，了解数据结构
+# View the first few rows of annotation data to understand its structure
+head(ann)
+
+# 统计每个免疫聚类(ImmClust)的样本数量，了解样本分布
+# Count the number of samples in each immune cluster (ImmClust) to understand sample distribution
+table(ann$ImmClust)
+
+# 读取待分析的药物名称列表
+# Read the list of drug names to be analyzed
+GCP.drug <- read.table("drug.txt") # 如果要使用例文中的两种药物，可替换为drug_eg.txt
+
+# 提取药物名称所在列的数据
+# Extract drug names from the first column of the data frame
+GCP.drug <- GCP.drug$V1
+
+# 选择前12种药物进行分析，可根据需要调整
+# Select the first 12 drugs for analysis, adjust as needed
+GCP.drug <- GCP.drug[1:12]
+```
+
+## 药物敏感性预测和画图
+
+##Drug sensitivity prediction and plotting
+
+```{r}
+# 自定义足够多的box颜色，颜色数量至少等于分组数量
+# Customize enough colors for the boxplots, the number of colors should be at least equal to the number of groups
+jco <- c("#EABF00", "#2874C5", "red")
+
+### 药物敏感性预测 ###
+# Initialize lists to store results and plots
+GCPinfo <- GCP.IC50 <- GCP.expr <- cvOut <- predictedPtype <- predictedBoxdat <- list()
+plotp <- list()
+
+for (drug in GCP.drug) {
+  # 设置随机种子，确保结果可重复
+  # Set random seed for reproducibility, especially for the 10-fold cross-validation in prediction
+  set.seed(1248103) 
+  
+  # 提示当前药物分析开始
+  # Print message indicating start of analysis for current drug
+  cat(drug," starts!\n") 
+  
+  # 预测IC50值，使用pRRophetic包的默认参数
+  # Predict IC50 values using pRRophetic with default parameters
+  testMatrix <- as.matrix(dat[,rownames(ann)])
+  predictedPtype[[drug]] <- pRRopheticPredict(testMatrix = testMatrix,
+                                              drug = drug,
+                                              tissueType = "allSolidTumors",
+                                              selection = 1) # 1表示若有重复基因取均值处理
+                                              # 1 indicates averaging duplicate genes if present
+  
+  # 检查预测结果与样本注释的名称是否匹配
+  # Check if the names in prediction results match the annotation data
+  if(!all(names(predictedPtype[[drug]])==rownames(ann))) {stop("Name mismatched!\n")}
+  
+  # 准备用于绘制箱线图的数据框
+  # Prepare data frame for boxplot visualization
+  predictedBoxdat[[drug]] <- data.frame("est.ic50"=predictedPtype[[drug]],
+                                        "ImmClust"=ifelse(ann$ImmClust == "C1","HPV16-IMM","HPV16-KRT"), 
+                                        row.names = names(predictedPtype[[drug]])) 
+  
+  # 将免疫聚类转换为有序因子变量
+  # Convert ImmClust to an ordered factor for proper plotting
+  predictedBoxdat[[drug]]$ImmClust <- factor(predictedBoxdat[[drug]]$ImmClust,
+                                            levels = c("HPV16-IMM","HPV16-KRT"),
+                                            ordered = T)
+  
+  # 使用ggplot2绘制箱线图
+  # Create boxplot using ggplot2
+  p <- ggplot(data = predictedBoxdat[[drug]], aes(x=ImmClust, y=est.ic50))
+  p <- p + geom_boxplot(aes(fill = ImmClust)) + 
+    scale_fill_manual(values = jco[1:length(unique(ann$ImmClust))]) + # 自定义box的配色
+                                                       # Customize box colors
+    theme(legend.position="none") + # 不显示图例
+                                   # Remove legend
+    theme(axis.text.x = element_text(angle = 45, hjust = 1,size = 12), # 倾斜x轴标签
+                                                                 # Rotate x-axis labels
+          plot.title = element_text(size = 12, hjust = 0.5)) +  # 居中标题
+                                                                 # Center plot title
+    xlab("") + ylab("Estimated IC50") +  # 设置坐标轴标签
+                                         # Set axis labels
+    ggtitle(drug) # 添加药物名称作为标题
+                  # Add drug name as title
+  
+  # 保存每个药物的箱线图到列表
+  # Save each plot to a list for later combination
+  plotp[[drug]] <- p
+  
+  # 提示当前药物分析完成
+  # Print message indicating completion of analysis for current drug
+  cat(drug," has been finished!\n")
+}
+
+# 合并图片 - 适合展示两种药物
+# Combine plots - suitable for displaying two drugs
+p1 <- plot_grid(plotp[[1]],plotp[[2]],labels = c("A","B"),nrow = 1) 
+ggsave("boxplot of predicted IC50.pdf", width = 6, height = 5)
+
+# 适合展示多种药物
+# Combine plots - suitable for displaying multiple drugs
+p2 <- plot_grid(plotlist=plotp, ncol=6)
+ggsave("boxplot of predicted IC50_multiple.pdf", width = 12, height = 6)
+```
+
+![](boxplot of predicted IC50.pdf)
+
+![](boxplot of predicted IC50_multiple.pdf)
+
+## 检验组间差异
+
+##Test group differences
+
+```{r}
+# 初始化向量存储每种药物的Wilcoxon检验p值（中文注释）
+# Initialize vector to store Wilcoxon test p-values for each drug (English comment)
+p <- vector()
+
+# 对每种药物进行Wilcoxon秩和检验，比较HPV16-IMM和HPV16-KRT免疫聚类组的估计IC50值（中文注释）
+# Perform Wilcoxon rank-sum test for each drug to compare estimated IC50 values between 
+# HPV16-IMM and HPV16-KRT immune clusters (English comment)
+for (drug in GCP.drug) {
+  # 提取HPV16-IMM免疫聚类组的估计IC50值（中文注释）
+  # Extract estimated IC50 values for HPV16-IMM immune cluster (English comment)
+  group1 <- as.numeric(predictedBoxdat[[drug]][which(predictedBoxdat[[drug]]$ImmClust %in% "HPV16-IMM"), "est.ic50"])
+  
+  # 提取HPV16-KRT免疫聚类组的估计IC50值（中文注释）
+  # Extract estimated IC50 values for HPV16-KRT immune cluster (English comment)
+  group2 <- as.numeric(predictedBoxdat[[drug]][which(predictedBoxdat[[drug]]$ImmClust %in% "HPV16-KRT"), "est.ic50"])
+  
+  # 执行单侧Wilcoxon秩和检验，检验假设：HPV16-IMM组的IC50值低于HPV16-KRT组（中文注释）
+  # Perform one-sided Wilcoxon rank-sum test with the hypothesis that 
+  # the IC50 values of HPV16-IMM group are lower than those of HPV16-KRT group (English comment)
+  tmp <- wilcox.test(group1, group2, alternative = "less")$p.value
+  
+  # 将p值添加到结果向量中（中文注释）
+  # Append the p-value to the result vector (English comment)
+  p <- append(p, tmp)
+}
+
+# 为结果向量添加药物名称作为标签（中文注释）
+# Add drug names as labels to the result vector (English comment)
+names(p) <- GCP.drug
+
+# 打印所有药物的p值（中文注释）
+# Print p-values for all drugs (English comment)
+print(p)
+
+# 注释：由于存在不显著的结果，此处未将p值添加到箱线图上（中文注释）
+# Note: Since there are non-significant results, p-values are not added to the boxplot here (English comment)
+# 可根据需要将p值添加到ggplot的标题中，或参考FigureYa12box函数直接绘制在图上（中文注释）
+# They can be added to the title of a ggplot or directly plotted on the figure 
+# by referring to the FigureYa12box function if needed (English comment)
+
+# 将p值保存到文本文件（中文注释）
+# Save p-values to a text file (English comment)
+write.table(p, "output_pvalue.txt", quote = F, sep = "\t")
+```
+
+打开output_pvalue.txt文件，从中挑选合适的药物，把名字写在"drug.txt"文件里，就可以只对这些药物计算和画图了。
+
+Open the output _pvalue. txt file, select the appropriate medication from it, write the name in the "drug. txt" file, and you can calculate and draw only for these medications.
+
+```{r}
+sessionInfo()
+```
