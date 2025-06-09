@@ -1,0 +1,219 @@
+---
+title: "FigureYa261circGene"
+params:
+  author: "Shuwen Cheng; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+绘制基因位置的环形图。
+
+Drawing a circular diagram of gene locations.
+
+![](example.png)
+
+出自：<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-020-01170-0>
+
+图1 胃癌中m6A调控因子的遗传及表达变异全景
+d 基于GSE62717队列的m6A调控因子在23条染色体上的拷贝数变异（CNV）位置分布
+
+Source: <https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-020-01170-0>
+
+Fig. 1 Landscape of genetic and expression variation of m6A regulators in gastric cancer.
+d The location of CNV alteration of m6A regulators on 23 chromosomes using GSE62717 cohort.
+
+# 应用场景
+# Application scenarios
+
+把几个感兴趣的基因标注在基因组上，可以像这篇例文画成圆的。
+
+如果基因太多，可以画成直的，可参考FigureYa10chromosome，可以同时展示基因表达量/变化倍数、分类等信息。
+
+如果还想展示基因之间的关系，可参考FigureYa74OmicCircos。
+
+Mark the genes of interest on the genome, which can be drawn in a circular layout like the example provided.
+
+If there are too many genes, a linear layout can be used (refer to FigureYa10chromosome), which can simultaneously display gene expression levels/fold changes, classifications, and other information.
+
+If you also want to illustrate relationships between genes, refer to FigureYa74OmicCircos.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("RCircos")
+BiocManager::install("TCGAbiolinks")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(RCircos)
+library(magrittr)
+library(tidyverse)
+library(rtracklayer)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 目标基因位置的获取
+# Obtaining Target Gene Locations
+
+如果你已经获得了very_easy_input.txt，就可以跳过这步，直接进入“开始画图”。
+
+easy_input_gene.txt，根据需要定义一个基因集，后面将把基因名标在画成环状的染色体上。
+
+hg38.gtf，基因组上所有基因所在位置，从中提取出目标基因的位置。可以从[gencode](https://www.gencodegenes.org)下载<https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_39/gencode.v39.annotation.gtf.gz>。文件较大，已上传到微云<https://share.weiyun.com/QXyYwYeP>。
+
+If you already have very_easy_input.txt, you can skip this step and proceed directly to "Start Plotting."
+
+easy_input_gene.txt: Define a gene set as needed. These gene names will later be labeled on the circular chromosome plot.
+
+hg38.gtf: Contains the genomic coordinates of all genes. Extract the positions of your target genes from this file. You can download the hg38.gtf file from [gencode](https://www.gencodegenes.org) at: <https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_39/gencode.v39.annotation.gtf.gz>. The file is large. A copy has been uploaded to Weiyun for convenience <https://share.weiyun.com/QXyYwYeP>.
+
+```{r eval=FALSE}
+# 根据需要定义一个基因集，可以从文件读入
+# Define a gene set as needed and it can be read from a file
+genes <- read.table("easy_input_gene.txt", header = T)$SYMBOL
+
+# 也可以直接在这里写入：
+# Or can be directly specified here: 
+#genes <- c("METTL3", "METTL14", "FTO", "ALKBH5","IGF2BP3",
+#           "YTHDF1", "YTHDF2", "YTHDF3", "IGF2BP1", "IGF2BP2", )
+
+# 根据基因集提取出目的基因所在位置
+# Extract genomic positions of target genes
+gene_pos <- import("hg38.gtf") %>% # 载入gtf文件
+  as.data.frame %>% 
+  
+  # 仅选择基因，去除转录本等等
+  # Select only gene entries, filtering out transcripts etc.
+  filter(source == "HAVANA", type == "gene") %>%  
+  
+  # 保留基因位置和名称
+  # Keep genomic coordinates and gene names
+  dplyr::select(seqnames, start, end, gene_name) %>% 
+  
+  # 挑选目的基因
+  # Filter for target genes
+  filter(gene_name %in% genes)
+head(gene_pos)
+
+# 原文没说内圈散点图代表什么特征，我们这里随机生成一列数值
+# Since the original text didn't specify what the inner scatter points represent, we'll randomly generate a numeric column here
+gene_pos$gene_dot <- rnorm(nrow(gene_pos), 0, 2)
+
+# 保存到文件，便于套用格式
+# Save to file for easy format reuse
+write.csv(gene_pos,"very_easy_input.csv", row.names = F, quote = F)
+```
+
+# 开始画图
+# Plotting
+
+very_easy_input.csv，基因、基因在染色体上的位置、基因的某一特征数值。
+
+very_easy_input.csv contains gene names, their chromosomal positions, and a numerical feature value for each gene.
+
+```{r}
+# 加载基因所在的位置和数值
+# Load gene positions and associated numerical values 
+gene_pos <- read.csv("very_easy_input.csv", header = T)
+
+# 加载染色体Ideogram
+# Load chromosome ideogram data 
+(data("UCSC.HG38.Human.CytoBandIdeogram"))
+```
+
+
+```{r, message=FALSE, fig.height = 8, fig.width=8}
+# 创建PDF输出文件（5x5英寸）
+# Create PDF output file (5x5 inches)
+pdf(file="circGene.pdf", height=5, width=5)
+
+# 初始化RCircos核心组件（基于hg38人类细胞遗传图谱）
+# Initialize RCircos core components (based on hg38 human cytoband)
+RCircos.Set.Core.Components(UCSC.HG38.Human.CytoBandIdeogram,
+                            chr.exclude = NULL,
+                            tracks.inside = 3, 
+                            tracks.outside = 0)
+RCircos.Set.Plot.Area()
+
+# 绘制染色体
+# Draw chromosome ideograms
+RCircos.Chromosome.Ideogram.Plot()
+
+# 在第一圈用散点在基因所在的位置标注数值
+# 调整配色
+# Plot scatter points in Track 1 to show numerical values at gene positions
+# Adjust color scheme
+param <- RCircos.Get.Plot.Parameters()
+param$track.background <- "grey" 
+RCircos.Reset.Plot.Parameters(param)
+
+# 第一轨道：散点图显示基因数值
+# Track 1: Scatter plot for gene values
+RCircos.Scatter.Plot(gene_pos,
+                     data.col = 5, 
+                     by.fold = 1, 
+                     track.num = 1,
+                     side = "in")
+
+# 第二轨道：基因连接线（标记基因位置）
+# Track 2: Gene connectors (mark gene positions)
+RCircos.Gene.Connector.Plot(genomic.data = gene_pos, 
+                            track.num = 2, 
+                            side = "in")
+
+# 第三轨道：基因名称标签
+# Track 3: Gene name labels
+RCircos.Gene.Name.Plot(gene_pos, 
+                       name.col = 4,
+                       track.num = 3, 
+                       side = "in")
+
+dev.off()
+```
+
+![](circGene.pdf)
+
+# 后期处理
+# Post-processing
+
+输出到pdf文件为矢量图，可以用Adobe Illustrator等软件打开，编辑图形和文字。例如为避免基因名文字重叠，手动微调文字位置，和修改连线形状。
+
+The plot is exported as a vector graphic in PDF format, which can be opened and edited in software like Adobe Illustrator. For example, you may manually adjust text positions to prevent gene name overlaps and modify connector shapes.
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
