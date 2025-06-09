@@ -1,0 +1,198 @@
+---
+title: "FigureYa262GDC"
+params:
+  author: "Zongcheng Li; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+希望众筹补充材料里的Figure S2A
+
+We want to crowdfund Figure S2A in the supplementary materials
+
+![](example.png)
+
+出自：<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-021-01322-w>，跟FigureYa259circLink、FigureYa260CNV出自同一篇文章。
+
+图S2. TCGA-COAD/READ中的突变频率和CNV分析。
+(A) TCGA队列33种癌症类型中RNA修饰"writers"的突变频率。横轴表示癌症类型，括号内给出了样本数量。纵轴列出了基因的名称。
+
+Source: <https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-021-01322-w>. Same article as FigureYa259circLink and FigureYa260CNV
+
+Figure S2. Analysis of mutation frequency and CNV in TCGA- COAD/READ. 
+(A) The mutation frequency of RNA modification “writers” among 33 cancer types in the TCGA cohort. The horizontal axis represents cancer types, and the number of samples is given in the parentheses. The vertical axis lists the names of the genes.
+
+# 应用场景
+# Application scenarios
+
+TCGA pancancer突变数据的可视化，自己提供感兴趣的基因名即可。
+
+The visualization of TCGA pancancer mutation data can be achieved by providing the gene names of interest yourself
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(tidyverse)
+library(magrittr)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件的获得
+# Input File Preparation
+
+STEP 1: 选定目标基因。这里跟原文一致，选用26个m6A Writer基因。打开例文Additional file 2 12943_2021_1322_MOESM2_ESM.xlsx中的Supplementary Table 1，复制B列的26个Writter gene。
+
+STEP 2: 从GDC网站获取目的基因在33种肿瘤种的突变信息。如下图所示六个步骤，在GDC网站<https://portal.gdc.cancer.gov/>上传基因名（这里用的是STEP1获得的26个m6A Writer），保存为frequently-mutated-genes.2022-01-26.tsv文件。
+
+STEP 1: Select target genes. Following the original paper, use 26 m6A Writer genes. Open Additional file 2 12943_2021_1322_MOESM2_ESM.xlsx, Supplementary Table 1, copy the 26 Writter genes from column B.
+
+STEP 2: Obtain mutation information for target genes across 33 cancer types from GDC portal. Follow the 6 steps shown in the image below to upload gene names at GDC website<https://portal.gdc.cancer.gov/>, save as frequently-mutated-genes.2022-01-26.tsv
+
+> 注意：第5步，所有行（基因）的红色小三角形都要点一下。
+
+> Note: In step 5, click on all the small red triangles in each row (gene).
+
+![download](GDC.png)
+
+# 解析突变信息TSV文件
+# Parse Mutation TSV File
+
+```{r}
+# 读取GDC的TSV文件（包含高频突变基因数据）
+# Read TSV file from GDC (containing frequently mutated genes data)
+gdcdata <- read_tsv("frequently-mutated-genes.2022-01-26.tsv")
+text <- gdcdata$`# SSM Affected Cases Across the GDC`[1]
+
+# 处理突变数据
+# Process mutation data
+gdcdata %>%
+  mutate(Mut = `# SSM Affected Cases Across the GDC`) %>%
+  select(Mut, Symbol) %>%
+  pmap(
+    function(Mut, Symbol){
+      Mut %>% str_split(",") %>%
+        .[[1]]%>%
+        str_extract("^TCGA-.*") %>% 
+        na.omit() %>%
+        str_match("^TCGA-([A-Z]+): ([0-9]+) / ([0-9]+) \\(([0-9.]+)%\\)") %>%
+        set_colnames(value = c("string", "cancer", "n_mutated", "n_cohort", "percent")) %>%
+        as.data.frame() %>%
+        mutate(n_mutated = as.numeric(n_mutated),
+               n_cohort = as.numeric(n_cohort),
+               percent = as.numeric(percent),
+               gene = Symbol)
+    }
+  ) %>% do.call(what = rbind) -> mutData
+
+# 添加排序因子和统计量
+# Add ordering factors and statistics
+mutData %>%
+  mutate(cancer_num = str_glue("{cancer} ({n_cohort})")) %>%
+  group_by(cancer) %>%
+  mutate(total_cancer = sum(percent)) %>%
+  ungroup() %>%
+  group_by(gene) %>%
+  mutate(total_gene = sum(percent)) %>%
+  ungroup() %>%
+  mutate(cancer_ordered = factor(cancer_num, levels = unique(cancer_num[order(-total_cancer)])),
+         gene_ordered = factor(gene, levels = unique(gene[order(total_gene)]))) -> ggData
+```
+
+# 开始画图
+
+```{r fig.width=8, fig.height=6}
+ggplot() +
+  # 填背景
+  # Create background
+  geom_blank(
+    mapping = aes(cancer_ordered, gene_ordered, fill = percent),
+    data = ggData,
+  ) +
+  
+  # 画边框
+  # Draw borders
+  geom_tile(
+    mapping = aes(cancer_ordered, gene_ordered),
+    data = expand_grid(
+      cancer_ordered = ggData$cancer_ordered %>% levels,
+      gene_ordered = ggData$gene_ordered %>% levels
+      ),
+    color = "gray90",size=.5, fill = NA
+  ) +
+  geom_tile(
+     mapping = aes(cancer_ordered, gene_ordered, fill = percent),
+     data = ggData,
+    color = "black",size=.5, inherit.aes = F
+  ) +
+  
+  # 写数字
+  # Add mutation count labels
+  geom_text(aes(cancer_ordered, gene_ordered, label=n_mutated),
+            data = ggData,
+            col ="black",
+            size = 3) +
+  
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(9, "Purples"), na.value = "red") +
+  scale_color_manual(na.value = "grey") +
+  scale_x_discrete(position = "top") +
+  labs(x = NULL, y = NULL, fill = "MF (%)") +
+  theme_grey() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid = element_blank()
+  )
+
+# 保存图片
+# Save plot
+ggsave("GDC.pdf", width = 8, height = 6)
+```
+
+> 用相同方法获得FigureYa276panSNV目标基因的突变信息，保存为frequently-mutated-genes.2022-06-03.tsv，跟FigureYa276panSNV（从xena下载数据开始）的第一个图对比，大致趋势是一致的。
+
+> Note: Using the same method to obtain mutation data for FigureYa276panSNV target genes, saved as frequently-mutated-genes.2022-06-03.tsv. Compared with the first plot in FigureYa276panSNV (starting from Xena database download), the trends are generally consistent.
+
+![](GDC_FigureYa276panSNV.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
