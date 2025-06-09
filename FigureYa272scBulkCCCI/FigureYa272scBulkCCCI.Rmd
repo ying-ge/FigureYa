@@ -1,0 +1,580 @@
+---
+title: "FigureYa272scBulkCCCI"
+params:
+  author: "Xiaojian Liu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+基于细胞类型signature识别细胞-细胞互作
+
+Identifying cell-cell interactions based on cell type signatures.
+
+![](workflow.png)
+
+出自：<https://linkinghub.elsevier.com/retrieve/pii/S009286742030341X>
+
+图S8. 相关性细胞互作网络分析框架及人和小鼠肿瘤中髓系细胞亚群概述（与图3和STAR方法相关）。
+(A) 相关性网络分析流程图。
+从Smart-seq2单细胞RNA测序数据中鉴定出细胞**亚型特异性基因**，并用于**估算TCGA/GTEx批量RNA测序数据中的相对丰度**。在过滤掉自身表达的基因后，计算**高相关性基因**。最后，基于Smart-seq2表达谱进行**富集分析**，以**识别所有相关的细胞亚型并构建相关性网络**（STAR方法）。
+
+Source: <https://linkinghub.elsevier.com/retrieve/pii/S009286742030341X>
+
+Figure S8. Analysis Framework for Correlative Cell-Cell Interaction Networks and Summary of Myeloid Cell Subsets in Human and Mouse Tumors, Related to Figure 3 and STAR Methods.
+(A) Workflow illustrating correlative network analysis. 
+Cell **subtype specific genes** were identified from the Smart-seq2 scRNA-seq dataset and were used to **estimate the relative abundance in TCGA/GTEx bulk RNA-seq datasets.** After filtering the self-expressed genes, **high correlative genes** were calculated. Finally, an **enrichment analysis** based on Smart-seq2 profile was performed to **identify all correlated cell subtypes and build the correlative network** (STAR Methods).
+
+# 应用场景
+# Application scenarios
+
+借助scRNA-seq找到的signature genes，推断bulk RNA-seq样本的细胞类群互作网络，最后用igraph（静态）和networkD3（动态）两种网络可视化工具来展示结果。
+
+本文档作者写了个R包scBulkCCCI，以便小伙伴运行例文的workflow。
+
+scBulkCCCI：correlative cell-cell interaction networks based on combining scRNA-seq and TCGA datasets
+
+R包下载地址：<https://www.yuque.com/figureya/figureyaplus/package>
+
+下载后解压缩，可以查看R包内容：
+
+- 包的自带描述文档，见ScBulkCCCI/README.md
+- 示例部分数据，储存在ScBulkCCCI/data，scRNA-seq数据太大，未内置在包中，根据说明去下载；
+- 数据经过预处理：数据预处理的code查看ScBulkCCCI包下ScBulkCCCI_DataPreprocess.R， 位于ScBulkCCCI/example；
+- 示例运行代码ScBulkCCCI.R，于ScBulkCCCI/example；
+
+Using signature genes identified from scRNA-seq, we inferred cell population interaction networks in bulk RNA-seq samples, and finally visualized the results using two network visualization tools: igraph (static) and networkD3 (dynamic).
+
+The author of this document developed an R package, scBulkCCCI, to help users run the workflow described in the example.
+
+scBulkCCCI: Correlative cell-cell interaction networks based on combining scRNA-seq and TCGA datasets
+
+R package download link: <https://www.yuque.com/figureya/figureyaplus/package>
+
+After downloading and extracting the package, you can view its contents:
+
+- Package documentation: See ScBulkCCCI/README.md.
+- Example datasets: Stored in ScBulkCCCI/data. Note that the scRNA-seq data is too large to be included in the package—please download it separately as instructed.
+- Preprocessed data: The preprocessing code can be found in ScBulkCCCI/example/ScBulkCCCI_DataPreprocess.R.
+- Example execution code: ScBulkCCCI.R, located in ScBulkCCCI/example
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("ggthemes")
+
+# 下载后本地安装
+# 下载地址：https://www.yuque.com/figureya/figureyaplus/package
+# Download and install locally
+# Download link: https://www.yuque.com/figureya/figureyaplus/package
+install.packages("ScBulkCCCI_0.1.3.tar.gz", repos = NULL, type = "source")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library("ScBulkCCCI")
+library("pheatmap")
+library("RColorBrewer")
+library("ggplot2")
+library("ggthemes")
+library("plyr")
+library("dplyr")
+library("stringr")
+library("tibble")
+library("tidyr")
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+输入文件包含两部分：scRNA-seq、bulk RNA-seq（以TCGA数据为例，也可以用其他RNA-seq数据）。
+
+The input files consist of two parts: scRNA-seq and bulk RNA-seq (using TCGA data as an example, though other RNA-seq data can also be used).
+
+## scRNA-seq 数据
+## scRNA-seq data
+
+下载地址：[GSE146771](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE146771)
+
+Download link: [GSE146771](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE146771)
+
+![](download.png)
+
+CRC.Leukocyte.Smart-seq2.Metadata.txt: 细胞类群信息
+
+- CellName: 细胞ID
+- Tissue: 细胞所属组织类型
+- Global_Cluster: 一级分类
+- Sub_Cluster: 二级分类
+
+CRC.Leukocyte.Smart-seq2.TPM.txt: 细胞基因定量矩阵，列是细胞，行是基因
+
+
+CRC.Leukocyte.Smart-seq2.Metadata.txt: Cell population information
+
+- CellName: Cell ID
+- Tissue: Tissue type of the cell
+- Global_Cluster: First-level classification
+- Sub_Cluster: Second-level classification
+
+CRC.Leukocyte.Smart-seq2.TPM.txt: Cell gene expression matrix (columns: cells, rows: genes)
+
+```{r}
+## 输入ScRNAseq Smart-seq2
+## Import ScRNAseq Smart-seq2
+CRC_Leukocyte_SM_MD <- read.table("CRC.Leukocyte.Smart-seq2.Metadata.txt",header = T, sep="\t", check.names = F);dim(CRC_Leukocyte_SM_MD)
+
+# 读取TPM标准化后的单细胞表达矩阵
+# Read TPM-normalized single-cell expression matrix
+CRC_Leukocyte_SM_RNA <- read.table("CRC.Leukocyte.Smart-seq2.TPM.txt",header = T) 
+```
+
+## bulk RNAseq数据
+## Bulk RNA-seq Data
+
+从[UCSC Xena](xenabrowser.net)下载后进行预处理（COAD and READ），预处理代码见ScBulkCCCI安装包中的example/ScBulkCCCI_DataPreprocess.R。已打包到R包里，直接加载即可。
+
+dataMerge_normal_allgene.rds: 列是样本，行是基因ID
+dataMerge_tumor_allgene.rds: 列是样本，行是基因ID
+
+Preprocessed data (COAD and READ) downloaded from [UCSC Xena](xenabrowser.net). The preprocessing code is available in the ScBulkCCCI package under example/ScBulkCCCI_DataPreprocess.R. The processed data is bundled in the R package and can be directly loaded.
+
+dataMerge_normal_allgene.rds: Column is sample, row is gene ID
+dataMerge_tumor_allgene.rds: Column is sample, row is gene ID
+
+```{r}
+## 获取ScBulkCCCI的安装路径
+## Get the install path of ScBulkCCCI
+libPath <- find.package("ScBulkCCCI")
+
+## 导入批量表达谱
+## Import bulk expression profiles
+dataMerge_normal_allgene <- readRDS(paste(libPath, "/data/dataMerge_normal_allgene.rds",sep="")); dim(dataMerge_normal_allgene)
+dataMerge_tumor_allgene <- readRDS(paste(libPath, "/data/dataMerge_tumor_allgene.rds",sep="")); dim(dataMerge_tumor_allgene)
+```
+
+# 特征基因
+# Signature Genes
+
+特征基因用于相关性互作分析
+
+怎样筛选自己的Signature Genes？
+
+可参考例文的“Identification of signature genes”，里面描述了接seurat的筛选标准。单细胞数据前期处理及seurat常规流程可参考FigureYa177RNAvelocity。
+
+对于异质性较大的样品，可参考FigureYa223scNMF，不用seurat，而是借助NMF和聚类分析找marker gene。
+
+这里直接整理例文的[Table S4 of paper](#https://ars.els-cdn.com/content/image/1-s2.0-S009286742030341X-mmc4.xlsx)，已打包到R包里，直接加载即可。
+
+CCgene_normal.rds: 正常组织富集的免疫细胞类群的signature genes；第一列基因，第二列细胞类群名
+
+CCgene_tumor.rds: 肿瘤组织富集的免疫细胞类群的signature genes；第一列基因，第二列细胞类群名
+
+
+Signature Genes were Used for Correlative Interaction Analysis
+
+How to Select Your Own Signature Genes?
+
+Refer to the example section "Identification of signature genes". It describes the Seurat-based selection criteria. For single-cell data preprocessing and standard Seurat workflow, refer to FigureYa177RNAvelocity.
+
+For highly heterogeneous samples, refer to FigureYa223scNMF. Instead of Seurat, it uses NMF and clustering to identify marker genes.
+
+Here we directly provide the curated Table S4 of the paper[Table S4 of paper](#https://ars.els-cdn.com/content/image/1-s2.0-S009286742030341X-mmc4.xlsx), which has been packaged into the R package and can be loaded directly.
+
+CCgene_normal.rds: Signature genes for immune cell populations enriched in normal tissues; Column 1: gene names, Column 2: cell population names
+
+CCgene_tumor.rds: Signature genes for immune cell populations enriched in tumor tissues; Column 1: gene names, Column 2: cell population names
+
+```{r}
+# 从预存RDS文件中加载正常组织的细胞周期特征基因
+# Load cell cycle signature genes for normal tissue from pre-saved RDS file
+CCgene_normal <- readRDS(paste(libPath, "/data/CCgene_normal.rds",sep=""))
+
+# 从预存RDS文件中加载肿瘤组织的细胞周期特征基因
+# Load cell cycle signature genes for tumor tissue from pre-saved RDS file
+CCgene_tumor <- readRDS(paste(libPath, "/data/CCgene_tumor.rds",sep=""))
+
+# 查看正常组织特征基因前几行
+# Preview first few rows of normal tissue signature genes
+head(CCgene_normal)
+
+# 查看肿瘤组织特征基因前几行
+# Preview first few rows of tumor tissue signature genes
+head(CCgene_tumor)
+```
+
+# 相关性矩阵
+# Correlation matrix
+
+基于**批量RNA测序**数据和**标记基因**评估各细胞簇的丰度
+
+Evaluate the abundance of each cluster based on **bulk RNAseq** data and **marker genes**
+
+```{r}
+# 计算正常组织细胞亚型基因表达的相关性矩阵
+# Calculate correlation matrix for normal tissue cell subtype gene expression
+cor_matrix_normal = corMatrix(CCgene_normal, 
+                              cluste = "cluster",
+                              dataMerge_normal_allgene) 
+
+# 显示相关性矩阵维度
+# Show correlation matrix dimensions
+dim(cor_matrix_normal)
+
+# 计算肿瘤组织细胞亚型基因表达的相关性矩阵
+# Calculate correlation matrix for tumor tissue cell subtype gene expression
+cor_matrix_tumor = corMatrix(CCgene_tumor, 
+                             cluste = "cluster",
+                             dataMerge_tumor_allgene)
+
+# 显示相关性矩阵维度
+# Show correlation matrix dimensions
+dim(cor_matrix_tumor)
+```
+
+# 富集分析
+# Enrichment analysis
+
+## 高相关性基因 - 针对特定细胞亚型与其他细胞亚型
+## Highly correlated genes - For a specific cell subtype and another cell subtype
+
+分析成果：从调整后的相关性矩阵中获得的、特定细胞亚型与其他亚型的非自身表达基因的排序相关性结果
+
+步骤1：鉴定自身表达基因
+
+步骤2：通过自身表达基因调整相关性矩阵
+
+Achievement: the ranked correlated non-self-expressed genes from the adjusted correlation matrix for a specific cell subtype
+
+step 1. Identify self-expressed genes
+
+step 2. Adjust correlation matrix by self-expressed genes
+
+```{r}
+# 从正常组织特征基因中提取唯一的亚群名称列表，并选择第一个亚群
+# Extract unique subcluster names from normal tissue signature genes and select the first one
+subcluter_name= unique(CCgene_normal$cluster)[1] #unique(CCgene_normal$cluster)[1] #unique(CCgene_normal$cluster)[1]
+
+# 筛选与指定亚群高度相关且非自身表达的基因
+# Filter genes highly correlated with target subcluster but not self-expressed
+highCorNonSelfGenes <- highCorGene(subcluter_name= subcluter_name,
+                                  Sub_Cluster="Sub_Cluster", CellName="CellName",
+                                  cellMetaData= CRC_Leukocyte_SM_MD, ScExMatrix=CRC_Leukocyte_SM_RNA,
+                                  cor_matrix=cor_matrix_normal,TopMethod="Positive")
+
+# 绘制相关性排名图
+# Plot correlation rank
+highCorNonSelfGenes$correlatioRankPlot
+```
+
+## 富集评分 - 针对特定细胞亚型与多个细胞亚型
+## Enrich score - For a specific cell subtype and multiple cell subtype
+
+```{r}
+# 合并正常和肿瘤组织的所有独特亚群名称
+# Combine all unique subcluster names from normal and tumor tissues
+allClusters <- unique(c(as.character(CCgene_normal$cluster), as.character(CCgene_tumor$cluster))) 
+#allClusters<- unique(CRC_Leukocyte_SM_MD$Sub_Cluster)
+
+# 执行一对多亚群富集分析（使用前13个高相关基因）
+# Perform one-to-multiple subcluster enrichment analysis (using top 13 correlated genes)
+ES <- oneToMultiple(allClusters= allClusters,
+                   topCorGene=names(highCorNonSelfGenes$CorGeneRank[1:13]),
+                   cellMetaData= CRC_Leukocyte_SM_MD, ScExMatrix=CRC_Leukocyte_SM_RNA,
+                   Sub_Cluster="Sub_Cluster", CellName="CellName")
+scale(na.omit(ES))
+
+# 创建绘图数据框（包含标准化分数和颜色分组信息）
+# Create plotting dataframe (with normalized scores and color groups)
+ESData = data.frame(name = rownames(scale(na.omit(ES))),ES=scale(na.omit(ES)))
+ESData$colorInfo = as.factor(ifelse(ESData$ES>0, "pos", "neg"))
+
+# 富集分数可视化
+# Enrichment Score Visualization
+ggplot() + geom_bar(data = ESData,aes(x=name, y=ES, fill=colorInfo),stat = "identity") + 
+  geom_hline(yintercept=1, color="blue", linetype="dashed") +
+  scale_fill_manual(values=c("#87CEFA", "#6495ED")) +
+  labs(x = "Correlative cell cluster", y = "Enrichment score", title = paste("Enrichment analysis for",subcluter_name,sep = " ")) +
+  theme_base() +
+  theme(axis.text.x = element_text(size = 15, vjust = 0.5, hjust = 0.5, angle = 90)) + 
+  theme(legend.position="none") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# 保存为PDF
+# Save as PDF
+ggsave("EnrichScore.pdf", width = 12, height = 8)
+```
+
+## 相关性网络分析 - 针对多细胞亚型间互作
+## Correlative network - For multiple cell subtypes and multiple cell subtypes
+
+```{r}
+# 合并正常和肿瘤组织的所有独特亚群名称
+# Combine all unique subcluster names from normal and tumor tissues
+allClusters = unique(c(as.character(CCgene_normal$cluster), as.character(CCgene_tumor$cluster))) #unique(CRC_Leukocyte_SM_MD$Sub_Cluster)
+
+# 例文选了top 13 highly correlated non-self-expressed genes were selected from the adjusted correlation matrix.
+# 根据自己的数据调整
+# The reference selected top 13 highly correlated non-self-expressed genes from the adjusted correlation matrix.
+# Adjust parameters according to your own data
+topGeneNum <- 13 
+
+{
+  # 正常组织亚群相互作用分析
+  # Normal tissue subcluster interaction analysis
+  normal_subtype_ES = cellCellInteraction(specificSubtypes = unique(CCgene_normal$cluster),
+                                          allClusters = allClusters, # unique(c(CCgene_normal$cluster, CCgene_tumor$cluster)), #unique(CRC_Leukocyte_SM_MD$Sub_Cluster)
+                                          cor_matrix = cor_matrix_normal,
+                                          cellMetaData= CRC_Leukocyte_SM_MD,
+                                          ScExMatrix=CRC_Leukocyte_SM_RNA,
+                                          Sub_Cluster="Sub_Cluster",
+                                          CellName="CellName",
+                                          topGeneNum = topGeneNum,
+                                          TopMethod="Positive")
+  
+  # 肿瘤组织亚群相互作用分析
+  # Tumor tissue subcluster interaction analysis
+  tumor_subtype_ES = cellCellInteraction(specificSubtypes = unique(CCgene_tumor$cluster),
+                                         allClusters = allClusters, # unique(c(CCgene_normal$cluster, CCgene_tumor$cluster)),
+                                         cor_matrix = cor_matrix_tumor,
+                                         cellMetaData= CRC_Leukocyte_SM_MD,
+                                         ScExMatrix=CRC_Leukocyte_SM_RNA,
+                                         Sub_Cluster="Sub_Cluster",
+                                         CellName="CellName",
+                                         topGeneNum = topGeneNum,
+                                         TopMethod="Positive")
+}
+
+# 添加组织来源标签
+# Add tissue origin labels
+normal_subtype_ES$tissue = "normal"
+tumor_subtype_ES$tissue = "tumor"
+
+# 合并正常和肿瘤结果
+# Merge normal and tumor results
+subtype_ES <- rbind(normal_subtype_ES,tumor_subtype_ES)
+
+# 保存肿瘤特异相互作用结果
+# Save tumor-specific interaction results
+write.table(tumor_subtype_ES, file = "output_tumor_subtype.Correlative.cell_cell.interactions.txt", quote = F, row.names = F, sep = "\t") #
+
+# 保存合并后的相互作用结果
+# Save merged interaction results
+write.table(subtype_ES, file = "output_correlative.cell_cell.interactions.txt", quote = F, row.names = F, sep = "\t") 
+```
+
+## 比较ScBulkCCCI与原文的相关细胞相互作用结果。
+## Compare the result of correlative cell cell interactions between ScBulkCCCI and paper.
+
+```{r}
+# 筛选hM03开头的亚群且富集分数>1的相互作用
+# Filter interactions for hM03-prefixed subtypes with enrichment score >1
+dplyr::filter(subtype_ES, grepl("^hM03", specificSubtype), EnrichScore>1)
+
+# 筛选hM04开头的亚群且富集分数>1的相互作用
+# Filter interactions for hM04-prefixed subtypes with enrichment score >1
+dplyr::filter(subtype_ES, grepl("^hM04", specificSubtype), EnrichScore>1)
+
+# 筛选hM12开头的亚群且富集分数>1的相互作用
+# Filter interactions for hM12-prefixed subtypes with enrichment score >1
+dplyr::filter(subtype_ES, grepl("^hM12", specificSubtype), EnrichScore>1)
+
+# 筛选hM13开头的亚群且富集分数>1的相互作用
+# Filter interactions for hM13-prefixed subtypes with enrichment score >1
+dplyr::filter(subtype_ES, grepl("^hM13", specificSubtype), EnrichScore>1)
+```
+
+> hM13_TAM-SPP1的富集分析结果在ScBulkCCCI中与文献报道一致。
+> The enrichment analysis result of `hM13_TAM-SPP1` from ScBulkCCCI is the same result as paper  show.
+
+- - 此外，hM03、hM04或hM12的富集分析结果并不完全相同，但具有相似性。
+- - What's more, the enrichment analysis results of hM03, hM04 or hM12 are not identical, but they are similar.
+
+# 开始画图
+# Plotting
+
+```{r}
+# 读取肿瘤亚群间相互作用结果文件
+# Read tumor subtype interaction results file
+tumor_subtype_ES <- read.table("output_tumor_subtype.Correlative.cell_cell.interactions.txt", header = T, sep = "\t")
+
+# 筛选显著相互作用（EnrichScore > 1.96，相当于p<0.05）
+# Filter significant interactions (EnrichScore > 1.96, approx. p<0.05)
+networkData <- dplyr::filter(tumor_subtype_ES, EnrichScore>1.96, specificSubtype != otherSubtype)
+
+# 重新加载单细胞元数据
+# Reload single-cell metadata
+CRC_Leukocyte_SM_MD <- read.table(paste(libPath, "/data/CRC.Leukocyte.Smart-seq2.Metadata.txt",sep=""),header = T, sep="\t", check.names = F);dim(CRC_Leukocyte_SM_MD)
+
+# 获取网络数据与元数据中的共同亚群
+# Get overlapping subtypes between network and metadata
+overlap <- intersect(unique(c(networkData$specificSubtype,networkData$otherSubtype)), CRC_Leukocyte_SM_MD$Sub_Cluster)
+
+# 从元数据中提取节点信息
+# Extract node information from metadata
+nodes <- dplyr::filter(CRC_Leukocyte_SM_MD,Sub_Cluster %in% overlap) %>%
+  select(Sub_Cluster, Global_Cluster) %>%
+  dplyr::distinct(Sub_Cluster,Global_Cluster) 
+
+# 构建完整节点列表
+# Build complete node list
+nodes <- merge(data.frame(node = unique(c(networkData$specificSubtype,networkData$otherSubtype))), nodes, by.x="node", by.y="Sub_Cluster", all = T)
+nodes[is.na(nodes)] ="Not annotation"
+```
+
+下面分别用igraph（静态）和networkD3（动态）两种网络可视化工具来展示Enrichment analysis结果。
+
+Below we present the Enrichment analysis results visualized using two network tools: igraph (static) and networkD3 (interactive).
+
+## 通过igraph绘制网络
+## Plot network by igraph
+
+```{r}
+# 加载igraph网络分析包
+# Load igraph network analysis package
+library("igraph")
+
+# 从数据框创建无向图对象
+# Create undirected graph object from data frame
+g <- graph_from_data_frame(networkData, directed=F, vertices=nodes)
+
+# 设置节点标签大小（0.75倍默认大小）
+# Set vertex label size (0.75x default)
+V(g)$label.cex=0.75
+
+# 设置节点标签颜色为黑色
+# Set vertex label color to black
+V(g)$label.color <- "black"
+
+# 使用RColorBrewer的Paired调色板设置节点颜色
+# Set vertex colors using RColorBrewer's Paired palette
+V(g)$color <- brewer.pal(n = 12, name ="Paired")[as.numeric(as.factor(V(g)$Global_Cluster))]
+
+# 设置节点边框颜色为白色
+# Set vertex frame color to white
+V(g)$frame.color <- "white"
+
+
+# 创建PDF输出文件
+# Create PDF output file
+pdf("network_igraph.pdf")
+
+# 绘制网络图
+# Plot network graph
+plot(g)
+
+# 添加图例
+# Add legend
+legend(x=-1.5, y= 1, unique(as.factor(V(g)$Global_Cluster)), pch=21,
+       col="#777777", pt.bg=unique(brewer.pal(n = 12, name ="Paired")[as.numeric(as.factor(V(g)$Global_Cluster))]), 
+       pt.cex=2, cex=.8, bty="n", ncol=1)
+
+# 关闭图形设备
+# Close graphics device
+dev.off()
+```
+
+![](network_igraph.pdf)
+
+## 绘制动态网络
+## Plot dynamic network
+
+```{r}
+#install.packages("networkD3")
+library(magrittr)
+library(networkD3)
+
+# 创建节点属性数据框
+# Create node attributes dataframe
+nodeData <- data.frame(name=nodes$node,
+                       group= as.factor(nodes$Global_Cluster))
+
+# 创建边列表数据框
+# Create edge list dataframe
+linkData <- data.frame(source = (match(networkData$specificSubtype, nodeData$name)-1),
+                       target = (match(networkData$otherSubtype, nodeData$name)-1))
+
+# 交互式网络绘制 
+# Interactive Network Visualization
+forceNetwork(
+  Links = linkData,
+  Nodes = nodeData,
+  Source = "source",
+  Target = "target",
+  NodeID = "name",Group = "group", legend = T, opacityNoHover = 1,zoom=T) 
+```
+
+```{r}
+# 输出到网页文件
+# Output to a web page file
+forceNetwork(
+  Links = linkData,
+  Nodes = nodeData,
+  Source = "source",
+  Target = "target",
+  NodeID = "name",Group = "group", legend = T, opacityNoHover = 1,zoom=T) %>%
+  saveNetwork(file = 'network.html')
+```
+
+打开`network.html`文件，即可查看动态网络。
+
+Open the 'network.html' file and you can view the dynamic network.
+
+# 附：Cell type enrichment across tissues
+# Attached: Cell type enrichment across tissues
+
+![](method_tissue.png)
+
+```{r}
+CRC_Leukocyte_10x_MD <- read.table(paste(libPath, "/data/CRC.Leukocyte.10x.Metadata.txt",sep=""),header = T, sep="\t", check.names = F);dim(CRC_Leukocyte_10x_MD)
+CRC_Leukocyte_10x_MD_FIilter = dplyr::filter(CRC_Leukocyte_10x_MD, grepl("^hM",Sub_Cluster))
+
+Roe <- calTissueDist(CRC_Leukocyte_10x_MD_FIilter,colname.cluster="Sub_Cluster", colname.tissue="Tissue")
+pheatmap::pheatmap(Roe, cluster_rows = F, cluster_cols = F, 
+                   color = colorRampPalette(brewer.pal(n = 7, name ="YlOrRd"))(50),
+                   display_numbers = TRUE,number_color = "black")
+```
+
+# 参考文献
+# Reference
+
+Zhang L, Li Z, Skrzypczynska KM, Fang Q, Zhang W, O'Brien SA, He Y, Wang L, Zhang Q, Kim A, Gao R, Orf J, Wang T, Sawant D, Kang J, Bhatt D, Lu D, Li CM, Rapaport AS, Perez K, Ye Y, Wang S, Hu X, Ren X, Ouyang W, Shen Z, Egen JG, Zhang Z, Yu X. Single-Cell Analyses Inform Mechanisms of Myeloid-Targeted Therapies in Colon Cancer. Cell. 2020 Apr 16;181(2):442-459.e29. doi: 10.1016/j.cell.2020.03.048. PMID: 32302573.
+
+Zhang L, Yu X, Zheng L, Zhang Y, Li Y, Fang Q, Gao R, Kang B, Zhang Q, Huang JY, Konno H, Guo X, Ye Y, Gao S, Wang S, Hu X, Ren X, Shen Z, Ouyang W, Zhang Z. Lineage tracking reveals dynamic relationships of T cells in colorectal cancer. Nature. 2018 Dec;564(7735):268-272. doi: 10.1038/s41586-018-0694-x. Epub 2018 Oct 29. PMID: 30479382.
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
