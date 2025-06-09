@@ -1,0 +1,236 @@
+---
+title: "FigureYa258SNF"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+用多组学数据，比如DNA甲基化和基因表达数据，一起识别疾病亚组，像这篇文章用相似网络融合 (SNF)这种方法。
+
+Using multi-omics data, such as DNA methylation and gene expression data, to jointly identify disease subgroups, as demonstrated in this article using methods like Similarity Network Fusion (SNF).
+
+![](method.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S1535610817302015?via%3Dihub>
+
+Source: <https://www.sciencedirect.com/science/article/pii/S1535610817302015?via%3Dihub>
+
+# 应用场景
+# Application scenarios
+
+使用相似性网络融合算法（Similarity network fusion, SNF）对多组学数据进行联合聚类。
+
+FigureYa69cancerSubtype用到了SNFCC方法，是对同一个数据集的聚类，这次是对多组学数据聚类。
+
+Using the Similarity Network Fusion (SNF) algorithm for joint clustering of multi-omics data.
+
+FigureYa69cancerSubtype employed the SNFCC method for clustering the same dataset, whereas this time, it is applied to multi-omics data clustering.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("SNFtool")
+BiocManager::install("wateRmelon")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(SNFtool)
+library(data.table)
+library(pheatmap)
+
+# 自定义函数
+# Custom function
+normalize <- function(X) X/rowSums(X)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+文件较大，已上传微云 <https://share.weiyun.com/9BYhu2QF>
+
+easy_input_expr.txt: 表达谱矩阵。
+
+easy_input_beta.txt: 甲基化数据，beta值。
+
+The file is large and has been uploaded to Weiyun <https://share.weiyun.com/9BYhu2QF>
+
+easy_input_expr.txt: Expression profile matrix.
+
+easy_input_beta.txt: Methylation data (beta values).
+
+```{r}
+# 加载表达谱和甲基化（beta值）
+# 注意：原文提到，SNF算法本身不要求数据进行任何预筛选，因此使用了全部表达谱和甲基化谱，这里只是为了示例，因此仅采用了mRNA和位于启动子的甲基化数据
+# 原文：The SNF method does not require any prior feature selection so we used the full matrix of gene expression (21,641 genes) and the full matrix of methylation data (logitB values, 321,174 probes).
+# Loading expression profiles and methylation (beta values)
+# Note: The original paper states that the SNF algorithm itself does not require any pre-filtering of data, hence the full expression and methylation profiles were used. For this demonstration, we only used mRNA and promoter-region methylation data.
+# Original text: "The SNF method does not require any prior feature selection so we used the full matrix of gene expression (21,641 genes) and the full matrix of methylation data (logitB values, 321,174 probes)."
+expr <- fread("easy_input_expr.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,data.table = F)
+rownames(expr) <- expr[,1]; expr <- expr[,-1]
+expr <- expr[rowSums(expr) > 0,]
+expr <- as.data.frame(t(scale(t(log2(expr + 1)))))
+
+beta <- fread("easy_input_beta.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,data.table = F)
+rownames(beta) <- beta[,1]; beta <- beta[,-1]
+beta <- as.data.frame(na.omit(beta))
+```
+
+# 进行SNF分析
+# Performing SNF analysis
+
+```{r}
+# 根据例文所述对甲基化beta值进行转化，得到M值
+# Convert methylation beta values to M-values as described in the example paper
+mvalue <- as.data.frame(wateRmelon::Beta2M(beta))
+
+# 获取同样的样本以及处理过的多组学数据（可以添加更多的组学数据到列表中）
+# Obtain common samples and prepare processed multi-omics data (additional omics data can be added to the list)
+comsam <- intersect(colnames(expr),colnames(mvalue))
+moic.list <- list(mrna = as.matrix(expr[,comsam]),
+                  meth = as.matrix(mvalue[,comsam]))
+
+# 进行SNF分析并使用原文参数
+# 原文：We used the SNFtool R package (v2.2.0) with the parameters K = 50, alpha = 0.6, T = 50. Spectral clustering implemented in the SNFtool package was run on the SNF fused similarity matrix to obtain the groups corresponding to k=2 to 20.
+# Perform SNF analysis using parameters from the original paper
+# Original text: "We used the SNFtool R package (v2.2.0) with the parameters K = 50, alpha = 0.6, T = 50. Spectral clustering implemented in the SNFtool package was run on the SNF fused similarity matrix to obtain the groups corresponding to k=2 to 20."
+para.K = 50
+para.alpha = 0.6
+para.T = 50
+
+W.list <- list()
+for (m in 1:length(moic.list)) { 
+  message("--dealing with the omics data of ",m,"...")
+  W.list[[m]] <- affinityMatrix(as.matrix(dist(t(moic.list[[m]]))), K = para.K, sigma = para.alpha)
+}
+
+# 对相似性矩阵列表进行融合
+# Fuse the similarity matrices
+W <- SNF(W.list, K = para.K, t = para.T) 
+```
+
+```{r}
+# 使用谱聚类对融合的相似性矩阵进行聚类
+# Perform spectral clustering on the fused similarity matrix 
+n.clust <- 2:5
+for (n in n.clust) {
+  message("--generating heatmap with cluster number of ",n,"...")
+  clust <- spectralClustering(W, K = n)
+  ind <- sort(as.vector(clust), index.return = TRUE)
+  ind <- ind$ix
+  diag(W) <- median(as.vector(W))
+  indata <- normalize(W)
+  indata <- indata + t(indata)
+  hm <- pheatmap(indata[ind, ind],
+                 color = NMF:::ccRamp(c("white","red"),64),
+                 border_color = NA,
+                 cluster_cols = F,
+                 cluster_rows = F,
+                 show_rownames = FALSE,
+                 show_colnames = FALSE,
+                 name = "SNF",
+                 filename = paste0("snf heatmap with cluster number of ",n,".pdf"))
+}
+```
+
+查看热图决定哪次聚类得到了最清晰的热图。
+
+原文最后选用k=4。
+
+![](snf heatmap with cluster number of 4.pdf)
+
+随后单独对每个subgroup进行SNF聚类，根据自己数据的具体情况套用以上代码即可。
+
+原文：For each of these four subgroups we then ran the SNF method independently with the following parameters and clustered the resulting fused similarity matrix with spectral clustering using k=2 to 8.
+
+参数:
+WNT: K = 10, alpha = 0.6, T = 50
+SHH: K = 40, alpha = 0.6, T = 50
+Group 3: K = 40, alpha = 0.6, T = 50
+Group 4: K = 60, alpha = 0.6, T = 50
+Group 3 and Group 4: K = 80, alpha = 0.6, T = 50
+
+Determine optimal cluster number by examining heatmap clarity.
+
+The original paper ultimately selected k=4 based on visual inspection.
+
+Apply SNF clustering independently to each subgroup using the following parameters.
+
+Original text: For each of these four subgroups we then ran the SNF method independently with the following parameters and clustered the resulting fused similarity matrix with spectral clustering using k=2 to 8.
+
+Parameters:
+WNT: K = 10, alpha = 0.6, T = 50
+SHH: K = 40, alpha = 0.6, T = 50
+Group 3: K = 40, alpha = 0.6, T = 50
+Group 4: K = 60, alpha = 0.6, T = 50
+Group 3 and Group 4: K = 80, alpha = 0.6, T = 50
+
+# 后期结果展示
+# Post-analysis visualization
+
+例文用热图展示subgroup、subtype的关系。
+
+按指定的样本顺序画热图，可参考FigureYa91cluster_heatmap。
+
+以下代码可顺利对接其中的“7. 从文件导入样本顺序”
+
+The example paper uses heatmaps to display subgroup/subtype relationships.
+
+To plot heatmaps with specified sample order, refer to FigureYa91cluster_heatmap.
+
+The following code can directly interface with "7. Import sample order from file"
+
+```{r}
+#按照原文选用k=4
+# Using k=4 as specified in the original paper
+n <- 4 
+clust <- spectralClustering(W, K = n)
+ind <- sort(as.vector(clust), index.return = TRUE)
+ind <- ind$ix
+diag(W) <- median(as.vector(W))
+indata <- normalize(W)
+indata <- indata + t(indata)
+
+# 把样本顺序保存到sam_order
+# Save sample order to sam_order
+sam_order <- row.names(indata[ind, ind])
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
