@@ -197,6 +197,8 @@ RCircos.Gene.Name.Plot(gene_pos,
                        track.num = 3, 
                        side = "in")
 
+# 关闭图形设备（完成PDF输出）
+# Close graphics device (finish PDF output)
 dev.off()
 ```
 
