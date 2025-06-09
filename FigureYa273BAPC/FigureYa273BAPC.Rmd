@@ -1,0 +1,370 @@
+---
+title: "FigureYa273BAPC"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirement Description
+
+需要做贝叶斯-年龄队列预测分析，画出文章中的Figure 3。
+
+Need to perform Bayesian age-period-cohort prediction analysis and plot Figure 3 from the paper.
+
+![](example.png)
+
+出自：<https://www.sciencedirect.com/science/article/abs/pii/S001650852100531X#abssec0020>
+
+图3 按大洲划分的43个国家胃癌年龄标准化发病率趋势，**实线为观察值，虚线为预测值**。
+
+Source: <https://www.sciencedirect.com/science/article/abs/pii/S001650852100531X#abssec0020>
+
+Figure 3 Trends in **observed (solid lines) and predicted (dashed lines)** age-standardized incidence rates of gastric cancer in 43 countries by continent.
+
+# 应用场景
+# Application Scenario
+
+贝叶斯年龄-时期-队列预测模型 (Bayesian-age-period-cohort [BAPC] model)
+
+Bayesian age-period-cohort prediction model (Bayesian-age-period-cohort [BAPC] model)
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("bamp")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+# 加载用于估计BAPC模型及进行预测的R包
+# Load R package for estimating BAPC model and making predictions
+library(bamp) 
+
+# 显示英文报错信息
+# Display English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character conversion to factor
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+原始数据结构说明：
+
+- 1、Oceania.csv 为Oceania总体信息，包括每个国家具体区域或城市的id（即，REGISTRY），统计数据起止年份（YEAR1和YEAR2）
+- 2、原始数据 Oceania_Pos.csv，为每个国家每个城市每年每个年龄组的具体人口数据
+- 3、原始数据 Oceania_Cases.csv，为每个国家每个城市每年每个年龄组的具体病例数据
+
+注意：
+
+- 1、本代码中的人口数据及病例数据，即，CI5plus数据集，来自于《Global Patterns and Trends in Gastric Cancer Incidence Rates (1988-2012) and Predictions to 2030》中参考文献所提供的网站<http://ci5.iarc.fr>。
+- 2、由于无法找到文中用于标准化的世界卫生组织WHO世界人口数据，采用了来自<https://seer.cancer.gov/stdpopulations/world.who.html>的数据，与文中有所差异，所以无法完全复现文中图。
+- 3、现以Oceania为例，其余州分析过程类似。
+- 4、本代码全部跑完大约需要10分钟。
+
+Data structure description:
+
+- 1. Oceania.csv contains overall information for Oceania, including id for each country's specific region or city (REGISTRY), start and end years of statistics (YEAR1 and YEAR2).
+- 2. Original data Oceania_Pos.csv contains specific population data for each city's each age group each year.
+- 3. Original data Oceania_Cases.csv contains specific case data for each city's each age group each year.
+
+Notes:
+
+- 1. The population and case data (CI5plus dataset) in this code comes from the website <http://ci5.iarc.fr> provided in references of the paper "Global Patterns and Trends in Gastric Cancer Incidence Rates (1988-2012) and Predictions to 2030".
+- 2. Since we couldn't find the WHO world population data for standardization used in the paper, we used data from <https://seer.cancer.gov/stdpopulations/world.who.html>, which may differ from the paper.
+- 3. Here we use Oceania as an example, other continents follow similar analysis process.
+- 4. The entire code takes about 10 minutes to run.
+
+```{r}
+# 初始化计算时间
+# # Initialize calculation time
+timestart <- Sys.time()
+
+### Oceania ####
+### 人口数据
+### Population data
+oce_pop <- read.csv("Oceania_Pops.csv", header = T)
+
+# 从原始数据中拆分出Australia的人口数据
+# 注意： seq(3600200, 3600800, 100)为Australia的城市或区域id
+# Extract Australia population data from raw data
+# Note: seq(3600200, 3600800, 100) are city/region ids for Australia
+
+# 合并Australia所有区域或城市的人口数据，并提取1988年以后数据
+# Combine population data for all Australia regions/cities and extract data since 1988
+Australia <- oce_pop[(oce_pop$REGISTRY %in% seq(3600200, 3600800, 100)) & (oce_pop$YEAR >= 1988), ] 
+
+# 将年份从小到大排序
+# Sort years in ascending order
+y_id <- sort(unique(Australia$YEAR))
+
+# 按年份合并男性和女性数据，得到每年各年龄组总的人口数据据
+# Combine male and female data by year to get total population data for each age group each year
+age_spe <- t(sapply(y_id, function(k) apply(Australia[Australia$YEAR == k, 5:dim(Australia)[2]], 2, sum))) 
+Australia_new <- data.frame(country = rep("Australia", dim(age_spe)[1]), 
+                            years = y_id,
+                            age_spe,
+                            stringsAsFactors = F)
+
+# 从原始数据中拆分出New zealand的人口数据
+# 注意：55400000为New zealand的id
+# Extract New Zealand population data from raw data
+# Note: 55400000 is New Zealand's id
+
+# 合并New Zealand所有区域或城市的人口数据，并提取1988年以后数据
+# Combine population data for all New Zealand regions/cities and extract data since 1988
+NZ <- oce_pop[(oce_pop$REGISTRY == 55400000) & (oce_pop$YEAR >= 1988), ] 
+
+# 将年份从小到大排序
+# Sort years in ascending order
+y_id <- sort(unique(NZ$YEAR))
+
+# 按年份合并男性和女性数据，得到每年各年龄组总的人口数据据
+# Combine male and female data by year to get total population data for each age group each year
+age_spe <- t(sapply(y_id, function(k) apply(NZ[NZ$YEAR == k, 5:dim(NZ)[2]], 2, sum))) 
+
+NZ_new <- data.frame(country = rep("New_Zealand", dim(age_spe)[1]), 
+                     years = y_id,
+                     age_spe,
+                     stringsAsFactors = F)
+
+# 构建整个Oceania的人口数据
+# 数据结构为每个国家（即，country）每年（即，years）各年龄组（即，P0_4，P5_9，...，P85.）的总人口数据. 
+# Build population data for entire Oceania
+# Data structure: total population data for each country (country) each year (years) each age group (P0_4, P5_9,..., P85.)
+pops <- rbind(Australia_new, NZ_new)
+
+### 病例数据
+### Case data
+oce_case <- read.csv("Oceania_Cases.csv", header = T)
+
+# 从原始数据中拆分出Australia的病例数据
+# 注意： seq(3600200, 3600800, 100)为Australia的城市或区域id
+# Extract Australia case data from raw data
+# Note: seq(3600200, 3600800, 100) are city/region ids for Australia
+
+# 合并Australia所有区域或城市的病例数据，并提取1988年以后数据
+# Combine case data for all Australia regions/cities and extract data since 1988
+Australia <- oce_case[(oce_case$REGISTRY %in% seq(3600200, 3600800, 100)) & (oce_case$YEAR >= 1988), ]
+
+# 将年份从小到大排序
+# Sort years in ascending order
+y_id <- sort(unique(Australia$YEAR))
+
+# 按年份合并男性和女性数据，得到每年各年龄组总的病例数据据
+# Combine male and female data by year to get total case data for each age group each year
+age_spe <- t(sapply(y_id, function(k) apply(Australia[Australia$YEAR == k, 6:(dim(Australia)[2]-1)], 2, sum)))
+
+# 整合Australia分析数据
+# Integrate Australia analysis data
+Australia_new <- data.frame(country = rep("Australia", dim(age_spe)[1]), 
+                            years = y_id, 
+                            age_spe,
+                            stringsAsFactors = F)
+
+# 从原始数据中拆分出New zealand的病例数据
+# 注意：seq(3600200, 3600800, 100)为New zealand的城市或区域id
+# Extract New Zealand case data from raw data
+# Note: seq(3600200, 3600800, 100) are city/region ids for New Zealand
+
+# 合并New zealand所有区域或城市的病例数据，并提取1988年以后数据
+# Combine case data for all New Zealand regions/cities and extract data since 1988
+NZ <- oce_case[(oce_case$REGISTRY == 55400000) & (oce_case$YEAR >= 1988), ] 
+
+# 将年份从小到大排序
+# Sort years in ascending order
+y_id <- sort(unique(NZ$YEAR)) 
+
+# 按年份合并男性和女性数据，得到每年各年龄组总的病例数据
+# Combine male and female data by year to get total case data for each age group each year
+age_spe <- t(sapply(y_id, function(k) apply(NZ[NZ$YEAR==k, 6:(dim(NZ)[2]-1)], 2, sum)))
+
+# 整合New zealand分析数据
+# Integrate New Zealand analysis data
+NZ_new <- data.frame(country = rep("New_Zealand", dim(age_spe)[1]), 
+                     years = y_id, 
+                     age_spe,
+                     stringsAsFactors = F)
+
+# 构建整个Oceania的病例数据
+# 数据结构为每个国家（即，country）每年（即，years）各年龄组（即，N0_4，N5_9，...，N85.）的总病例数据.
+# Build case data for entire Oceania
+# Data structure: total case data for each country (country) each year (years) each age group (N0_4, N5_9,..., N85.)
+cases <- rbind(Australia_new, NZ_new)
+```
+
+# BAPC分析预测
+# BAPC Analysis and Prediction
+```{r}
+### 估计每个国家的年龄标准化疾病发生率
+### Estimate age-standardized disease incidence rate for each country
+
+# who_pop: 世界卫生组织标准人口分布，基于2000-2025年间各年龄组的世界平均人口
+# who_pop: WHO standard population distribution based on world average population for each age group during 2000-2025
+who_pop <- c(8.86, 8.69, 8.60, 8.47, 8.22, 7.93, 
+             7.61, 7.15, 6.59, 6.04, 5.37, 4.55, 
+             3.72, 2.96, 2.21, 1.52, 0.91, 0.635)/100
+
+# 估计每个国家每年各年龄组的疾病率
+# Estimate disease rate for each country's each age group each year
+p.est <- cases[,3:20] / pops[,3:20] 
+
+# 使用“who_pop”数据，估计每个国家年龄标准化疾病率
+# Use "who_pop" data to estimate age-standardized disease rate for each country
+asr.est <- (as.matrix(p.est) %*% who_pop) * 100000 
+dat.est <- data.frame(country = cases[,1],
+                      years = cases[,2],
+                      asr = asr.est,
+                      stringsAsFactors = F)
+
+### 对每个国家进行BAPC分析预测
+### Perform BAPC analysis and prediction for each country
+asr.pred <- NULL
+for (id in c("Australia", "New_Zealand")) {
+  set.seed(10)
+  
+  # 提取当前国家病例数据
+  # Extract current country's case data
+  cases_c <- cases[cases[,1] == id, ] 
+  
+  # 提取当前国家人口数据
+  # Extract current country's population data
+  pops_c <- pops[pops[,1] == id, ] 
+  
+  # 准备用于BAPC分析的病例数据，数据类型为矩阵
+  # Prepare case data for BAPC analysis (matrix format)
+  cases_bamp <- matrix(unlist(cases_c[, 3:dim(cases)[2]]), 
+                       dim(cases_c)[1], dim(cases_c)[2]-2) 
+  
+  # 准备用于BAPC分析的人口数据，数据类型为矩阵
+  # Prepare population data for BAPC analysis (matrix format)
+  pops_bamp <- matrix(unlist(pops_c[, 3:dim(cases)[2]]), 
+                      dim(pops_c)[1], dim(pops_c)[2]-2) 
+  
+  # 使用函数bamp()估计BAPC模型
+  # Use bamp() function to estimate BAPC model
+  invisible(capture.output(model <- bamp(cases_bamp, 
+                                         pops_bamp, 
+                                         age      = "rw2", 
+                                         period   = "rw2", 
+                                         cohort   = "rw2", 
+                                         periods_per_agegroup = 5, 
+                                         overdisp = TRUE, 
+                                         hyperpar = list(age      = c(1, 0.5), 
+                                                         period   = c(1, 5e-04), 
+                                                         cohort   = c(1, 5e-04), 
+                                                         overdisp = c(1, 0.001)),
+                                         mcmc.options = list(number_of_iterations = 50000, 
+                                                             burn_in = 10000, 
+                                                             step    = 50, 
+                                                             tuning  = 500))))
+  
+  # 预测的时期数
+  # Number of periods to predict
+  per <- 2030-cases_c[dim(cases_c)[1], 2] 
+  
+  # 预测当前国家各年龄组的疾病率
+  # Predict disease rate for each age group of current country
+  pred <- predict_apc(object = model,
+                      periods = per,
+                      population = pops_bamp,
+                      update = TRUE) 
+  
+  # 存储当前国家年龄标准化疾病率预测值
+  # Store predicted age-standardized disease rate for current country
+  asr.pred <- rbind(asr.pred, data.frame(country = rep(id, per), 
+                                         asr = pred$predicted$pr[2, (dim(cases_c)[1]+1):(dim(cases_c)[1] + per), ] %*% who_pop * 100000))
+}
+```
+
+# 开始画图
+# Start Plotting
+
+```{r}
+# 画出每个国家估计的和预测的年龄标准化疾病率趋势图
+# Plot trend of estimated and predicted age-standardized disease rate for each country
+pdf("BAPC.pdf", width = 6,height = 5.5)
+par(bty = "o", mgp = c(2.1,.33,0), mar = c(3.1,3.1,2.1,2.1), las = 1, tcl = -.25,xpd = F)
+
+# 创建空白绘图区域
+# Create empty plot area
+plot(1, type = "n",  xaxt = "n", 
+     xlim = c(1989, 2031), ylim = c(400,1400), 
+     main = "Oceania", 
+     ylab = "Age standardized incidence rates per 100000",  
+     xlab = "Year",
+     bty = "l")
+
+# 自定义x轴刻度（每5年显示）
+# Custom x-axis ticks (every 5 years)
+axis(1, seq(1990, 2030, 5), seq(1990, 2030, 5))
+
+# 添加预测基准线（2012年为预测起点）
+# Add prediction baseline (2012 as starting point)
+abline(v = 2012, lwd = 1.5, col = "chocolate1")
+
+# 获取国家唯一标识
+# Get unique country IDs
+c_id <- unique(asr.pred$country)
+
+# 设置国家专属颜色
+# Set country-specific colors
+col <- c("red", "dodgerblue4")
+
+# 循环绘制各国趋势线
+# Loop through countries to plot trends
+for(i in 1:2){
+  t <- ts(dat.est$asr[dat.est$country == c_id[i]], 
+          start = dat.est$years[dat.est$country == c_id[i]][1], frequency = 1)
+  lines(t, col=col[i], lwd=4) 
+  t <- ts(c(dat.est$asr[dat.est$country == c_id[i] & dat.est$years == 2012], asr.pred$asr[asr.pred$country == c_id[i]]), start = 2012, frequency = 1)
+  lines(t, "l", col=col[i], lty=2, lwd=2) 
+}
+
+# 在右上角添加国家图例
+# Add country legend at top-right
+legend("topright", legend = c("Australia", "New Zealand"), col = col, lwd = 4, bty = "n")
+
+# 静默关闭图形设备
+# Silently close graphics device
+invisible(dev.off())
+
+# 输出耗时
+# Output time consumption
+timeend <- Sys.time()
+print(timeend-timestart) 
+```
+
+![](BAPC.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
