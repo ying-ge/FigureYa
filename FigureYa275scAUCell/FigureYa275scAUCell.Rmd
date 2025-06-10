@@ -1,0 +1,419 @@
+---
+title: "FigureYa275scAUCell"
+params:
+  author: "Yandong Zheng; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+单细胞分析AUCell对细胞ISG活性评分。
+
+Single-cell analysis of ISG activity scores using AUCell
+
+![](example.png)
+
+出自：<https://www.thelancet.com/journals/ebiom/article/PIIS2352-3964(21)00270-X/fulltext>
+
+图2. ISG活性评分在SLE PBMC细胞亚群中的分布。
+(a) 178个筛选ISG基因集的评分。阈值设定为0.12，共12,974个细胞的ISG评分超过阈值
+(b) 基于单细胞ISG评分的UMAP可视化。高ISG评分细胞亚群被突出显示。
+
+Source: <https://www.thelancet.com/journals/ebiom/article/PIIS2352-3964(21)00270-X/fulltext>
+
+Fig. 2. ISG score of SLE PBMC cell clusters. 
+(a) Score of 178 screened ISG sets. The threshold was chosen as 0.12 and the ISG score of 12 974 cells exceeded the threshold value. 
+(b) UMAP plots based on the ISG score of each cell. High ISG score cell clusters are highlighted. 
+
+# 应用场景
+# Application Scenario
+
+本教程展示如何在单细胞数据中使用AUCell包计算自定义基因集的评分，并画图展示。
+
+我们众筹过的用到AUCell包的FigureYa：
+
+- FigureYa194pySCENIC<https://k.youshop10.com/5gCxXaGm>，用AUCell对每个细胞计算regulon activity score (RAS)
+- FigureYa223scNMF<https://k.youshop10.com/qjIM3DFg>，用AUCell对上皮细胞进行打分，然后做NMF聚类
+- FigureYa269scMetabolism<https://k.youshop10.com/lCYoADnk>，计算scMetabolism时有多种方法供选择，AUCell是其中之一
+
+This tutorial demonstrates how to calculate customized gene set scores in single-cell data using the AUCell package and visualize the results.
+
+Below are our crowdfunded FigureYa projects utilizing the AUCell package:
+
+- FigureYa194pySCENIC<https://k.youshop10.com/5gCxXaGm>,
+Computes regulon activity score (RAS) per cell using AUCell
+- FigureYa223scNMF<https://k.youshop10.com/qjIM3DFg>,
+Scores epithelial cells with AUCell followed by NMF clustering
+- FigureYa269scMetabolism<https://k.youshop10.com/lCYoADnk>,
+Implements multiple metabolic scoring methods including AUCell
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+# 安装AUCell
+# Install AUCell
+BiocManager::install("AUCell")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(patchwork)
+library(RColorBrewer)
+library(pheatmap)
+library(dplyr)
+library(magrittr)
+library(AUCell)
+library(patchwork)
+library(ggplot2)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+## 基因集
+## Gene Sets
+
+ISG_genelist.csv，基因集，将用到GeneName列。下载自<https://ars.els-cdn.com/content/image/1-s2.0-S235239642100270X-mmc5.xlsx>
+
+ISG_genelist.csv - Gene set file (utilizing the GeneName column). Downloaded from: <https://ars.els-cdn.com/content/image/1-s2.0-S235239642100270X-mmc5.xlsx>
+
+```{r}
+# 读取ISG基因列表文件
+# Read ISG gene list file
+ISG_genelist <- read.csv("ISG_genelist.csv")
+
+# 提取GeneName列并去重
+# Extract GeneName column and remove duplicates
+ISG_genelist <- unique(as.vector(ISG_genelist$GeneName))
+
+# 创建基因集列表
+# Create gene set list
+geneSets <- list(ISGs=ISG_genelist)
+```
+
+## 单细胞数据及预处理
+## Single-cell data and preprocessing
+
+跟FigureYa267scCellChat和FigureYa269scMetabolism一样的处理，获得中间文件immune.combined.rds，可直接跳到“使用AUCell包计算自定义基因集的评分”。
+
+`ifnb` - A Seurat object with the PBMC control/IFNB-stimulated dataset。出自<https://pubmed.ncbi.nlm.nih.gov/29227470/>，已被打包到SeuratData里，我们直接安装、加载它。
+
+示例数据ifnb有STIM和CTRL两组：
+
+- 先拆分成两个seurat object，对两个数据集单独进行normalize并识别各自的高变异基因，使用高变异基因在两个基因集中分别执行PCA。
+- 然后对两个数据集进行整合，进行常规数据预处理，存入immune.combined，以便进行后续分析。
+
+The same processing pipeline as in FigureYa267scCellChat and FigureYa269scMetabolism was applied to generate the intermediate file immune.combined.rds. You may skip directly to the section "Calculating Custom Gene Set Scores Using AUCell".
+
+`ifnb` - A Seurat object containing PBMC control/IFNB-stimulated dataset. Sourced from <https://pubmed.ncbi.nlm.nih.gov/29227470/>, already packaged in SeuratData, we directly install and load it.
+
+The example data ifnb has two groups - STIM and CTRL:
+
+- First split into two seurat objects, independently normalize the two datasets and identify their respective highly variable genes, then perform PCA on both gene sets using the highly variable genes.
+- Then integrate the two datasets, perform routine data preprocessing, and save as immune.combined for subsequent analysis.
+
+```{r eval=FALSE}
+# 安装并加载所需数据集
+# Install and load required dataset
+#InstallData("ifnb") 
+
+# 加载数据集
+# load dataset
+LoadData("ifnb")
+
+# UpdateSeuratObject确保与当前Seurat版本兼容
+# Ensures compatibility with current Seurat version
+ifnb <- UpdateSeuratObject(ifnb)
+
+# ifnb数据集中包含两个样本数据，分别为CTRL和STIM
+# The ifnb dataset contains two treatment groups: CTRL and STIM
+head(ifnb@meta.data)
+table(ifnb@meta.data$stim)
+
+# Split ifnb dataset into a list of two Seurat objects (STIM and CTRL)
+ifnb.list <- SplitObject(ifnb, split.by = "stim")
+
+# 对两个数据集单独进行normalize并识别各自的高变异基因
+# Perform independent normalization and highly variable gene identification on each dataset
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+
+# 计算两个数据中排完rank后top2000的高变异基因
+# Identify top 2000 highly variable genes after ranking across both datasets
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 2000)
+
+# 使用上述高变异基因在两个基因集中分别执行PCA
+# Perform PCA separately on both datasets using the selected highly variable genes
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+  x <- ScaleData(x, features = features, verbose = T)
+  x <- RunPCA(x, features = features, verbose = T)
+})
+
+
+# 对两个数据集进行整合
+# 首先使用findinintegrationanchors函数标识锚点，然后使用IntegrateData函数将两数据集整合在一起
+# 可以通过调整k.anchor参数调整两个样本整合的强度，默认为5，数字越大整合强度越强
+# Integration of Two Datasets
+# First use FindIntegrationAnchors() to identify anchor points, then integrate both datasets using IntegrateData()
+# The integration strength can be adjusted via the k.anchor parameter (default=5). Higher values indicate stronger integration.
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features, reduction = "rpca", k.anchor = 20)
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+
+
+# 对整合后的数据进行后续分析
+# Downstream Analysis of Integrated Data
+DefaultAssay(immune.combined) <- "integrated"
+
+# 常规流程，scale数据，跑PCA，使用前30个PC进行降维跑UMAP，计算Neighbors，分cluster
+# Standard analysis workflow:
+# 1. Scale normalized data
+# 2. Perform PCA 
+# 3. Run UMAP dimensional reduction
+# 4. Construct KNN graph
+# 5. Cluster cells 
+immune.combined <- ScaleData(immune.combined, verbose = FALSE)
+immune.combined <- RunPCA(immune.combined, npcs = 30, verbose = FALSE)
+immune.combined <- RunUMAP(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindNeighbors(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindClusters(immune.combined, resolution = 0.5)
+
+DefaultAssay(immune.combined) <- "RNA"
+Idents(immune.combined) <- "CellType"
+
+# 可视化
+# Visualization
+p1 <- DimPlot(immune.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined, reduction = "umap", group.by = "seurat_annotations",label = TRUE,repel = TRUE)
+
+# 保存UMAP图 
+# Save UMAP plots
+pdf("./immune.combined.UMAP.pdf", height = 5,width = 12)
+p1 + p2
+dev.off()
+
+# 保存完整分析结果 
+# Save complete analysis results
+saveRDS(immune.combined,"./immune.combined.rds")
+```
+
+# 使用AUCell包计算自定义基因集的评分
+# Calculating Custom Gene Set Scores Using AUCell Package
+
+```{r}
+# 加载上面保存的中间文件
+# Load the intermediate file saved earlier
+immune.combined <- readRDS("immune.combined.rds")
+
+# 为每个细胞构建基因表达排序
+# Build gene expression rankings for each cell 
+cells_rankings <- AUCell_buildRankings(immune.combined@assays$RNA@data, nCores=10)  
+# 关于细胞检测到的基因数量的分位数说明：
+# (未检测到的基因会在排序末尾随机排列。在选择计算AUC的阈值时请记住这一点)
+# Quantiles for the number of genes detected by cell:
+# (Non-detected genes are shuffled at the end of the ranking. Keep it in mind when choosing the threshold for calculating the AUC).
+```
+
+排名在2741之后的基因被pass
+
+Genes ranked beyond 2741 are filtered out.
+
+```{r}
+# 计算每个细胞中每个基因集的"AUC"值
+# Calculates the 'AUC' for each gene-set in each cell
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings,nCores = 10, 
+                            aucMaxRank = nrow(cells_rankings)*0.05) 
+# 参数'aucMaxRank'允许修改用于执行此计算的基因数量(最大排名)。默认设置为排名中基因总数的5%。一般取值范围为1 ~ 20%。
+# The parameter 'aucMaxRank' allows adjusting the number of genes used for this calculation (maximum rank). The default setting is 5% of the total ranked genes. Typical value range is 1% to 20%.
+```
+
+# 开始画图
+# Plotting
+
+## 图2a - 178个筛选ISG基因集的评分分布
+## Figure 2a - Score of 178 screened ISG sets.
+
+```{r}
+# 创建PDF输出文件
+# Create PDF output file
+pdf("cells_assignment.pdf")
+
+# 执行AUCell阈值探索分析
+# Perform AUCell threshold exploration
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist=TRUE, assign=TRUE, nCores=10)
+
+# 关闭图形设备
+# Close graphics device
+dev.off()
+```
+
+![](cells_assignment.pdf)
+
+也是两个明显的双峰，当AUC值阈值设为0.22时，有2854个细胞的AUC值相对较高
+
+Two distinct bimodal peaks are observed. When setting the AUC threshold at 0.22, 2,854 cells exhibit relatively high AUC scores.
+
+## 图2b - 基于单细胞ISG评分的UMAP可视化
+## Figure 2b - UMAP plots based on the ISG score of each cell.
+
+```{r}
+# 提取UMAP坐标和AUC值，在UMAP图上展示AUC值
+# Extract UMAP coordinates and AUC values to visualize AUC scores on UMAP plot
+geneSet.name <- "ISGs"
+AUC_Exp <- as.numeric(getAUC(cells_AUC)[geneSet.name, ])
+
+# 后续分析和可视化
+# acilitates downstream analysis and visua
+immune.combined$AUC <- AUC_Exp
+
+# 准备绘图数据框
+# Prepare plotting dataframe
+plot.df<- data.frame(immune.combined@meta.data, immune.combined@reductions$umap@cell.embeddings)
+
+# UMAP可视化
+# UMAP visualization
+p <- ggplot() + 
+  geom_point(data=plot.df, aes(x=umap_1,y=umap_2,colour=AUC), size =0.5) +
+  viridis::scale_color_viridis(option="A") +
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.text= element_text(colour= 'black',size=14),
+        axis.title= element_text(size = 14),
+        axis.line= element_line(colour= 'black'),
+        panel.border = element_rect(size = 0.5, linetype = "solid", colour = "black"), 
+        aspect.ratio = 1)
+p
+
+# 保存为PDF文件
+# Save as PDF
+ggsave(filename = "UMAP_AUC_value.pdf", plot = p, height = 6, width = 6)
+```
+
+从图中可以看到当AUC值阈值设为0.22时，高AUC值的细胞类型是Eryth、CD14 Mono、CD16 Mono和DC
+
+High ISG score cell clusters are highlighted. 
+
+以下部分计算并添加标签所位置，添加椭圆框，也可后续自己手动添加
+
+The plot shows that when the AUC threshold is set to 0.22, the cell types with high AUC values are Eryth, CD14 Mono, CD16 Mono and DC.
+
+High ISG score cell clusters are highlighted.
+
+The following section calculates and adds label positions and ellipses, which can also be manually added later.
+
+```{r}
+# 定义关注的细胞类型列表
+# Define cell types of interest
+high.ISGs.celltype <- c("Eryth", "CD14 Mono", "CD16 Mono", "DC")
+
+# 筛选特定细胞类型的数据
+# Filter data for specified cell types
+high.AUC.df <- subset(plot.df, seurat_annotations %in% high.ISGs.celltype)
+
+# 添加分组标识列
+# Add grouping identifier column
+high.AUC.df$Type <- "HighAUC"
+
+# 计算各细胞类型的UMAP中心坐标
+# Calculate UMAP centroids per cell type
+centers <- high.AUC.df[,c('umap_1','umap_2','seurat_annotations')] %>%
+  dplyr::group_by(seurat_annotations) %>%
+  summarize(x = median(x = umap_1), y = median(x = umap_2))
+
+# 构建最终可视化图形
+# Construct final visualization
+p.final <- p +stat_ellipse(data = high.AUC.df, aes(x=umap_1,y=umap_2,fill=Type),
+                          geom = "polygon", alpha = 0.3,fill="#4ef4eb",level = 0.99)+ 
+  geom_text(data = centers, aes(x=x,y=y,label=seurat_annotations),colour="black",size=4)
+p.final
+
+# 保存为pdf 
+# Save as PDF
+ggsave(filename = "UMAP_AUC_value_label.pdf", plot = p.final, height = 6, width = 6)
+```
+
+# 计算high ISGs celltype 和low ISGs celltype 之间的DEGs
+# Calculate DEGs between high ISGs celltype and low ISGs celltype
+
+```{r}
+# 将细胞分为高/低ISG活性两组
+# Classify cells into High/Low ISG activity groups
+immune.combined@meta.data$ISGs.Type <- ifelse(immune.combined@meta.data$seurat_annotations%in%high.ISGs.celltype, "High.ISGs", "Low.ISGs") 
+
+# 可视化ISG活性分类的UMAP图
+# Visualize ISG classification on UMAP
+pdf("immune.combined.ISGs.type.UMAP.pdf", height = 5,width = 6)
+DimPlot(immune.combined, reduction = "umap", group.by = "ISGs.Type",label = TRUE,repel = TRUE)
+dev.off()
+
+# 设置细胞身份标识为ISG分类
+# Set cell identities to ISG classification
+Idents(immune.combined) <- "ISGs.Type"
+
+# 执行差异表达分析
+# Perform differential expression analysis
+ISGs.DEGs <- FindAllMarkers(immune.combined, min.pct = 0.25, logfc.threshold = 0.25)
+
+# 筛选adj 的p value小于0.05的差异基因
+# Filter DEGs with adjusted p-value < 0.05
+ISGs.DEGs.filter <- subset(ISGs.DEGs, p_val_adj<0.05) 
+
+# 检查筛选结果
+# Examine filtered results
+head(ISGs.DEGs.filter)
+
+# 保存差异表达分析结果
+# Save DEG analysis results
+write.csv(ISGs.DEGs.filter, "output_ISGs.type.DEGs.filter.list.csv")
+```
+
+最后选取High.ISGs组的基因去做GO和pathway，可以用Y叔的clusterProfiler包或者各种在线包，更多富集分析展示方式看这里<https://k.youshop10.com/sm2p0xYn>
+
+最核心还是找到适合自己研究思路的基因集！
+
+Finally, select genes from the High.ISGs group for GO and pathway analysis. You can use Dr. Y's clusterProfiler package or various online tools. For more enrichment visualization methods, see: <https://k.youshop10.com/sm2p0xYn>
+
+The key is to identify gene sets that align with your research objectives!
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
