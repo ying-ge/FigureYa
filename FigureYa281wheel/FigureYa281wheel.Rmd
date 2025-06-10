@@ -1,0 +1,246 @@
+---
+title: "FigureYa281wheel"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+用R画出多角图wheel plot。比如有九个角，然后我有个dataframe是各数据点到九个角的数值，想画一个图表示。这里是用python画的<https://github.com/linnarsson-lab/ipynb-lamanno2016/blob/master/ipynb-lamanno2016-cellscoring.ipynb>，想用R画。
+
+Draw the multi-angle plot using R. For instance, there are nine corners. Then I have a dataframe showing the values from each data point to the nine corners and I want to draw a graph to represent them. Here is the painting in python <https://github.com/linnarsson-lab/ipynb-lamanno2016/blob/master/ipynb-lamanno2016-cellscoring.ipynb>, and we want to use R.
+
+![](example1.png)
+
+出自：<https://linkinghub.elsevier.com/retrieve/pii/S0092867416313095>
+
+图S7. 干细胞分化方案与机器学习性能及诊断分析（关联图7）
+(J) 训练数据集轮状图展示（绘制方法同图7G）
+
+Source: <https://linkinghub.elsevier.com/retrieve/pii/S0092867416313095>
+
+Figure S7 Stem Cells Differentiation Protocol and Machine Learning Performance and Diagnostics, Related to Figure 7
+(J) Training dataset plotted on wheel plot as in Figure 7G.
+
+文章中多次用到了类似的图：
+
+This type of visualization is repeatedly utilized throughout the manuscript:
+
+![](example2.png)
+
+图S7. 干细胞分化方案与机器学习性能诊断（关联图7）
+(L) 阴性对照细胞通过随机置换训练数据集细胞的基因值获得，其轮状图展示方式与图7G一致。
+
+Figure S7 Stem Cells Differentiation Protocol and Machine Learning Performance and Diagnostics, Related to Figure 7
+(L) Negative control cells are obtained by scrambling gene values of cells of the training dataset and are plotted on wheel plot as in Figure 7G.
+
+![](example3.png)
+
+图7. 人胚胎干细胞和诱导多能干细胞体外分化单细胞分析与原型评分
+(G) 展示hESCs和hiPSCs原型评分的轮状图。点代表单个细胞，**点与各原型的距离与该原型的相对评分成正比**。颜色表示分化时间点（红色：第0天；深蓝色：第63天）。
+
+Figure 7. Single-Cell Analysis of Differentiated In Vitro Human ESC and iPSC Cultures and Prototype-Based Scoring
+(G) Wheel plot showing the prototype scores for hESCs and hiPSCs. Dots represent individual cells and the **distance to each prototype is proportional to the relative score of that prototype**. Colors indicate time point of differentiation (red, day 0; dark blue, day 63).
+
+# 应用场景
+# Application Scenario
+
+特别适合两种独立分组方式的数据：外围的角代表第一种分组，点的颜色形状代表第二种分组，点跟角的距离代表数值高低。
+
+另外，还可以参考FigureYa235scDEG<https://k.youshop10.com/m=E-yK5Z>的画法，第一种分组从左往右一字排开，第二种分组画到上下两侧（如果超过两组就要再引入颜色、形状等特征来加以区分），点跟横轴的距离代表数值高低。
+
+Particularly suitable for data with two independent grouping methods: the peripheral angles represent the first grouping, the color and shape of points represent the second grouping, and the distance from points to angles represents the magnitude of values.
+
+Additionally, you can refer to the visualization method in FigureYa235scDEG<https://k.youshop10.com/m=E-yK5Z>, where the first grouping is arranged from left to right in a straight line, the second grouping is plotted on the upper and lower sides (if there are more than two groups, additional features like color and shape need to be introduced to differentiate them), and the distance from points to the horizontal axis represents the magnitude of values.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(ggplot2)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.txt，最后一列跟点的颜色相对应，前面各列的列名跟图中的角相对应，数值对应点到角的距离。
+
+easy_input.txt: The last column corresponds to the point colors, while the column names of the preceding columns correspond to the angles in the plot, and their values represent the distances from the points to the angles.
+
+```{r}
+# 读取文件
+# Read Data File
+
+## 文件格式如下
+## File Format as follows
+
+### 行为某种观测（点），列为某种水平（角），末列标注各个点的归属情况
+### 数据大小在0-1之间，样本间可比
+### Rows represent observations (points), columns represent levels (axes), and the last column indicates group membership for each point
+### Data values range between 0-1 and are comparable across samples
+raw.data <- read.table("easy_input.txt", header = T, stringsAsFactors = T)
+```
+
+# 为画图准备数据
+# Preparing Data for Visualization
+
+```{r}
+# 记录末列的名称
+# Record the name of the last column 
+txt <- colnames(raw.data)[ncol(raw.data)]
+
+## 计算坐标轴角度
+## Calculate axis angles
+sides <- ncol(raw.data) - 1 
+start_angle <- 90 
+basis <- t(sapply((1:sides)-1, function(i){
+  c(cos(2 * i * pi / sides + start_angle * pi / 180),
+    sin(2 * i * pi / sides + start_angle * pi / 180))
+}))
+
+## 将12维的数据坐标投射到二维
+## Project 12-dimensional data coordinates onto 2D space
+data <- as.matrix(raw.data[, -match(txt, colnames(raw.data))]) %*% basis
+
+# 准备绘图数据
+# Prepare plotting data  
+
+### 点的数据
+### Point data
+plot.data <- data.frame(
+  "x" = data[, 1],
+  "y" = data[, 2],
+  "Group" = raw.data$celltype
+)
+
+### 多边形的数据
+### Polygon data (axis framework) 
+basis <- data.frame(
+  "x" = basis[, 1],
+  "y" = basis[, 2]
+)
+
+### 类图例的数据
+### Axis label data
+label <- data.frame(
+  "x" = 1.1 * basis[, 1],
+  "y" = 1.1 * basis[, 2],
+  "label" = colnames(raw.data)[-ncol(raw.data)]
+)
+
+### 设定颜色（由原Python代码改写来，使用的是RGB颜色）
+### Color settings (adapted from original Python code using RGB values) 
+color.palette <- list(
+  'hEndo'=   c(190,  10,  10),'hPeric'= c(225, 160,  30),'hMgl'=    c(217, 245,   7),
+  'hDA1'=    c(170, 180, 170),'hDA2'=   c(130, 140, 140),'hNbM'=    c(180, 140, 130),
+  'hNbML1'=  c(100, 100, 240),'hProgM'= c( 80, 235, 255),'hProgFPM'=c(190, 235, 255),
+  'hProgFPL'=c(210, 255, 215),'hProgBP'=c(230, 140, 120),'hNProg'=  c(255, 195,  28),
+  'hNbML5'=  c(139, 101, 100),'hRgl1'=  c(252, 183,  26),'hRgl3'=   c(214, 194,  39),
+  'hRgl2c'=  c(255, 120, 155),'hRgl2b'= c(250, 145,  45),'hRgl2a'=  c(250, 125,  25),
+  'hDA0'=    c(190, 200, 190),'hOPC'=   c(255,  35, 155),'hRN'=     c(199, 121,  41),
+  'hNbGaba'= c( 40,  55, 130),'hGaba'=  c(  7,  121, 61),'hOMTN'=   c( 95, 186,  70),
+  'hSert'=   c( 50, 180, 180),'eSCa'=   c(245, 205, 170),'eSCb'=    c(205, 245, 170),
+  'eSCc'=    c(205, 205, 220)
+)
+color.palette <- lapply(color.palette, function(x){
+  rgb(red = x[1]/255, green = x[2]/255, blue = x[3]/255)
+})
+color.palette <- unlist(color.palette) 
+```
+
+# 开始画图
+# Plotting
+
+```{r}
+# 轮状图绘制 
+# Wheel Plot Visualization
+ggplot(plot.data, aes(x = x, y = y)) +
+  geom_point(aes(col = Group, size = .5)) +
+  geom_polygon(mapping = aes(x = x, y = y), data = basis,
+               fill = "transparent", color = "black", size = 1) +
+  geom_text(mapping = aes(x = x, y = y, label = label), data = label) +
+  scale_color_manual(values = color.palette) +
+  theme_classic() +
+  theme(axis.line = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank())
+
+# 保存图形
+# Save plot as PDF
+ggsave("wheelplot.pdf", width = 10, height = 8) 
+```
+
+还可以用形状区分另一层分组，就像例文Figure 7G用不同形状进一步区分hESCs and hiPSCs
+
+Another grouping layers can be represented through point shapes, as demonstrated in reference Figure 7G where distinct shapes differentiate hESCs and hiPSCs.
+
+```{r}
+# 创建新分组变量用于形状映射
+# Create new grouping variable for shape mapping
+plot.data$group3 <- "others"
+
+# 将eSC相关组(a/b/c)标记为特殊形状
+# Mark eSC groups (a/b/c) with distinct shape
+plot.data[plot.data$Group %in% c("eSCa", "eSCb", "eSCc"),]$group3 <- "eSC"
+
+# 增强轮状图绘制 
+# Enhanced Wheel Plot Visualization
+ggplot(plot.data, aes(x = x, y = y)) +
+  geom_point(aes(col = Group, shape = group3, size = .5)) + 
+  scale_shape_manual(values = c(18, 20)) + 
+  geom_polygon(mapping = aes(x = x, y = y), data = basis,
+               fill = "transparent", color = "black", size = 1) +
+  geom_text(mapping = aes(x = x, y = y, label = label), data = label) +
+  scale_color_manual(values = color.palette) +
+  theme_classic() +
+  theme(axis.line = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank())
+
+# 保存图形
+# Save plot as PDF
+ggsave("wheelplot_plus.pdf", width = 8, height = 6) 
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
