@@ -1,0 +1,344 @@
+---
+title: "FigureYa279panGeneGSEA"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+想把FigureYa253panGSEA<https://k.youshop10.com/QbM6nwGB>中的单基因多通路的泛癌富集分析改成"多基因，单通路的泛癌富集分析"，即把下图中的Y轴变成了基因，X轴还是癌种。
+
+I want to modify the pan-cancer enrichment analysis in FigureYa253panGSEA<https://k.youshop10.com/QbM6nwGB> from "single-gene multi-pathway" to "multi-gene single-pathway" analysis. That is, changing the Y-axis in the figure to show genes while keeping the X-axis as cancer types.
+
+![](example.png)
+
+出自：<https://www.cell.com/iscience/fulltext/S2589-0042(20)30489-2?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS2589004220304892%3Fshowall%3Dtrue>
+
+图3. 铁死亡与信号通路及免疫表型的关系。
+(A和B) 高FPI与低FPI肿瘤组织间代谢通路(A)和癌症信号(B)的富集分析。NES表示GSEA算法中的标准化富集分数。
+
+Source: <https://www.cell.com/iscience/fulltext/S2589-0042(20)30489-2?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS2589004220304892%3Fshowall%3Dtrue>
+
+Figure 3. Relationships between Ferroptosis and Signaling Pathways and Immunophenotypes.
+(A and B) Enrichment analysis for metabolism pathway (A) and cancer signaling (B) between high- and low-FPI tumor tissues. NES is the normalized enrichment score in the GSEA algorithm.
+
+# 应用场景
+# Application scenarios
+
+基于特定基因两组数据，对每个肿瘤进行单基因集富集分析(GSEA)，展示某特定通路的富集情况。
+
+更多pancancer分析画图FigureYa看这里<https://k.youshop10.com/C8RkTgR3>
+
+Based on two groups of specific gene data, single gene set enrichment analysis (GSEA) was performed for each tumor to demonstrate the enrichment of a particular pathway.
+
+For more pan-cancer analysis and visualization (FigureYa), check here<https://k.youshop10.com/C8RkTgR3>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(clusterProfiler)
+library(limma)
+library(ggplot2)
+library(data.table)
+library(ggpubr)
+library(SimDesign)
+source("twoclasslimma.R")
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+merged_sample_quality_annotations.tsv，样本分组信息。下载自<http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>。
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv，表达矩阵，第一列是基因，之后是其在每个样本中的表达量。下载自<http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>。
+
+merged_sample_quality_annotations.tsv, sample grouping information. Downloaded from <http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>.
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv, expression matrix where the first column lists genes, followed by their expression levels in each sample. Downloaded from <http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>.
+
+```{r}
+# 生成文件夹来保存中间结果
+# Create directory to store intermediate results
+res.path <- file.path("Results")
+if (!file.exists(res.path)) { dir.create(res.path) }
+
+# 设置颜色
+# Define color palette
+darkblue <- "#303B7F"
+darkred <- "#D51113"
+yellow <- "#EECA1F"
+
+# 获取感兴趣的肿瘤类型（有正常和肿瘤样本）
+# Select tumor types of interest (with both normal and tumor samples)
+tumors <- c("BLCA","BRCA","CESC","CHOL","COAD",
+            "ESCA","GBM","HNSC","KICH","KIRC",
+            "KIRP","LIHC","LUAD","LUSC","PAAD",
+            "PRAD","READ","STAD","THCA","UCEC")
+
+# 从原文中获取感兴趣的基因集 (TTC35/EMC2) 
+# Extract gene set of interest (TTC35/EMC2) from original publication
+genelist <- c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1","FDFT1","SLC1A5","SAT1",
+         "TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4")
+
+# 读取肿瘤注释文件
+# Load tumor annotation file
+rawAnno <- read.delim("merged_sample_quality_annotations.tsv",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+# 数据来自：http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf
+# Data source: http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf
+
+# 提取简化的样本条形码（前15位字符）
+# Extract simplified barcode (first 15 characters)
+rawAnno$simple_barcode <- substr(rawAnno$aliquot_barcode,1,15)
+
+# 去重处理并保留关键列
+# Remove duplicates and keep essential columns
+samAnno <- rawAnno[!duplicated(rawAnno$simple_barcode),c("cancer type", "simple_barcode")]
+samAnno <- samAnno[which(samAnno$`cancer type` != ""),]
+
+# 保存处理后的注释文件
+# Save processed annotation file
+write.table(samAnno,"simple_sample_annotation.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+
+# 快速读取表达谱数据并做数据预处理
+# Rapidly load expression matrix and perform preprocessing
+expr <- fread("EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",sep = "\t",stringsAsFactors = F,check.names = F,header = T) 
+# 数据来自：http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611
+# Data source: http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf
+
+# 转换为数据框格式并处理基因名
+# Convert to dataframe and process gene names
+expr <- as.data.frame(expr); rownames(expr) <- expr[,1]; expr <- expr[,-1]
+
+# 提取竖线分隔符前的正式基因名
+# Extract official gene names before "|" separator
+gene <- sapply(strsplit(rownames(expr),"|",fixed = T), "[",1)
+expr$gene <- gene
+
+# 去重处理（保留每个基因第一个出现的数据）
+# Remove duplicate genes (keep first occurrence)
+expr <- expr[!duplicated(expr$gene),]
+rownames(expr) <- expr$gene; expr <- expr[,-ncol(expr)]
+
+# 对于这份泛癌数据，将略小于0的数值拉到0，否则不能取log（其他途径下载的泛癌数据可能不需要此操作）
+# For this pan-cancer dataset, adjust slightly negative values to 0 to enable log transformation (may not be needed for other pan-cancer datasets)
+expr[expr < 0] <- 0 
+
+# 简化样本ID（取前15位字符）
+# Simplify sample IDs (first 15 characters)
+colnames(expr) <- substr(colnames(expr),1,15)
+
+# 内存清理 
+# Memory cleanup
+gc()
+```
+
+# 运行GSEA
+# Perform GSEA analysis
+
+```{r}
+# 这里使用的是HALLMARK背景集，可以改为自己感兴趣的基因集合
+# Using HALLMARK gene set (can be replaced with custom gene sets of interest)
+msigdb.hallmark <- read.gmt("h.all.v7.2.symbols.gmt") 
+
+# 30%阈值来定义高低组
+# 30% threshold for defining high/low expression groups
+pct <- 0.3 
+
+# 初始化结果存储表 
+# Initialize result container
+gseaTab <- NULL
+
+# 主分析循环
+# Main Analysis Loop
+for (i in tumors) {
+  message("--",i,"...")
+  
+  # 获取当前癌型的样本列表 
+  # Get samples for current cancer type
+  sam <- samAnno[which(samAnno$`cancer type` == i),"simple_barcode"]
+  
+  # 得到特定肿瘤类型的表达谱
+  # Get expression matrix for specific cancer type
+  comsam <- intersect(colnames(expr), sam) 
+  
+  # 仅提取肿瘤样本
+  # Extract tumor samples only
+  tumsam <- comsam[substr(comsam,14,14) == "0"] 
+  
+  # 提取目标基因表达矩阵
+  # Subset target gene expression matrix
+  es <- expr[genelist,tumsam] 
+  
+  # 基因级别分析 
+  # Per-gene Analysis
+  for (j in genelist) {
+    message("gene of ", j, " starts...")
+    
+    # 转置表达矩阵便于排序
+    # Transpose matrix for sorting
+    es_subset <- as.data.frame(t(es[j,tumsam]))
+    
+    # 对表达值排序
+    # Sort by expression value
+    es_subset <- es_subset[order(es_subset[,1],decreasing = T),,drop = F] 
+    
+    # 取前30%为高组，取后30%为低组
+    # Define high/low expression groups (top/bottom 30%)
+    high.es <- rownames(es_subset[1:(nrow(es_subset) * pct),,drop = F]) 
+    low.es <- rownames(es_subset[nrow(es_subset):(nrow(es_subset) - nrow(es_subset) * pct + 1),,drop = F]) 
+    
+    # 创建分组信息表 
+    # Create sample grouping information
+    subt <- data.frame(condition = rep(c("high","low"),c(length(high.es),length(low.es))),
+                       row.names = c(high.es, low.es),
+                       stringsAsFactors = F)
+    
+    # 数据预处理：log2转换（加1伪计数避免零值）
+    # Data preprocessing: log2 transformation (with pseudocount)
+    gset <- log2(na.omit(expr[,rownames(subt)]) + 1)
+    
+    # 执行limma差异分析 
+    # Perform limma differential analysis
+    twoclasslimma(subtype  = subt, 
+                  featmat  = gset, 
+                  treatVar = "high", 
+                  ctrlVar  = "low", 
+                  prefix   = paste0("TCGA_",i,"_",j), 
+                  overwt   = T, 
+                  sort.p   = F, 
+                  verbose  = TRUE, 
+                  res.path = res.path) 
+    
+    # 加载差异表达结果
+    # Load differential expression results
+    res <- read.table(file.path(res.path, paste0("TCGA_",i,"_",j,"_limma_test_result.high_vs_low.txt")),sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+    
+    # 产生pre-ranked基因列表
+    # Generate a pre-ranked list of genes
+    res <- res[order(res$log2fc, decreasing = T),]
+    glist <- res$log2fc; names(glist) <- rownames(res)
+    
+    # 运行GSEA
+    # Run GSEA analysis
+    set.seed(20220407)
+    gsea <- quiet(GSEA(geneList = glist,
+                 pvalueCutoff = 1, 
+                 seed = TRUE,
+                 TERM2GENE = msigdb.hallmark,
+                 verbose = TRUE))
+    
+    # 内存清理 
+    # Memory cleanup
+    gc()
+    
+    # 转换GSEA结果为数据框 
+    # Convert GSEA result to dataframe
+    gsea.df <- as.data.frame(gsea) 
+    
+    # 保存当前基因的GSEA结果 
+    # Save per-gene GSEA results
+    write.table(gsea.df,file = file.path(res.path,paste0("gsea between high and low group of gene ",j," in ",i,".txt")),sep = "\t",row.names = T,col.names = NA,quote = F)
+    
+    # 合并结果到总表 
+    # Aggregate results to master table
+    gseaTab <- rbind.data.frame(gseaTab,
+                                data.frame(tumor = i,
+                                           gene = j,
+                                           term = gsea.df$ID,
+                                           NES = gsea.df$NES,
+                                           pval = gsea.df$pvalue,
+                                           FDR = gsea.df$p.adjust,
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+  }
+}
+
+# 保存整合的GSEA结果
+# Save consolidated GSEA results
+write.table(gseaTab, "TCGA_pancan_gsea_regarding_genes_of_interest.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+# 开始画图
+# Plotting
+
+生成泡泡图
+
+Generate bubble plots
+
+```{r}
+# 设置感兴趣的通路
+# Set pathway of interest
+pathOfInterest <- "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION" 
+
+# 提取和该通路有关的NES
+# Extract NES values related to this pathway
+tmp <- gseaTab[which(gseaTab$term == pathOfInterest),] 
+
+# 颜色配置 
+# Color Configuration
+my_palette <- colorRampPalette(c(darkblue,yellow,darkred), alpha=TRUE)(n=128)
+
+# 气泡图绘制 
+# Bubble Plot Visualization
+ggplot(tmp, aes(x=tumor,y=gene)) +
+  geom_point(aes(size=-log10(FDR),color=NES)) +
+  scale_color_gradientn('NES', 
+                        colors=my_palette) + 
+  scale_size_continuous(range = c(1,4)) + 
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank(),
+        axis.text.x = element_text(angle = 45, size = 12, hjust = 0.3, vjust = 0.5, color = "black"),
+        axis.text.y = element_text(size = 10, color = "black"),
+        axis.title = element_blank(),
+        panel.border = element_rect(size = 0.7, linetype = "solid", colour = "black"),
+        legend.position = "bottom",
+        plot.margin = unit(c(1,1,1,1), "lines"))
+
+# 保存为PDF
+# Save as PDF
+ggsave(paste0("GSEA regarding ",pathOfInterest," in pancancer.pdf"), width = 8,height = 6)
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
