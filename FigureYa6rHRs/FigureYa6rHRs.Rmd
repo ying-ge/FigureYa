@@ -1,0 +1,175 @@
+---
+title: "FigureYa6rHRs"
+author: "Dekang Lv; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+临床的亚组分析，我想用R做出文章里的样子。
+
+这里只从形式上复现，如果需要计算过程，请参考FigureYa90subgroup。
+
+Clinical subgroup analysis, I'd like to use R to make what it looks like in the article.
+
+It is only reproduced here formally, if you need the calculation process, please refer to FigureYa90subgroup.
+
+![](example.png)
+出自<https://ascopubs.org/doi/full/10.1200/JCO.2017.75.6155?url_ver=Z39.88-2003&rfr_id=ori%3Arid%3Acrossref.org&rfr_dat=cr_pub%3Dpubmed>
+
+from<https://ascopubs.org/doi/full/10.1200/JCO.2017.75.6155?url_ver=Z39.88-2003&rfr_id=ori%3Arid%3Acrossref.org&rfr_dat=cr_pub%3Dpubmed>
+
+## 使用场景
+## usage scenario
+
+场景一：临床的亚组分析。例如，能从参与临床试验的那么多人当中发现EGFR抑制剂唯独对亚洲非吸烟女性有效。
+
+场景二：meta分析，是经典的meta分析的图。
+
+Scenario 1: Clinical subgroup analysis. For example, it was discovered that among the numerous participants in a clinical trial, EGFR inhibitors were effective only for Asian non-smoking females.
+
+Scenario 2: meta-analysis, a graph of a classic meta-analysis.
+
+## 输入数据
+## Input data
+
+临床数据，包括分类、样本数、风险比及置信区间(上限及下限)等
+
+Clinical data, including categorization, sample size, hazard ratio, and confidence intervals (upper and lower limits), etc.
+
+## 输入数据的格式化
+## Formatting input data
+
+测试用数据文件为easy_input.csv，分类、样本数、风险比及置信区间(上限及下限)对应的列名分别是Variable、Count、Point.Estimate、Low和High
+
+The data file for testing is easy_input.csv, and the corresponding column names for classification, sample size, hazard ratio, and confidence intervals (upper and lower limits) are Variable, Count, Point.Estimate, Low, and High, respectively.
+
+```{r,message=FALSE,warning=FALSE}
+#install.packages("forestplot")
+library("forestplot")
+
+#读取输入文件，输入数据一般包括分类、样本数、风险比及置信区间（上限及下限）等，需要注意的是输入文件的布局(包括文字缩进)将展示在最后结果中，所见即所得。
+#Read the input file, the input data generally includes classification, sample size, hazard ratio and confidence interval (upper and lower limits), etc. It should be noted that the layout of the input file (including text indentation) will be displayed in the final results, what you see is what you get.
+data <- read.csv("easy_input.csv", stringsAsFactors=FALSE)
+head(data)
+np <- ifelse(!is.na(data$Count), paste(data$Count," (",data$Percent,")",sep=""), NA)#合并count和percent，这一步非必要 Merge count and percent, this step is not necessary
+head(np)
+
+#将要在图中展示的文本
+#所见即所得，想显示哪几列，就在cbind里面添加
+#the text to be displayed in the diagram
+#What you see is what you get, add which columns you want to show in the cbind
+tabletext <- cbind(c("\nSubgroup",NA,NA,data$Variable,NA),
+                   c("No. of\nPatients (%)",NA,NA,np,NA),
+                   c("Hazard Ratio\n(95% CI)",NA,NA,ifelse(!is.na(data$Count), paste(format(data$Point.Estimate,nsmall=2)," (",format(data$Low,nsmall = 2)," to ",format(data$High,nsmall = 2),")",sep=""), NA),NA),
+                   #c("P-value", NA, NA, ifelse(data$P < 0.001, "<0.001", round(data$P,3)), NA))
+                   c("P-value", NA, NA, data$P, NA)) #如果没有pvalue，就删掉这行 If there is no p-value, delete this line
+head(tabletext)
+```
+
+## 开始画图
+## Start drawing
+
+用默认参数画图
+
+Draw with default parameters
+
+```{r,fig.height=8,fig.width=8,message=FALSE,warning=FALSE}
+forestplot(labeltext=tabletext,mean=c(NA,NA,1,data$Point.Estimate,NA),
+           lower=c(NA,NA,1,data$Low,NA),upper=c(NA,NA,1,data$High,NA))
+```
+
+仔细读说明文档，调整参数，就能画出paper里的样子
+
+**重点修改`hrzl_lines`参数里的第三行，画最下面一条黑线，""中数字为nrow(data)+5**
+
+Read the documentation carefully, adjust the parameters, and you'll be able to draw what you see in the paper
+
+**Focus on modifying the third line in the `hrzl_lines` parameter, draw a black line at the bottom, and the number in "" as nrow(data)+5**
+
+```{r,fig.height=10,fig.width=10,message=FALSE,warning=FALSE}
+forestplot(labeltext=tabletext, #图中的文本 text in figure
+           mean=c(NA,NA,1,data$Point.Estimate,NA),#风险比 HR
+           lower=c(NA,NA,1,data$Low,NA), #95%置信区间下限 lower limit of 95% confidence interval
+           upper=c(NA,NA,1,data$High,NA),#95%置信区间上限 upper limit of 95% confidence interval
+           #title="Hazard Ratio",
+           graph.pos=3,#图在表中的列位置 column position of the graph in the table
+           graphwidth = unit(.4,"npc"),#图在表中的宽度比例 width ratio of the graph in the table
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石 box type selection diamond
+           col=fpColors(box="steelblue", lines="black", zero = "black"),#box颜色 box color
+           boxsize=c(NA,NA,NA,data$Percent,NA)/75,#box大小根据样本量设置 box size is set according to the sample size
+           lwd.ci=2,ci.vertices.height = 0.1,ci.vertices=TRUE,#置信区间用线宽、高、型 confidence interval with line width, height, and type
+           zero=1,#zero线横坐标 horizontal coordinates of the zero line
+           lwd.zero=2,#zero线宽 zero line width
+           grid = structure(c(data[1,]$Point.Estimate), gp = gpar(col = "black", lty=2,lwd=2)),#虚线(可多条)及其横坐标、颜色、线宽 dashed lines (can be more than one) and their horizontal coordinates, colors, line widths
+           xticks = c(0.5, 1,1.5, 2),#横坐标刻度根据需要可随意设置 horizontal coordinate scale can be set as freely
+           lwd.xaxis=2,#X轴线宽 X-axis line width
+           xlab="     <-Favors A Arm      Favors B Arm->",#X轴标题 X-axis title
+           hrzl_lines=list("3" = gpar(lwd=2, col="black"),#第三行顶部加黑线，引号内数字标记行位置 add a black line at the top of the third line, with numbers in quotes indicating the line position
+                           #"4" = gpar(lwd=60,lineend="butt", columns=c(1:4), col="#99999922"),#加阴影，弱项不建议使用 add shadows, not recommended for weak items
+                           "30" = gpar(lwd=2, col="black")),#最后一行底部加黑线,""中数字为nrow(data)+5 add a black line at the bottom of the last line, with the number in quotes as nrow(data)+5
+           txt_gp=fpTxtGp(label=gpar(cex=1.25),#各种字体大小设置 various font size settings
+                          ticks=gpar(cex=1.25),
+                          xlab=gpar(cex = 1.25),
+                          title=gpar(cex = 1.25)),
+           #is.summary = c(T,rep(F,27)),#首行字体类型设置 first line font type setting
+           lineheight = unit(.75,"cm"),#固定行高 fixed row height
+           #align=c("l","c","c"),#每列文字的对齐方式，偶尔会用到 the alignment of the text in each column is occasionally used to
+           #cex=10,
+           colgap = unit(0,"cm"),#列间隙 column gap
+           mar=unit(rep(1.25, times = 4), "cm"),#图形页边距 graphic margin
+           new_page = F#是否新页 new page or not
+           )
+```
+
+## 输出文件
+## Output file
+
+把森林图输出到pdf文件中，测试的输出文件为forestplot.pdf
+
+Output the forest plot to a pdf file, the output file of the test is forestplot.pdf
+
+```{r}
+pdf("forestplot.pdf",width=12,height = 9)#新建PDF文件，准备写入图形 create a new PDF file and prepare to write graphics
+forestplot(labeltext=tabletext, #图中的文本 text in figure
+           mean=c(NA,NA,1,data$Point.Estimate,NA),#风险比 HR
+           lower=c(NA,NA,1,data$Low,NA), #95%置信区间下限 lower limit of 95% confidence interval
+           upper=c(NA,NA,1,data$High,NA),#95%置信区间上限 upper limit of 95% confidence interval
+           #title="Hazard Ratio",
+           graph.pos=3,#图在表中的列位置 column position of the graph in the table
+           graphwidth = unit(.4,"npc"),#图在表中的宽度比例 width ratio of the graph in the table
+           fn.ci_norm="fpDrawDiamondCI",#box类型选择钻石 box type selection diamond
+           col=fpColors(box="steelblue", lines="black", zero = "black"),#box颜色 box color
+           boxsize=c(NA,NA,NA,data$Percent,NA)/75,#box大小根据样本量设置 box size is set according to the sample size 
+           lwd.ci=2,ci.vertices.height = 0.1,ci.vertices=TRUE,#置信区间用线宽、高、型 confidence interval with line width, height, and type
+           zero=1,#zero线横坐标 horizontal coordinates of the zero line
+           lwd.zero=2,#zero线宽 zero line width
+           grid = structure(c(data[1,]$Point.Estimate), gp = gpar(col = "black", lty=2,lwd=2)),#虚线(可多条)及其横坐标、颜色、线宽 dashed lines (can be more than one) and their horizontal coordinates, colors, line widths
+           xticks = c(0.5, 1,1.5, 2),#横坐标刻度根据需要可随意设置  horizontal coordinate scale can be set as freely
+           lwd.xaxis=2,#X轴线宽  X-axis line width
+           xlab="     <-Favors A Arm      Favors B Arm->",#X轴标题  X-axis title
+           hrzl_lines=list("3" = gpar(lwd=2, col="black"),#第三行顶部加黑线，引号内数字标记行位置 add a black line at the top of the third line, with numbers in quotes indicating the line position
+                           #"4" = gpar(lwd=60,lineend="butt", columns=c(1:4), col="#99999922"),#加阴影，弱项不建议使用 add shadows, not recommended for weak items
+                           "30" = gpar(lwd=2, col="black")),#最后一行底部加黑线,""中数字为nrow(data)+5 add a black line at the bottom of the last line, with the number in quotes as nrow(data)+5
+           txt_gp=fpTxtGp(label=gpar(cex=1.25),#各种字体大小设置 various font size settings
+                          ticks=gpar(cex=1.25),
+                          xlab=gpar(cex = 1.25),
+                          title=gpar(cex = 1.25)),
+           #is.summary = c(T,rep(F,27)),#首行字体类型设置 first line font type setting
+           lineheight = unit(.75,"cm"),#固定行高 fixed row height
+           #align=c("l","c","c"),#每列文字的对齐方式，偶尔会用到 the alignment of the text in each column is occasionally used to
+           #cex=10,
+           colgap = unit(0,"cm"),#列间隙 column gap
+           mar=unit(rep(1.25, times = 4), "cm"),#图形页边距 graphic margin
+           new_page = F#是否新页 new page or not
+           )
+dev.off()#写入图型并关闭PDF文件 write graphics and close the PDF file
+
+sessionInfo()
+```
