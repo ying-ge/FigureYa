@@ -1,0 +1,552 @@
+---
+title: "FigureYa40 lineages_analysis"
+author: "Zhougeng Xu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+# 使用knitr包设置全局代码块选项
+# Set global chunk options using knitr package
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用R画出文章里的这个图
+
+##Requirement description
+
+Draw the image in the article using R
+
+![](http://oex750gzt.bkt.clouddn.com/18-9-11/92022740.jpg)
+
+出自<https://www.cell.com/cell/abstract/S0092-8674(17)30596-2>
+
+from<https://www.cell.com/cell/abstract/S0092-8674(17)30596-2>
+
+## 应用场景
+
+细胞谱系分析，主要用于单细胞测序数据，展示细胞在二维状态空间的拟时间（pseudotime）排列，即一群细胞怎样变成另一群细胞。
+
+##Application scenarios
+
+Cell lineage analysis is mainly used for single-cell sequencing data, displaying the pseudotime arrangement of cells in a two-dimensional state space, that is, how a group of cells become another group of cells.
+
+## 软件安装
+
+细胞谱系分析目前用到的包主要是[Monocle2](https://bioconductor.org/packages/release/bioc/html/monocle.html)
+
+`monocle`需要通过`biocLite`安装，如果速度慢，将下面代码`#options(...)`中的`#`去掉，则会使用国内镜像. 
+
+CRAN镜像备选
+
+- 国科大: <https://mirrors.ustc.edu.cn/CRAN/>
+- 同济大学: <https://mirrors.tongji.edu.cn/CRAN/>
+- 兰州大学: <https://mirror.lzu.edu.cn/CRAN/>
+
+##Software installation
+
+The packages currently used for cell lineage analysis are mainly [Monocle2]（ https://bioconductor.org/packages/release/bioc/html/monocle.html )
+
+`Monocle needs to be installed through biocLite. If the speed is slow, remove the # from the # options (...) code below, and a domestic image will be used  
+
+CRAN image backup
+
+-University of Science and Technology of China:< https://mirrors.ustc.edu.cn/CRAN/ >
+-Tongji University:< https://mirrors.tongji.edu.cn/CRAN/ >
+-Lanzhou University:< https://mirror.lzu.edu.cn/CRAN/ >
+
+```{r, message=FALSE, warning=FALSE}
+#source("https://bioconductor.org/biocLite.R")  # 加载Bioconductor包管理器 | Load Bioconductor package manager
+#options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))  # 设置CRAN镜像为清华源 | Set CRAN mirror to Tsinghua source
+#options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")  # 设置Bioconductor镜像为中科大源 | Set Bioconductor mirror to USTC source
+
+# 检查并安装monocle包：用于单细胞RNA-seq数据分析的轨迹推断工具 | Check and install monocle package: Trajectory inference tool for single-cell RNA-seq data analysis
+if ( ! require(monocle)) BiocInstaller::biocLite("monocle")
+# 检查并安装DDRTree包：用于降维和轨迹推断的算法实现 | Check and install DDRTree package: Algorithm implementation for dimensionality reduction and trajectory inference
+if ( ! require(DDRTree)) BiocInstaller::biocLite("DDRTree")
+# 检查并安装pheatmap包：用于生成高质量热图的可视化工具 | Check and install pheatmap package: Visualization tool for generating high-quality heatmaps
+if ( ! require(pheatmap)) BiocInstaller::biocLite("pheatmap")
+
+# 加载monocle包 | Load the monocle package
+library(monocle)
+# 加载DDRTree包 | Load the DDRTree package
+library(DDRTree)
+# 加载pheatmap包 | Load the pheatmap package
+library(pheatmap)
+```
+
+## 输入数据
+
+输入数据为两种:
+
+- 表达量矩阵，行为基因名，列为样本(细胞)
+- 样本的元数据(metadata)
+
+> 测试数据集内存8G可能够用, 但是细胞数越多会对内存的要求更高。
+
+**注**: 测试数据集的单细胞测序用的是SMART-Seq2, 因此表达矩阵需要进行TPM标准化, 参考"FigureYa23count2TPM"
+
+如果用的是10X Genomics技术，表达矩阵是UMI，则不需要进行额外的TPM/FPKM标准化。
+
+##Input data
+
+There are two types of input data:
+
+-Expression matrix, behavioral gene names, listed as samples (cells)
+-Sample metadata
+
+>8GB of memory may be sufficient for the test dataset, but the more cells there are, the higher the memory requirements will be.
+
+**Note * *: SMART-Seq2 was used for single-cell sequencing of the test dataset, therefore the expression matrix needs to be standardized using TPM, as shown in "FigureYa23count2TPM"
+
+If 10X Genomics technology is used and the expression matrix is UMI, no additional TPM/FPKM standardization is required.
+
+```{r}
+# 输入文件路径设置 | Input file path settings
+exprs_file <- 'easy_input_TPM.txt'  # 表达矩阵文件路径 | Path to expression matrix file
+metadata_file <- 'easy_input_sample_sheet.txt'  # 样本元数据文件路径 | Path to sample metadata file
+
+# 读取表达矩阵数据 | Read expression matrix data
+# 参数说明 | Parameter explanation:
+# file: 输入文件路径 | Input file path
+# sep: 字段分隔符，制表符 | Field separator, tab character
+# header: 是否将第一行作为列名 | Whether to treat the first row as column names
+# stringsAsFactors: 是否将字符串转换为因子 | Whether to convert strings to factors
+# check.names: 是否检查列名有效性 | Whether to check the validity of column names
+exprs_df <- read.table(file=exprs_file, sep='\t', header = TRUE, 
+                 stringsAsFactors = FALSE, check.names = FALSE)
+
+# 读取样本元数据 | Read sample metadata
+# 参数说明 | Parameter explanation:
+# file: 输入文件路径 | Input file path
+# header: 是否将第一行作为列名 | Whether to treat the first row as column names
+# stringsAsFactors: 是否将字符串转换为因子 | Whether to convert strings to factors
+sample_sheet <- read.table(file = metadata_file, header = TRUE,
+                           stringsAsFactors = FALSE)
+```
+
+数据来源于示例图所在的文章<https://www.cell.com/cell/abstract/S0092-8674(17)30596-2>
+
+在GEO上根据[GSE98638](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE98638)下载raw count 数据。
+
+由于文献分别对不同聚类进行细胞谱系分析，测试数据集选择了"C01_CD8-LEF1","C02_CD8-CX3CR1", "C04_CD8-LAYN","C05_CD8-GZMK"
+
+The data is sourced from the article where the example image is located< https://www.cell.com/cell/abstract/S0092-8674 (17)30596-2>
+
+According to [GSE98638] on GEO（ https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE98638 ）Download raw count data.
+
+Due to the literature conducting cell lineage analysis on different clusters, the test dataset selected "C01_CD8-LEF1", "C02-CCD8-CX3CR1", "C04_CD8-LAYN", "C05_CD8-GZMK"
+
+```{r}
+# 查看数据的前几列, 以便后续进行数据整理 | View the first few columns of the data for subsequent data organization
+#exprs_df[1:10]  # 注释：取消注释可查看表达矩阵前10列 | Uncomment to view first 10 columns of expression matrix
+
+# 这里的表达矩阵的第一列和第二列是基因的ID和symbol，后面的列都是每个细胞ID
+# The first two columns of the expression matrix are gene IDs and symbols, followed by columns for each cell ID
+
+# 查看样本元数据的前10行 | View the first 10 rows of sample metadata
+sample_sheet[1:10,]
+```
+
+这里的第一列是细胞的ID，第二列是病人，第三列是聚类，第四列是细胞类型。一般第三列的聚类是通过Seurat分析得到, 参考"FIgureYa27tSNE"
+
+The first column here is the cell ID, the second column is the patient, the third column is the cluster, and the fourth column is the cell type. Generally, the clustering in the third column is obtained through Seurat analysis, referring to "FIGureYa27tSNE"
+
+## 构建newCellDataSet
+
+后续分析依赖于Monocle, 所以要整理出三个数据集
+
+- 表达量矩阵`exprs`:数值矩阵 行名是基因, 列名是细胞编号.
+- 细胞的表型信息`phenoData`: 第一列是细胞编号，其他列是细胞的相关信息
+- 基因注释`featureData`: 第一列是基因编号, 其他列是基因对应的信息
+
+并且这三个数据集要满足如下要求:
+
+表达量矩阵**必须**：
+
+- 保证它的列数等于`phenoData`的行数
+- 保证它的行数等于`featureData`的行数
+
+而且
+
+- `phenoData`的行名需要和表达矩阵的列名匹配
+- `featureData`和表达矩阵的行名要匹配
+- `featureData`至少要有一列"gene_short_name", 就是基因的symbol
+
+先构建表达矩阵。根据之前对数据集的简单了解，原先的数据集前两列是不必要信息，所以要去掉，而行名对应第一列
+
+##Build newCellDataset
+
+Subsequent analysis relies on Monocle, so three datasets need to be compiled
+
+-Expressions matrix: The row names of the numerical matrix are genes, and the column names are cell numbers
+-Phenotypic information of cells: The first column is the cell number, and the other columns are the relevant information of the cell
+-Gene annotation 'featureData': The first column is the gene number, and the other columns are the information corresponding to the gene
+
+And these three datasets must meet the following requirements:
+
+The expression matrix * * must * *:
+
+-Ensure that its column count is equal to the row count of 'phenoData'
+-Ensure that its row count is equal to the row count of 'featureData'
+
+not only ... but
+
+-The row names of phenoData need to match the column names of the expression matrix
+-The row names of 'featureData' and the expression matrix should match
+-The 'featureData' must have at least one column of 'gene_sthort_name', which is the symbol of the gene
+
+First, construct an expression matrix. Based on my previous understanding of the dataset, the first two columns were unnecessary information and need to be removed. The row names correspond to the first column
+
+```{r}
+# 提取表达矩阵数据（去除前两列基因ID和symbol） | Extract expression matrix data (excluding first two columns of gene ID and symbol)
+# 参数说明 | Parameter explanation:
+# exprs_df[,c(-1,-2)]: 选取所有行，但排除第1列和第2列 | Select all rows except columns 1 and 2
+# as.matrix(): 将数据框转换为矩阵格式 | Convert data frame to matrix format
+expr_matrix <- as.matrix(exprs_df[,c(-1,-2)])
+
+# 设置矩阵的行名为基因ID | Set row names of matrix to gene IDs
+# exprs_df[[1]]: 获取数据框的第一列（基因ID列） | Get the first column (gene ID column) of the data frame
+rownames(expr_matrix) <- exprs_df[[1]]
+
+# 查看表达矩阵的前10行和前5列 | View the first 10 rows and 5 columns of the expression matrix
+expr_matrix[1:10,1:5]
+```
+
+再为`phenoData`准备数据框. 和之前导入的"sample_sheet"相符合, 只不过需要额外增加行名，即第一列
+
+Prepare a data box for 'phenoData' again Same as the previously imported 'sample_steet', except that an additional row name needs to be added, which is the first column
+
+```{r}
+# 确保样本元数据表格可被后续代码访问（此行为冗余操作，可删除） | Ensure sample metadata table is accessible for subsequent code (this line is redundant and can be removed)
+sample_sheet <- sample_sheet
+
+# 设置样本元数据的行名为样本ID（第一列数据） | Set row names of sample metadata to sample IDs (first column of data)
+# 参数说明 | Parameter explanation:
+# sample_sheet[[1]]: 选取样本元数据的第一列作为行名 | Select the first column of sample metadata as row names
+rownames(sample_sheet) <- sample_sheet[[1]]
+```
+
+接着为`featureData`准备数据框. 信息可以从exprs_df的前两列提取, symbol要改名成"gene_short_name"
+
+Next, prepare a data box for 'featureData' The information can be extracted from the first two columns of exprs_df, and the symbol needs to be renamed as "gene_sthort_name"
+
+```{r}
+# 提取基因注释信息（基因ID和基因名称） | Extract gene annotation information (gene ID and gene name)
+# 参数说明 | Parameter explanation:
+# exprs_df[,c(1,2)]: 选取表达矩阵的第1列（基因ID）和第2列（基因名称） | Select column 1 (gene ID) and column 2 (gene name) from the expression matrix
+gene_annotation <- exprs_df[,c(1,2)]
+
+# 设置基因注释表的行名为基因ID | Set row names of gene annotation table to gene IDs
+# exprs_df[[1]]: 获取表达矩阵的第一列（基因ID列） | Get the first column (gene ID column) of the expression matrix
+rownames(gene_annotation) <- exprs_df[[1]]
+
+# 将基因名称列的列名修改为monocle要求的"gene_short_name" | Rename the gene name column to "gene_short_name" as required by monocle
+# colnames(gene_annotation)[2]: 获取基因注释表的第二列列名并修改 | Get and modify the column name of the second column in the gene annotation table
+colnames(gene_annotation)[2] <- "gene_short_name"
+```
+
+最后要比较下表达量矩阵的列数是否等于用于构建`phenoData`的sample_sheet.
+
+如果发现不相同就需要根据表达矩阵的列来调整用于构建`phenoData`的sample_shee的行。
+
+运行两次，看到结果为"run successfully"则表明顺利处理
+
+Finally, it is necessary to compare whether the number of columns in the expression matrix is equal to the sample_stheet used to construct the 'phenoData'
+
+If differences are found, it is necessary to adjust the rows of sample_sthee used to construct 'phenoData' based on the columns of the expression matrix.
+
+Run twice and see the result as' run successfully ', indicating smooth processing
+
+```{r}
+# 获取表达矩阵的列名（样本ID） | Get column names (sample IDs) of the expression matrix
+expr_col_name <- colnames(expr_matrix)
+# 获取样本元数据的行名（样本ID） | Get row names (sample IDs) of the sample metadata
+sample_sheet_row_name <- rownames(sample_sheet)
+
+# 检查表达矩阵的列名与样本元数据的行名是否完全一致 | Check if column names of expression matrix match row names of sample metadata
+if ( ! identical(expr_col_name, sample_sheet_row_name)){
+  # 若不一致，输出前10个样本ID进行对比 | If not identical, output first 10 sample IDs for comparison
+  data.frame(x=colnames(expr_matrix)[1:10],
+             y=rownames(sample_sheet)[1:10])
+} else {
+  # 若一致，提示运行成功 | If identical, print success message
+  cat("run successfully")
+}
+
+# 检查样本元数据中的所有样本是否都在表达矩阵中存在 | Check if all samples in metadata exist in expression matrix
+if (all( sample_sheet_row_name %in% expr_col_name )){
+  # 按样本元数据的顺序重新排列表达矩阵的列 | Reorder expression matrix columns to match metadata order
+  expr_matrix <- expr_matrix[,match(sample_sheet_row_name,expr_col_name)]
+} else{
+  # 若存在不匹配的样本，发出警告 | If any samples are missing, issue a warning
+  warning("unequal row number")
+}
+
+```
+
+最后构建Monocle后续分析要求的"newCellDataSet"对象, 注意根据输入数据的类型调整下面的`expressionFamily`参数。我们用的是TPM数据,所以用`tobit()`
+
+- UMI: `negbinomial.size()	`
+- FPKM, TPM: `tobit()`
+- log-转换后的 FPKM/TPM： `gaussianff()`
+
+Finally, construct the 'newCellDataset' object required for subsequent analysis of Monocle, paying attention to adjusting the 'expressionFamily' parameter based on the type of input data. We use TPM data, so we use tobit()`
+
+- UMI: `negbinomial.size()	`
+- FPKM, TPM: `tobit()`
+-Log converted FPKM/TPM: ` Gaussian FF()`
+
+```{r}
+# 创建样本注释数据框 | Create sample annotation data frame
+# 参数说明 | Parameter explanation:
+# as.data.frame(sample_sheet): 将样本元数据转换为数据框格式 | Convert sample metadata to data frame format
+# new("AnnotatedDataFrame"): 创建monocle包所需的注释数据框对象 | Create an AnnotatedDataFrame object required by monocle
+pd <- new("AnnotatedDataFrame", data=as.data.frame(sample_sheet))
+
+# 创建基因注释数据框 | Create gene annotation data frame
+# 参数说明 | Parameter explanation:
+# as.data.frame(gene_annotation): 将基因注释信息转换为数据框格式 | Convert gene annotation information to data frame format
+fd <- new("AnnotatedDataFrame", data=as.data.frame(gene_annotation))
+
+# 创建monocle的细胞数据集对象 | Create monocle CellDataSet object
+# 参数说明 | Parameter explanation:
+# expr_matrix: 表达矩阵，包含基因表达值 | Expression matrix containing gene expression values
+# phenoData: 样本注释数据，包含样本元信息 | Sample annotation data containing metadata
+# featureData: 基因注释数据，包含基因信息 | Gene annotation data containing gene information
+# expressionFamily = tobit(): 指定表达值分布模型为Tobit模型，适合处理RNA-seq数据中的零膨胀问题 | 
+#                           Specify Tobit model for expression values, suitable for zero-inflated RNA-seq data
+rownames(pData(pd)) <- pData(pd)$UniqueCell_ID
+CDS <- newCellDataSet(expr_matrix, 
+                      phenoData = pd,
+                      featureData = fd,
+                      expressionFamily = tobit())
+
+rpc_matrix <- relative2abs(CDS)
+
+CDS <- newCellDataSet(as(rpc_matrix, "sparseMatrix"), 
+                      phenoData = pd,
+                      featureData = fd,
+                      expressionFamily = negbinomial.size())
+
+```
+
+如果expressionFamily选择的是`negbinomial.size()	`或者`negbinomial()`, 则还需要进行如下两步。
+
+If expressionFamily selects either 'negminomial. size()' or 'negminomial()', the following two steps need to be taken.
+
+```{r}
+# 估计细胞大小因子，用于表达量归一化（已注释掉，暂不执行） | Estimate cell size factors for expression normalization (commented out, not executed)
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象，包含表达矩阵和注释信息 | CellDataSet object containing expression matrix and annotations
+# 功能: 计算每个细胞的大小因子，用于校正测序深度差异 | Function: Calculate size factors for each cell to correct for sequencing depth differences
+#CDS <- estimateSizeFactors(CDS)
+
+# 估计基因表达离散度参数（已注释掉，暂不执行） | Estimate gene expression dispersion parameters (commented out, not executed)
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象 | CellDataSet object
+# 功能: 计算每个基因的表达离散度，用于后续差异表达分析 | Function: Calculate expression dispersion for each gene for differential expression analysis
+#CDS <- estimateDispersions(CDS)
+```
+
+## 细胞谱系分析
+
+### 第一步:定义排序基因
+
+排序基因的选择有很多种：
+
+- 基于不同聚类的差异表达
+- 基于已知的标记基因
+
+从不同聚类中找到差异基因, 在聚类的基础上进行差异表达分析
+
+单细胞聚类分析见"FIgureYa27tSNE"
+
+##Cell lineage analysis
+
+###Step 1: Define sorting genes
+
+There are many options for sorting genes:
+
+-Differential expression based on different clusters
+-Based on known marker genes
+
+Identify differentially expressed genes from different clusters and conduct differential expression analysis based on the clustering
+
+Single cell clustering analysis can be found in "FIGureYa27tSNE"
+
+```{r,warning=FALSE}
+# 检测表达基因 | Detect expressed genes
+# 参数说明 | Parameter explanation:
+# cds: 细胞数据集对象 | CellDataSet object
+# min_expr: 定义基因表达的最小阈值 | Minimum expression threshold to define gene expression
+CDS <- detectGenes(cds = CDS , min_expr = 0.1)
+
+# 筛选在至少10个细胞中表达的基因 | Filter genes expressed in at least 10 cells
+expressed_genes <- row.names(subset(fData(CDS),
+    num_cells_expressed >= 10))
+
+# 我的电脑8G内存，运行下面这行需要20分钟 | This line takes ~20 mins to run on 8GB RAM
+# 如果只为跑通代码，可以先跳过这步，直接进入下一段，读取压缩包里的“order_gene.txt”文件。
+# If just testing the code, skip this step and load "order_gene.txt" from compressed file instead
+# 差异表达基因检测，用于细胞轨迹分析的基因排序 | Differential expression analysis for gene ordering in trajectory analysis
+# 参数说明 | Parameter explanation:
+# CDS[expressed_genes,]: 使用筛选后的表达基因子集 | Subset of expressed genes
+# fullModelFormulaStr: 指定差异表达分析的模型公式 | Formula for differential expression model
+# cores: 指定并行计算的核心数 | Number of CPU cores for parallel computation
+CDS <- estimateSizeFactors(CDS)
+CDS <- estimateDispersions(CDS)  
+clustering_DEG_genes <- 
+  differentialGeneTest(CDS[expressed_genes,],
+                       fullModelFormulaStr = '~majorCluster',
+                       cores=9)
+
+# 选择q值最小的前1000个差异表达基因作为排序基因 | Select top 1000 genes with lowest q-values for trajectory ordering
+ordering_genes <- row.names(clustering_DEG_genes)[order(clustering_DEG_genes$qval)][1:1000]
+
+# 将排序基因保存到文件 | Save selected genes to file
+# 参数说明 | Parameter explanation:
+# file: 输出文件路径 | Output file path
+# quote: 是否对字符串加引号 | Whether to quote strings
+write.table(ordering_genes, "order_gene.txt", quote = F)
+```
+
+如果有一些已知基因，比如说上面做的差异表达分析的基因都是我们的已知基因，就可以直接导入
+
+If there are some known genes, such as the genes analyzed for differential expression above, which are all our known genes, they can be directly imported
+
+```{r}
+# 从文件中读取用于轨迹分析的排序基因列表 | Read the list of ordering genes for trajectory analysis from file
+# 参数说明 | Parameter explanation:
+# file: 输入文件路径，即之前保存的排序基因文件 | Input file path, the previously saved ordering genes file
+# [[1]]: 提取数据框的第一列（基因名称） | Extract the first column (gene names) from the data frame
+ordering_genes <- read.table("order_gene.txt")[[1]]
+```
+
+最后设定用于排序的基因
+
+Finally, set the genes for sorting
+
+```{r}
+# 设置用于细胞轨迹分析的基因筛选 | Set genes used for cell trajectory analysis
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象 | CellDataSet object
+# ordering_genes: 指定用于定义细胞轨迹的基因列表 | Genes used to define cell trajectory
+CDS <- setOrderingFilter(CDS, 
+                         ordering_genes = ordering_genes)
+```
+
+
+### 第二步: 降维
+
+这一步，比较耗费时间. 降维是为了更好的展示数据。
+
+降维有很多种方法, 不同方法的最后展示的图都不太一样, 其中"DDRTree"是Monocle2使用的默认方法，ICA则是Monocle2的方法
+
+###Step 2: Dimensionality Reduction
+
+This step is quite time-consuming Dimensionality reduction is to better display data.
+
+There are many methods for dimensionality reduction, and the final images displayed by different methods are not the same. Among them, "DDRTree" is the default method used by Monocle2, while ICA is the method used by Monocle2
+
+```{r,warning=FALSE}
+# 降维处理：使用DDRTree方法将表达矩阵降至二维空间 | Dimensionality reduction using DDRTree method to 2D space
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象 | CellDataSet object
+# max_components: 指定降维后的维度数 | Number of dimensions to reduce to
+# method: 指定降维方法，DDRTree是monocle推荐的轨迹分析方法 | Dimensionality reduction method, DDRTree is recommended for trajectory analysis
+CDS <- reduceDimension(CDS, max_components = 2, 
+                       method="DDRTree")
+
+# 把最耗时的这步保存下来，即使关闭了R，后面也可以直接从这步开始
+# Save the most time-consuming step so you can resume later even after closing R
+# saveRDS(CDS, file="CDS_DDRTree.rds")
+```
+
+### 第三步: 在谱系上对细胞排序
+
+###Step 3: Sort the cells on the lineage
+
+```{r}
+# 读取上一步保存的CDS对象（已注释，当前未执行） | Read the previously saved CDS object (commented out, not executed)
+# 参数说明 | Parameter explanation:
+# file: 输入文件路径，即之前保存的CDS对象文件 | Input file path, the previously saved CDS object file
+# 功能: 从文件恢复降维后的CDS对象，避免重复计算 | Function: Restore the dimensionality-reduced CDS object from file to avoid recomputation
+#CDS <- readRDS("CDS_DDRTree.rds")
+
+# 基于降维结果对细胞进行轨迹排序 | Order cells along a pseudotime trajectory based on dimensionality reduction
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象，需已完成降维处理 | CellDataSet object after dimensionality reduction
+# 功能: 推断细胞分化轨迹，计算每个细胞在轨迹上的位置（伪时间） | 
+#       Function: Infer cell differentiation trajectory and calculate pseudotime for each cell
+trace("project2MST",edit = T, where = asNamespace("monocle")) # nei()改为.nei()/Change nei() to. nei()
+CDS <- orderCells(CDS)
+```
+
+### 第四步：作图
+
+可以自己设置足够多的颜色。 图上的着色可以通过修改"color_by"参数, 这里的取值可以是`pData(CDS)`结果的列名。 点的大小可以通过`cell_size`修改
+
+- 按照状态着色
+
+###Step 4: Drawing
+
+You can set enough colors by yourself. The coloring on the graph can be achieved by modifying the 'color-by' parameter, where the value can be the column name of the 'pData (CDS)' result. The size of the point can be modified through 'cell_2'
+
+-Color according to state
+
+```{r}
+# 自定义轨迹图颜色方案，用于区分不同细胞状态 | Define custom colors for trajectory plot to distinguish cell states
+# 参数说明 | Parameter explanation:
+# 向量中每个颜色代码对应一种细胞状态 | Each color code corresponds to a cell state
+my_colour <- c('#006dbb','#1cac55','#e52622','#4db3e8', "#c46cac", '#006dbb','#1cac55')
+
+# 绘制细胞轨迹图，按细胞状态着色 | Plot cell trajectory colored by cell state
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象，需已完成轨迹排序 | CellDataSet object after trajectory ordering
+# color_by: 指定着色的元数据列，这里是细胞状态 | Metadata column to color cells by (cell state)
+# cell_size: 指定点的大小 | Size of data points
+p1 <- plot_cell_trajectory(CDS, color_by = "State", cell_size = 1.25) +
+  scale_colour_manual(values=my_colour)  # 应用自定义颜色方案 | Apply custom color palette
+
+# 显示轨迹图 | Display the trajectory plot
+p1
+
+# 保存轨迹图到PDF文件 | Save trajectory plot to PDF file
+# 参数说明 | Parameter explanation:
+# filename: 输出文件名 | Output file name
+# 注意: 当前设置会保存当前活动绘图，确保p1是当前活动图 | 
+#       Note: Current settings save the active plot. Ensure p1 is the active plot
+ggsave("monocle_State.pdf")
+```
+
+- 按照聚类着色
+
+-Coloring according to clustering
+
+```{r}
+# 绘制细胞轨迹图，按主要细胞簇（majorCluster）着色 | Plot cell trajectory colored by major cell clusters
+# 参数说明 | Parameter explanation:
+# CDS: 细胞数据集对象（已完成轨迹排序） | CellDataSet object (with trajectory ordered)
+# color_by: 指定着色依据的元数据列（主要细胞簇） | Metadata column for coloring (major cell clusters)
+# cell_size: 细胞点的显示大小 | Size of cell points
+p2 <- plot_cell_trajectory(CDS, color_by = "majorCluster", cell_size = 1.25) +
+  scale_colour_manual(values = my_colour) +  # 应用自定义颜色方案 | Apply custom color palette
+  theme(axis.ticks = element_blank(), axis.text = element_blank()) +  # 移除坐标轴刻度和标签 | Remove axis ticks and labels
+  guides(color = guide_legend(ncol = 2, title = NULL))  # 设置图例：2列布局，无标题 | Set legend: 2 columns, no title
+p2
+
+# 保存轨迹图为PDF文件 | Save trajectory plot as PDF
+# 参数说明 | Parameter explanation:
+# filename: 输出文件名 | Output file name
+# width/height: 图形宽度和高度（英寸） | Plot width and height (inches)
+ggsave("monocle_majorCluster.pdf", width = 5, height = 5)
+```
+
+```{r}
+sessionInfo()
+```
