@@ -1,0 +1,134 @@
+---
+title: "FigureYa2 ggtree+pheatmap+msa"
+author: "Guangchuang Yu; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+基因家族成员进化树、表达谱聚类、多序列比对，组图
+
+本文档分别绘制三个图，没有组到一张图里
+
+另一份文档解决组图问题（by Y叔）
+ggtree_pheatmap_msa_cowplot.html
+
+Gene family member evolutionary tree, expression profile clustering, multiple sequence comparison, grouped figures
+
+This document separately draws three figures, not grouped into one figure.
+
+Another document to solve the grouping problem (by Uncle Y)
+
+## 使用场景
+## usage scenario
+
+在嘉因公众号回复“ggtree”查看详情。
+
+场景一：多组sample的RNA-seq数据画完heatmap，发现我感兴趣的基因家族所在的cluster当中，有一些功能未知的基因。这些功能未知基因是否也属于这个基因家族？做多序列比对看看，它们是否具有相似的结构区域。
+
+场景二：我鉴定出来一个新的转录因子，它有什么功能？序列相似预示着功能相似，做多序列比对，先找到序列相似的已知转录因子，再下载公共数据，查看它们的表达谱是否也是一致的。
+
+Reply to “ggtree” in Jiayin official account for details.
+
+Scenario 1: After drawing the heatmap of RNA-seq data from multiple samples, I found that there are some genes with unknown functions in the cluster of the gene family I am interested in. Do these genes with unknown functions also belong to this gene family? Perform multiple sequence comparison to see if they have similar structural regions.
+
+Scenario 2: I have identified a new transcription factor, what is its function? Sequence similarity predicts function similarity, perform multiple sequence comparison to find known transcription factors with similar sequences first, then download public data to see if their expression profiles are also consistent.
+
+## 表达谱聚类
+## Expression profile clustering
+
+给同一group的sample加上同一种颜色，就能看出两个group的sample分别被聚到两类，说明这些基因能够用来区分两个group
+
+Adding the same color to the samples of the same group shows that the samples of the two groups are clustered into two categories, indicating that these genes can be used to distinguish between the two groups
+
+```{r,fig.height=3}
+#install.packages("pheatmap")
+require(pheatmap)
+df<-read.table("easy_input.txt",header = T, row.names = 1,as.is = 1)
+
+annotation_col = data.frame(group = factor(rep(c("group1","group2"),c(6,12))))
+rownames(annotation_col) = colnames(df)
+ann_colors = list(Stage = c(group1 = "#FFFFCC", group2 = "#FEFF23"))
+p1<-pheatmap(df,method="spearman", cluster_rows=T, cluster_cols=T,
+         cellwidth = 10, cellheight = 10, fontsize = 10, 
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(20),
+         scale="row", show_colnames=F,
+         annotation_col = annotation_col, 
+         annotation_colors = ann_colors)
+
+#输出pdf文件
+#output pdf file
+pdf(file="heatmap.pdf")
+p1
+dev.off()
+
+```
+
+## 多序列比对
+## Multiple sequence comparison
+
+msa包需要LaTex，MAC系统推荐安装MacTex
+
+The msa package requires LaTex, and it is recommended to install MacTex in the MAC system
+
+```{r,message=FALSE,warning=FALSE}
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("msa")
+require(msa)
+#输入文件
+#借用msa自带的exampleAA.fasta
+#input file
+#borrow the exampleAA.fasta that comes with msa
+mySequenceFile <- system.file("examples", "exampleAA.fasta", package="msa")
+mySequences <- readAAStringSet(mySequenceFile)
+#自己的fasta文件读入方式：
+#the way to read in your own fasta file:
+#mySequences <- readAAStringSet("file.fa")
+
+#多序列比对
+#multiple sequence comparison
+myFirstAlignment <- msa(mySequences)
+
+#输出pdf文件
+#output pdf file
+msaPrettyPrint(myFirstAlignment, output="pdf", 
+                 paperWidth=15, paperHeight=10, 
+                 showNames="right",showLogo="none", showNumbering="none",
+                 showConsensus = "none",
+                 askForOverwrite=FALSE, verbose=FALSE)
+```
+![](myFirstAlignment.pdf)
+
+## 进化树
+## Evolutionary tree
+
+```{r,message=FALSE,warning=FALSE}
+#install.packages(c("seqinr","ape"))
+#用多序列比对的结果计算距离
+#calculate the distance using the results of multiple sequence comparison
+require(seqinr)
+myAlignment <- msaConvert(myFirstAlignment, type="seqinr::alignment")
+d <- dist.alignment(myAlignment, "identity")
+
+#构建NJ树
+#construct the NJ tree
+require(ape)
+tree <- nj(d)
+
+#画树并输出到PDF文件ggtree.pdf
+#draw the tree and output to PDF file ggtree.pdf
+require(ggtree)
+p2 <- ggtree(tree, layout='circular') + geom_tiplab2(size=3, offset=.1) + xlim(-.2, 3) 
+p2
+#输出pdf文件
+#output pdf file
+pdf(file="ggtree.pdf")
+p2
+dev.off()
+```
