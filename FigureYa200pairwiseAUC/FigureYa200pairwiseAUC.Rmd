@@ -1,0 +1,320 @@
+---
+title: "FigureYa200pairwiseAUC"
+author: "Xiaofan Lu"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+我想众筹Figure 1B，两个数据集里面看预后判断力都很好的基因。
+
+# Requirement Description
+
+I want to crowdfund Figure 1B, and look at the genes with good prognostic judgment in both datasets.
+
+![](example.png)
+
+出自<https://aasldpubs.onlinelibrary.wiley.com/doi/abs/10.1002/hep.30930>
+from<https://aasldpubs.onlinelibrary.wiley.com/doi/abs/10.1002/hep.30930>
+
+FIg. 1. PDLIM1 is down-regulated in human metastatic HCC tissues. (A) Heat map showing 402 genes differentially expressed in HCC tissues with or without metastasis based on data set **GSE364**. (B) area under the curve evaluation of the prognostic value of candidate genes involved in metastasis-related events based on data sets **TCGA and GSE10816**. Those genes with no detectable protein expression in liver cancer were excluded and are colored in **gray**.
+
+# 应用场景
+
+训练集定义候选基因，后在两个测试集里寻找预后判断力都好的基因集合。
+
+# Application Scenarios
+
+The training set defines the candidate genes, and then looks for the set of genes with good prognostic judgment in both test sets.
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Use the domestic Mirror Installer
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+load packages
+
+```{r}
+library(limma) # 芯片差异表达 # Differential expression of chips
+library(impute) # 芯片缺失值多重填补 # Chip missing values are multi-filled
+library(dplyr)
+library(pheatmap)
+library(gplots)
+library(pROC)
+library(ggplot2)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # error messages are displayed in English
+options(stringsAsFactors = FALSE) #禁止chr转成factor # It is forbidden to convert chr into factor
+```
+
+自定义函数
+Custom functions
+
+```{r}
+# 自定义函数显示进度 # Custom functions display progress
+display.progress = function ( index, totalN, breakN=20) {
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+} 
+
+# 自定义函数标准化表达谱 # Custom functions normalize the expression spectrum
+standarize.fun <- function(indata=NULL, halfwidth=NULL, centerFlag=T, scaleFlag=T) {  
+  outdata=t(scale(t(indata), center=centerFlag, scale=scaleFlag))
+  if (!is.null(halfwidth)) {
+    outdata[outdata>halfwidth]=halfwidth
+    outdata[outdata<(-halfwidth)]= -halfwidth
+  }
+  return(outdata)
+}
+```
+
+# 输入文件
+
+需要多套带预后信息的表达数据，分别作为训练集和测试集。
+
+训练集：
+
+- GSE364.expr.txt
+- GSE364.sinfo.txt
+
+测试集：
+
+- LIHC.expr.txt (TCGA)，有点大，放到微云上<https://share.weiyun.com/85eUvRBp>
+- LIHC.sinfo.txt (TCGA)
+- GSE10186.expr.txt
+- GSE10186.sinfo.txt
+
+# Input Files
+Multiple sets of expression data with prognostic information are required, serving as the training set and test set, respectively.
+
+Training Set:
+-GSE364.expr.txt
+
+-GSE364.sinfo.txt
+
+Test Set:
+-LIHC.expr.txt (TCGA) – Note: This file is large and has been uploaded to Weiyun: https://share.weiyun.com/85eUvRBp
+
+-LIHC.sinfo.txt (TCGA)
+
+-GSE10186.expr.txt
+
+-GSE10186.sinfo.txt
+
+## 加载训练集数据 —— GSE364
+
+# Load the training set data - GSE364
+
+```{r}
+gse364.expr <- read.table("GSE364.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse364.sinfo <- read.table("GSE364.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+#gse364.sinfo$prefix <- sapply(strsplit(gse364.sinfo$Title,"-",fixed = T),"[",1)
+meta.sam <- rownames(gse364.sinfo[grep("-M[12]$",gse364.sinfo$Title),]) # 
+local.sam <- rownames(gse364.sinfo[grep("-P[12]$",gse364.sinfo$Title),]) # 例文只有29个样本 # There are only 29 samples in the example
+#comid <- intersect(meta.sam$prefix,local.sam$prefix) # 本以为是配对样本但是配对只有20个 # I thought it was a paired sample, but there were only 20 pairings
+
+gse364.expr <- gse364.expr[,c(meta.sam,local.sam)] %>% as.matrix() %>% impute.knn()
+gse364.expr <- log2(gse364.expr$data + 1) %>% as.data.frame()
+```
+
+## 加载测试集
+# Load the test set
+
+```{r}
+# TCGA
+lihc.expr <- read.table("LIHC.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+lihc.sinfo <- read.table("LIHC.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+comsam <- intersect(colnames(lihc.expr), rownames(lihc.sinfo))
+lihc.expr <- log2(lihc.expr[,comsam] + 1)
+lihc.sinfo <- lihc.sinfo[comsam,,drop = F]
+
+# GSE10186
+gse10186.expr <- read.table("GSE10186.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse10186.sinfo <- read.table("GSE10186.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+comsam <- intersect(colnames(gse10186.expr), rownames(gse10186.sinfo))
+gse10186.expr <- log2(gse10186.expr[,comsam] + 1)
+gse10186.sinfo <- gse10186.sinfo[comsam,,drop = F]
+
+# 处理预后信息
+# Process prognostic information
+lihc.sinfo$fustat <- ifelse(lihc.sinfo$OS == 1 | lihc.sinfo$PFI == 1, 1, 0) # death or progression
+```
+
+# 用训练集定义候选基因集
+
+# Define the candidate gene set with the training set
+
+用limma分析差异表达，定义候选基因集，顺便画出图A
+
+Differential expression analysis was conducted using the limma package, followed by the identification of candidate genes. Figure A was generated to visualize the results.
+
+```{r}
+pd <- data.frame(Samples = c(meta.sam,local.sam),
+                 Group = rep(c("meta","local"),c(length(meta.sam),length(local.sam))),
+                 row.names = c(meta.sam,local.sam),
+                 stringsAsFactors = FALSE)
+design <- model.matrix(~ -1 + factor(pd$Group, levels = c("meta","local")))
+colnames(design) <- c("meta","local")
+fit <- limma::lmFit(as.matrix(gse364.expr), design = design);
+contrastsMatrix <- limma::makeContrasts(meta - local, levels = c("meta", "local"))
+fit2 <- limma::contrasts.fit(fit, contrasts = contrastsMatrix)
+fit2 <- limma::eBayes(fit2, 0.01)
+resData <- limma::topTable(fit2, adjust = "fdr", sort.by = "B", number = 100000)
+resData <- as.data.frame(subset(resData, select=c("logFC","t","B","P.Value","adj.P.Val")))
+resData$id <- rownames(resData)
+colnames(resData) <- c("log2fc","t","B","pvalue","padj","id")
+resData$fc <- 2^resData$log2fc
+resData <- resData[order(resData$padj),]
+resData <- resData[,c("id","fc","log2fc","t","B","pvalue","padj")]
+
+# 定义差异表达基因 （原文用log2fc>0.6和p<0.05的阈值我完全找不到差异表达基因，即便用GEO2R网页分析也没有任何满足阈值的基因）
+# Defining Differentially Expressed Genes (DEGs) (Using the thresholds of |log2FC| > 0.6 and p < 0.05, I was unable to identify any differentially expressed genes (DEGs). Even when analyzing the data with GEO2R, no genes met the significance criteria.)
+
+upgene <- rownames(resData[which(resData$log2fc > 0 & resData$pvalue < 0.1),])
+dngene <- rownames(resData[which(resData$log2fc < 0 & resData$pvalue < 0.1),])
+
+# 用前面自定义的函数做标准化
+# Standardize with the previous custom function
+plotdata <- standarize.fun(gse364.expr[c(upgene, dngene),],halfwidth = 3)
+
+annCol <- pd
+annRow <- data.frame(Dys = rep(c("up","dn"),c(length(upgene),length(dngene))),
+                     row.names = c(upgene,dngene),
+                     stringsAsFactors = F)
+annColors <- list(Group = c("meta"="red","local"="blue"),
+                  Dys = c("up"="darkred","dn"="darkblue"))
+pheatmap(plotdata,
+         cluster_cols = F,
+         cluster_rows = F,
+         annotation_col = annCol[,"Group",drop = F],
+         annotation_row = annRow,
+         annotation_colors = annColors,
+         show_rownames = F,
+         show_colnames = F,
+         color = greenred(64),
+         border_color = NA)
+dev.copy2pdf(file = "heatmap.pdf", width = 5,height = 5)
+write.table(annRow,"differential expressed gene.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# 在两个测试集里寻找预后判断力都好的基因集合
+# Look for a set of genes with good prognostic judgment in both test sets
+
+```{r}
+# 计算auc
+# Calculate the AUC
+comgene <- intersect(intersect(rownames(gse10186.expr),
+                               rownames(lihc.expr)),
+                     rownames(annRow))
+auc1 <- auc2 <- c()
+for (i in comgene) {
+  # TCGA-LIHC
+  tmp <- data.frame(expr = as.numeric(lihc.expr[i,]),
+                    fustat = lihc.sinfo$fustat,
+                    stringsAsFactors = F)
+  auc1 <- c(auc1, roc(predictor = tmp$expr, response = tmp$fustat)$auc)
+  
+  # GSE10186
+  tmp <- data.frame(expr = as.numeric(gse10186.expr[i,]),
+                    fustat = gse10186.sinfo$fustat,
+                    stringsAsFactors = F)
+  auc2 <- c(auc2,roc(predictor = tmp$expr,response = tmp$fustat)$auc)
+}
+names(auc1) <- names(auc2) <- comgene
+
+# 原文在Human Protemome Project上去找哪些定义的基因是有人类蛋白表达的，这里我就随便取了几个基因，只是为了绘图方便而已。
+# 找到满足条件的基因
+# To identify genes with confirmed human protein expression, original article referenced the Human Proteome Project database. For illustrative purposes, I selected a subset of genes meeting these criteria solely for visualization convenience
+# Find the genes that meet the criteria
+FAKE.protein.positive <- sample(comgene, size = 0.7 * length(comgene)) #随机取了一些基因作为蛋白表达基因
+# A number of genes were randomly selected as protein expression genes
+FAKE.protein.negtive <- setdiff(comgene, FAKE.protein.positive)
+
+auc1.cutoff <- 0.55
+auc2.cutoff <- 0.55
+finalgene <- intersect(comgene[auc1 > auc1.cutoff & auc2 > auc2.cutoff], FAKE.protein.positive) # 既满足阈值又是蛋白表达的基因 # Genes that both meet the threshold and are protein expressed
+avgauc <- c(auc1[finalgene] + auc2[finalgene])/2
+pickgene <- "B4GALNT1" # 因为和原文结果不同所以随便选的 # As it is different from the original result, I choose it willingly
+```
+
+# 开始画图
+#start plot
+
+用base plot画图，从plot开始整段运行。
+Draw with base plot and run the entire section from the plot
+
+```{r}
+xrange <- pretty(range(auc1))
+yrange <- pretty(range(auc2))
+
+par(mfrow = c(1,2)) # 把画布分成左右两个 # Divide the canvas into two sides, left and right
+par(bty="l", mgp = c(2.4,.33,0), mar=c(4.1,4.6,2.1,2.1)+.1, las=1, tcl=-.25)
+
+# 绘制“假的”有蛋白表达的散点
+# Plot the "fake" scatter with protein expression
+plot(x = auc1[FAKE.protein.positive],
+     y = auc2[FAKE.protein.positive],
+     xlab = "AUC for disease event\ninTCGA-LIHC",
+     ylab = "AUC for disease event\nin GSE10186",
+     pch = 19,
+     col = "#5D7ABE",
+     cex = 1.2,
+     xlim = c(xrange[1],xrange[length(xrange)]),
+     ylim = c(yrange[1],yrange[length(yrange)]),
+     xaxt = "n",
+     yaxt = "n")
+# 添加“假的”无蛋白表达的散点
+# Add "fake" scatters without protein expression
+points(x = auc1[FAKE.protein.negtive],
+       y = auc2[FAKE.protein.negtive],
+       pch = 19,
+       cex = 1.2,
+       col = ggplot2::alpha("grey70", 0.8))
+# 添加“假的”有蛋白表达且AUC满足阈值且感兴趣的目标基因
+# Add the "fake" target gene that has protein expression and AUC meets the threshold and is of interest
+points(x = auc1[pickgene],
+       y = auc2[pickgene],
+       pch = 19,
+       cex = 1.2,
+       col = ggplot2::alpha("red", 0.8))
+axis(side = 1,at = xrange)
+axis(side = 2,at = yrange)
+# 添加阈值区域框
+# Add a threshold area box
+rect(xleft = auc1.cutoff,xright = max(auc1) + 0.01,
+     ybottom = auc2.cutoff,ytop = max(auc2) + 0.01,
+     lwd = 1.5,
+     lty = 2)
+
+# 右侧绘制AUC均值
+# The AUC mean is plotted on the right
+par(bty="l", mgp = c(1.9,.33,0), mar=c(4.1,5.1,2.1,2.1)+.1, las=1, tcl=-.25)
+a <- barplot(sort(avgauc,decreasing = F),
+        horiz = T,
+        col = ifelse(names(sort(avgauc,decreasing = F)) == pickgene,"red","#5D7ABE"),
+        xlab = "Mean AUC")
+axis(side = 2,at = a,labels = F)
+dev.copy2pdf(file = "combined pairwise auc.pdf", width = 9, height = 5)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
