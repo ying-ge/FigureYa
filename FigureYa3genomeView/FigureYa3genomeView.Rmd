@@ -1,0 +1,147 @@
+---
+title: "FigureYa3genomeView"
+author: "Dekang Lv; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 需求描述
+### requirement description
+
+想展示我感兴趣的基因附近的ChIP-seq、DNase/ATAC-seq或RNA-seq的bigwig信号图，不想用IGV或UCSC genome browser那种截图，我想要矢量图。
+
+I want to display bigwig signal plots of ChIP-seq, DNase/ATAC-seq, or RNA-seq near the gene I am interested in, without using screenshots from IGV or UCSC genome browser. I want vector plots.
+
+### 使用场景
+### usage scenario
+
+场景一：用DNase/ATAC-seq或H3K4me3、H3K4me1、H3K27ac等组蛋白修饰的ChIP-seq数据证实基因启动子、增强子的位置。
+
+场景二：展示ChIP-seq数据，证实哪些转录因子调控我的基因。
+
+场景三：展示RNA-seq和ChIP-seq的信号，证实转录因子结合对基因转录的影响。
+
+在嘉因公众号回复“A7”查看详情。
+
+Scenario 1: Use DNase/ATAC-seq or ChIP-seq data of histone modifications such as H3K4me3, H3K4me1, and H3K27ac to confirm the locations of gene promoters and enhancers.
+
+Scenario 2: Show ChIP-seq data to confirm which transcription factors regulate my genes.
+
+Scenario 3: Show RNA-seq and ChIP-seq signals to confirm the effect of transcription factor binding on gene transcription.
+
+Reply "A7" on Jiayin official account to view details.
+
+### 输入数据
+### Input data
+
+需要展示的区域loci.bed
+
+bigwig文件TAL1.bw，POLR2A.bw
+
+bigwig文件描述easy_input.txt
+
+Regions to be displayed loci.bed
+
+bigwig files TAL1.bw, POLR2A.bw
+
+bigwig file description easy_input.txt
+
+### 开始画图
+### Start drawing
+
+```{r,message=FALSE,warning=FALSE}
+#source("http://bioconductor.org/biocLite.R")
+#biocLite("Gviz","RColorBrewer")
+#biocLite("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#biocLite("org.Hs.eg.db")
+library(data.table)
+library(Gviz)
+library(RColorBrewer)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+txdb_hg38 <- TxDb.Hsapiens.UCSC.hg38.knownGene
+grt <- GeneRegionTrack(txdb_hg38, genome="hg38",showId=TRUE, geneSymbol=TRUE, name="UCSC")
+library(org.Hs.eg.db)
+z <- mapIds(org.Hs.eg.db, gene(grt), "SYMBOL", "ENTREZID", multiVals = "first")
+zz <- sapply(z, is.null)
+z[zz] <- gene(grt)[zz]
+gr <- ranges(grt)
+mcols(gr)$symbol <- z
+grt@range <- gr
+
+# 输入数据
+# input data
+bwInfo<-read.table("easy_input.txt",header=F,row.names=1,as.is=T)
+head(bwInfo)
+gloci<-read.table("loci.bed",header=F,as.is=T)
+head(gloci)
+#可调整的参数
+#adjustable parameters
+genefold<-as.numeric("1.5")#放大、缩小展示的范围 zoom in and out of the display range
+
+# 展示的基因组范围
+# range of genomes displayed
+colnames(gloci)<-c("chr","start","end","strand")
+chr<-gloci[rownames(gloci),]$chr
+gloci$width<-with(gloci,end-start)
+startpoint<-gloci[rownames(gloci),]$start-genefold*gloci[rownames(gloci),]$width
+endpoint<-gloci[rownames(gloci),]$end+genefold*gloci[rownames(gloci),]$width
+
+#下面将scale等track写入tracklist
+#Write scale and other tracks into tracklist below
+tracklist<-list()
+#写入chromosome
+#write to chromosome
+itrack <- IdeogramTrack(genome = "hg38", chromosome = chr,outline=T)
+tracklist[["itrack"]]<-itrack
+
+#写入比例尺
+#write to scale
+scalebar <- GenomeAxisTrack(scale=0.25,col="black",fontcolor="black",name="Scale",labelPos="above",showTitle=TRUE)
+tracklist[["scalebar"]]<-scalebar
+
+#写入基因组位置
+#write to genomic location
+axisTrack <- GenomeAxisTrack(labelPos="above",col="black",fontcolor="black",name=paste(chr,":",sep=""),exponent=0,showTitle=TRUE)
+tracklist[["axisTrack"]]<-axisTrack
+
+#写入bigwig
+#配色
+#Write to bigwig
+#color matching
+colpal<-rep(brewer.pal(12,"Paired"),20)
+coldf<-data.frame(col=colpal[1:nrow(bwInfo)],row.names = rownames(bwInfo),stringsAsFactors = F)
+
+for(index in rownames(bwInfo)){
+  bgFile<-file.path("D:/FigureYa/FigureYa3genomeView",paste(index,".bw",sep=""))
+  tracklist[[index]]<-DataTrack(range = bgFile,genome="hg38",type="histogram",
+                                name=chartr("_","\n",bwInfo[index,]),
+                                col.histogram=coldf[index,])#每个track颜色不同才好看 each track looks better with a different color
+}
+
+#写入基因结构
+#write to gene structure
+tracklist[["grt"]]<-grt
+
+#画图
+#draw the plot
+plotTracks(tracklist, from = startpoint, to = endpoint,
+           chromosome=chr,background.panel = "white", background.title = "white",
+           col.title="black",col.axis="black",
+           rot.title=0,cex.title=0.9,margin=38,title.width=1.5,
+           collapseTranscripts = "longest")#同一个基因的多个transcript压缩成最长的一个 multiple transcripts of the same gene compress into the longest one
+
+#输出pdf文件
+#output pdf file
+pdf("loci.pdf",height=5,width=8)
+plotTracks(tracklist, from = startpoint, to = endpoint,
+           chromosome=chr,background.panel = "white", background.title = "white",
+           col.title="black",col.axis="black",
+           rot.title=0,cex.title=0.9,margin=38,title.width=1.5,
+           collapseTranscripts = "longest")#同一个基因的多个transcript压缩成最长的一个 multiple transcripts of the same gene compress into the longest one
+dev.off()
+sessionInfo()
+```
