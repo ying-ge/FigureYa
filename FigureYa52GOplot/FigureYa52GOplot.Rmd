@@ -1,0 +1,502 @@
+---
+title: "FigureYa52 GOplot"
+author: "Ying Ge, Guangchuang Yu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-05-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# 使用knitr包设置全局代码块选项
+# Set global chunk options using knitr package
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+
+用GOplot展示clusterProfiler的富集分析结果，画出paper里的⭕️图
+
+##Requirement description
+
+Display the enrichment analysis results of clusterProfiler using GOplot and draw the data in the paper ⭕ ️ Image
+
+![](https://media.springernature.com/lw900/springer-static/image/art%3A10.1038%2Fs41467-017-01195-y/MediaObjects/41467_2017_1195_Fig4_HTML.jpg)
+
+出自<https://www.nature.com/articles/s41467-017-01195-y>
+
+from<https://www.nature.com/articles/s41467-017-01195-y>
+
+![](example.png)
+
+出自<https://www.karger.com/Article/FullText/492519>
+
+from<https://www.karger.com/Article/FullText/492519>
+
+## 应用场景
+
+适用于：既想用clusterProfiler做富集分析，又想用GOplot展示结果，但是不知道二者怎样衔接的小伙伴。
+
+此处以GO为例，获得clusterProfiler的富集分析结果，生成GOplot所需的格式，用GOplot画⭕️图。
+
+clusterProfiler除了擅长做GO富集分析以外，还可以用KEGG、Diseaes、Reactome、DAVID、MSigDB等注释库做富集分析。另外，enrichplot自带的gseaplot2函数可以生成GSEA结果的矢量图、多条pathway画到同一个图上，完美代替Java版本的GSEA，看这篇：<https://mp.weixin.qq.com/s/AamfRz0BUENCi_1P0P-Ruw>。有关clusterProfiler、enrichplot本身的问题，建议加入Y叔知识星球提问。
+
+##Application scenarios
+
+Suitable for: those who want to use clusterProfiler for enrichment analysis and GOplot to display results, but do not know how to connect the two.
+
+Taking GO as an example, obtain the enrichment analysis results of clusterProfiler, generate the required format for GOplot, and use GOplot to draw ⭕ Picture.
+
+In addition to being proficient in GO enrichment analysis, clusterProfiler can also use annotation libraries such as KEGG, Disseales, Reactor, DAVID, MSigDB, etc. for enrichment analysis. In addition, enrichplot's built-in gseaplot2 function can generate vector graphs of GSEA results and draw multiple pathways onto the same graph, perfectly replacing the Java version of GSEA. See this article:< https://mp.weixin.qq.com/s/AamfRz0BUENCi_1P0P-Ruw >Regarding issues related to clusterProfiler and enrichplot itself, it is recommended to include questions from Uncle Y's Knowledge Planet.
+
+## 环境设置
+
+安装需要的包
+
+##Environment settings
+
+Install the required packages
+
+```r
+#使用国内镜像安装包
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("clusterProfiler", version = "3.8")
+BiocManager::install("org.Mm.eg.db", version = "3.8")
+
+install.packages('GOplot')
+```
+
+加载需要用到的包
+
+Load the required packages
+
+```{r}
+# 加载用于功能富集分析的包 | Load packages for functional enrichment analysis
+library(clusterProfiler)
+# 加载用于生物信息学注释资源的包 | Load package for bioinformatics annotation resources
+library(AnnotationHub)
+# 加载用于注释数据库接口的包 | Load package for annotation database interface
+library(AnnotationDbi)
+# 加载用于基因本体可视化的包 | Load package for Gene Ontology visualization
+library(GOplot)
+# 加载用于数据可视化的包 | Load package for data visualization
+library(ggplot2)
+library(org.Mm.eg.db)
+# 设置环境变量以显示英文报错信息 | Set environment variable to display English error messages
+Sys.setenv(LANGUAGE = "en") 
+# 设置选项禁止将字符向量自动转换为因子 | Set option to prevent automatic conversion of character vectors to factors
+options(stringsAsFactors = FALSE) 
+```
+
+## 获取ENTREZ ID跟基因名的对应关系
+
+如果你的基因ID已经是ENTREZ ID，并保存成`very_easy_input_**.csv`的格式，就可以跳过这步，直接进入“富集分析”
+
+根据基因名gene symbol找到相应的ensembl ID。模式生物和非模式生物的转换代码稍有不同，根据自己的物种，选择运行以下两段之一。
+
+##Obtain the correspondence between ENTREZ ID and gene name
+
+If your gene ID is already ENTREZ ID and saved in the format of 'very easy input * *. csv', you can skip this step and directly enter 'enrichment analysis'
+
+Find the corresponding ensembl ID based on the gene symbol name. The conversion code for model organisms and non model organisms is slightly different. Depending on your species, choose to run one of the following two segments.
+
+### 人和模式生物ENTREZ ID的获取
+
+此处以例文中的小鼠数据为例，其他18个物种只需更改`OrgDb = "org.Mm.eg.db"`参数
+
+具体物种对应的R包名字看这页：<http://bioconductor.org/packages/release/BiocViews.html#___OrgDb>
+
+如果你关心的物种不在这个列表里，请跳过这步，直接进入“非模式生物ENTREZ ID的获取”
+
+###Obtaining ENTREZ IDs for humans and model organisms
+
+Taking the mouse data in the example article as an example, the other 18 species only need to change the 'OrgDb=' org. Mm. eg. db 'parameter
+
+Please refer to this page for the R package names corresponding to specific species:< http://bioconductor.org/packages/release/BiocViews.html#___OrgDb >
+
+If the species you are concerned about is not in this list, please skip this step and go directly to "Obtaining ENTREZ ID for Non model Organisms"
+
+```{r, message=FALSE}
+# 从CSV文件读取基因符号和表达量数据 | Read gene symbols and expression data from CSV file
+gsym.fc <- read.csv("easy_input_Mm.csv", as.is = T)
+# 查看数据维度（行数和列数） | Check the dimensions (rows and columns) of the data
+dim(gsym.fc)
+
+# 查看可用的ID类型（此行为注释，未执行） | View available ID types (commented out)
+# keytypes(org.Mm.eg.db)
+
+# 将基因符号转换为ENTREZ ID | Convert gene symbols to ENTREZ IDs
+gsym.id <- bitr(gsym.fc$SYMBOL,         # 基因名列 | Gene symbol column
+                fromType = "SYMBOL",     # 输入ID类型为基因符号 | Input ID type: gene symbol
+                toType = "ENTREZID",     # 输出ID类型为ENTREZ ID | Output ID type: ENTREZ ID
+                OrgDb = "org.Mm.eg.db")  # 小鼠注释数据库 | Mouse annotation database
+# 查看转换结果前几行 | View first few rows of the conversion result
+head(gsym.id)
+
+# 合并基因名、ENTREZ ID和表达量变化值 | Merge gene symbols, ENTREZ IDs and fold change values
+idvec <- gsym.id$ENTREZID  # 创建ENTREZ ID向量 | Create vector of ENTREZ IDs
+names(idvec) <- gsym.id$SYMBOL  # 设置向量名称为基因符号 | Set vector names as gene symbols
+gsym.fc$ENTREZID <- idvec[gsym.fc$SYMBOL]  # 将ENTREZ ID匹配到原始数据 | Map ENTREZ IDs to original data
+# 查看合并后数据前几行 | View first few rows of merged data
+head(gsym.fc)
+
+# 将处理后的数据保存为CSV文件 | Save processed data to CSV file
+write.csv(gsym.fc[,c(3,2)], "very_easy_input_Mm.csv",  # 选择第3列(ENTREZID)和第2列(表达量) | Select columns 3 (ENTREZID) and 2 (expression)
+          quote = F,          # 不使用引号包裹字段 | Do not quote fields
+          row.names = F)      # 不保存行名 | Do not save row names
+```
+
+### 非模式生物ENTREZ ID的获取
+
+模式生物请跳过这段，直接进入“富集分析”。
+
+参考资料：
+
+- Y叔公众号biobabble：<https://mp.weixin.qq.com/s/lHKZtzpN2k9uPN7e6HjH3w>
+
+- AnnotationHub包的说明文档：<https://bioconductor.org/packages/release/bioc/vignettes/AnnotationHub/inst/doc/AnnotationHub.html>
+
+**准备工作：**
+
+把基因名跟ENTREZ ID对应关系的注释文件保存到本地文件，以后想要获取同一基因组版本的ENTREZ ID时，直接导入这个“Zmays(物种名).AH66225(版本).sqlite”文件就可以了。此处以玉米为例：
+
+```r
+hub <- AnnotationHub() #大概需要2分钟，网速慢就要更久
+
+#查看AnnotationHub里有哪些物种，记住idx列里的AH***
+#d <- display(hub) 
+
+#或者直接搜zea(玉米拉丁名的一部分)
+query(hub, "zea") 
+
+maize_db_candidates <- query(hub, c("Zea mays", "OrgDb"))
+
+#此处下载“AH61838”
+maize.db <- hub[['AH117408']] #大概需要3分钟，网速慢就要更久
+
+#查看包含的基因数
+length(keys(maize.db)) 
+#查看包含多少种ID
+columns(maize.db)
+#查看前几个基因的ID长啥样
+select(maize.db, keys(maize.db)[1:3], 
+       c("REFSEQ", "SYMBOL"), #你想获取的ID
+       "ENTREZID")
+
+#保存到文件
+saveDb(maize.db, "Zmays.AH66225.sqlite")
+```
+
+根据基因名gene symbol获取ENTREZ ID
+
+###Acquisition of ENTREZ ID for non model organisms
+
+Model organisms, please skip this paragraph and proceed directly to "Enrichment Analysis".
+
+reference material:
+
+-Uncle Y's official account:< https://mp.weixin.qq.com/s/lHKZtzpN2k9uPN7e6HjH3w >
+
+-AnnotationHub package documentation:< https://bioconductor.org/packages/release/bioc/vignettes/AnnotationHub/inst/doc/AnnotationHub.html >
+
+**Preparation work:**
+
+Save the annotation file of the correspondence between gene names and ENTREZ IDs to a local file. In the future, when you want to obtain ENTREZ IDs for the same genome version, simply import this' Zmays' (species name) AH66225 (version). sqlite "file is sufficient. Taking corn as an example:
+
+```r
+Hub<- AnnotationHub() # It takes about 2 minutes, and if the internet speed is slow, it will take even longer
+
+#Check which species are in AnnotationHub and remember AH in column idx***
+#d <- display(hub) 
+
+#Or simply search for 'zea' (a part of the Latin name for corn)
+query(hub, "zea") 
+
+maize_db_candidates <- query(hub, c("Zea mays", "OrgDb"))
+
+#Download "AH61838" here
+Maize.db<- hub [['AH117409 '] # It takes about 3 minutes, and if the internet speed is slow, it will take even longer
+
+#View the number of genes included
+length(keys(maize.db)) 
+#Check how many IDs are included
+columns(maize.db)
+#What do the IDs of the first few genes look like
+select(maize.db, keys(maize.db)[1:3], 
+c("REFSEQ", "SYMBOL"), #The ID you want to obtain
+"ENTREZID")
+
+#Save to file
+saveDb(maize.db, "Zmays.AH66225.sqlite")
+```
+
+Obtain ENTREZ ID based on gene symbol of gene name
+
+```{r}
+# 读入差异基因数据 | Read differentially expressed genes data
+gsym.fc <- read.csv("easy_input_Zm.csv")
+# 查看数据前几行 | View the first few rows of the data
+head(gsym.fc)
+# 查看数据维度 | Check the dimensions of the data
+dim(gsym.fc)
+
+# 加载本地保存的玉米注释数据库 | Load the locally saved maize annotation database
+maize.db <- loadDb("Zmays.AH66225.sqlite")
+
+# 将基因符号转换为ENTREZ ID | Convert gene symbols to ENTREZ IDs
+gsym.id <- bitr(gsym.fc$SYMBOL,     # 基因名所在的列 | Column containing gene symbols
+                "SYMBOL",           # 输入ID类型为基因符号 | Input ID type: gene symbol
+                "ENTREZID",         # 输出ID类型为ENTREZ ID | Output ID type: ENTREZ ID
+                maize.db)           # 玉米注释数据库 | Maize annotation database
+# 查看转换结果前几行 | View the first few rows of the conversion result
+head(gsym.id)
+# 查看转换结果维度 | Check the dimensions of the conversion result
+dim(gsym.id)
+
+# 合并基因名、ENTREZ ID和表达量变化值 | Merge gene symbols, ENTREZ IDs and fold change values
+idvec <- gsym.id$ENTREZID           # 创建ENTREZ ID向量 | Create a vector of ENTREZ IDs
+names(idvec) <- gsym.id$SYMBOL      # 设置向量名称为基因符号 | Set names of the vector to gene symbols
+gsym.fc$ENTREZID <- idvec[gsym.fc$SYMBOL]  # 将ENTREZ ID匹配到原始数据 | Map ENTREZ IDs to the original data
+# 查看合并后数据前几行 | View the first few rows of the merged data
+head(gsym.fc)
+# 查看合并后数据维度 | Check the dimensions of the merged data
+dim(gsym.fc)
+
+# 将处理后的数据保存为CSV文件 | Save the processed data to a CSV file
+write.csv(gsym.fc[,c(3,2)], "very_easy_input_Zm.csv",  # 选择第3列(ENTREZID)和第2列(表达量) | Select column 3 (ENTREZID) and column 2 (expression value)
+          quote = F,          # 不使用引号包裹字段 | Do not quote fields
+          row.names = F)      # 不保存行名 | Do not save row names
+```
+
+## 富集分析
+
+参考资料：<http://bioconductor.org/packages/release/bioc/vignettes/clusterProfiler/inst/doc/clusterProfiler.html#supported-organisms>
+
+如果你已经做好了富集分析，并且保存成“enrichGO_output.csv”的格式，就可以跳过这部分，直接进入“把clusterProfiler输出的富集分析结果转成GOplot所需的格式”
+
+##Enrichment analysis
+
+Reference materials:< http://bioconductor.org/packages/release/bioc/vignettes/clusterProfiler/inst/doc/clusterProfiler.html#supported -organisms>
+
+If you have already completed the enrichment analysis and saved it in the format of "enrichGO_output. csv", you can skip this part and directly enter "Convert the enrichment analysis results output by clusterProfiler to the format required by GOplot"
+
+```{r}
+# 读取ENTREZ ID和log2折叠变化数据 | Read ENTREZ ID and log2 fold change data
+# 假设ENTREZ ID位于第一列，log2foldchange位于第二列 | Assume ENTREZ ID is in the first column and log2foldchange in the second column
+id.fc <- read.csv("very_easy_input_Mm.csv", as.is = T)
+# 查看数据前几行 | View the first few rows of the data
+head(id.fc)
+# 查看数据维度 | Check the dimensions of the data
+dim(id.fc)
+
+# 进行基因本体论(GO)富集分析 | Perform Gene Ontology (GO) enrichment analysis
+ego <- enrichGO(gene = id.fc$ENTREZID,         # 输入的基因列表(ENTREZ ID) | Input gene list (ENTREZ IDs)
+                # 选择物种注释数据库 - 小鼠使用此行 | Select species annotation database - use this line for mouse
+                OrgDb = org.Mm.eg.db,
+                # 人类使用此行 | Use this line for human
+                #OrgDb = org.Hs.eg.db,
+                # 非模式生物使用此行，例如玉米 | Use this line for non-model organisms like maize
+                #OrgDb = maize.db,
+                ont = "BP",                   # 选择GO分类: BP(生物学过程)、MF(分子功能)或CC(细胞组分) | Select GO ontology: BP (Biological Process), MF (Molecular Function), or CC (Cellular Component)
+                pAdjustMethod = "BH",         # p值校正方法为Benjamini-Hochberg | P-value adjustment method: Benjamini-Hochberg
+                #pvalueCutoff  = 0.001,      # 原始p值阈值(注释掉未使用) | Raw p-value cutoff (commented out)
+                qvalueCutoff  = 0.01)        # 校正后q值阈值 | Adjusted q-value cutoff
+# 查看富集结果的维度 | Check the dimensions of the enrichment results
+dim(ego)
+
+# 将富集分析结果保存为CSV文件 | Save the enrichment analysis results to a CSV file
+write.csv(ego, "enrichGO_output.csv", quote = F)  # 不使用引号包裹字段 | Do not quote fields
+```
+
+富集的GO term有些是相似的，可以用语义学方法，合并相似的GO term。需要较长时间。
+
+参考资料：<https://guangchuangyu.github.io/2015/10/use-simplify-to-remove-redundancy-of-enriched-go-terms/>
+
+Some enriched GO terms are similar, and semantic methods can be used to merge similar GO terms. It takes a long time.
+
+Reference materials:< https://guangchuangyu.github.io/2015/10/use-simplify-to-remove-redundancy-of-enriched-go-terms/ >
+
+```{r}
+# 可选：简化富集结果，减少冗余 | Optional: Simplify enrichment results to reduce redundancy
+# ego2 <- simplify(ego, cutoff = 0.7, by = "p.adjust", select_fun = min)
+# 查看简化后的结果维度 | Check dimensions of simplified results
+# dim(ego2)
+# 将简化后的富集分析结果保存为CSV文件 | Save simplified enrichment results to CSV file
+# write.csv(ego2, "enrichGO_simplify_output.csv", quote = F)
+```
+
+用enrichplot自带的函数画⭕️
+
+参考资料：<https://bioconductor.org/packages/release/bioc/vignettes/enrichplot/inst/doc/enrichplot.html>
+
+Draw using the built-in functions of enrichplot ⭕ ️
+
+Reference materials:< https://bioconductor.org/packages/release/bioc/vignettes/enrichplot/inst/doc/enrichplot.html >
+
+```{r, fig.width = 10}
+# 将ENTREZ ID转换为基因符号，提高结果可读性 | Convert ENTREZ IDs to gene symbols for better readability
+egox <- setReadable(ego, 'org.Mm.eg.db', # 选择物种注释数据库 | Select species annotation database
+                    'ENTREZID')           # 指定输入的ID类型为ENTREZ ID | Specify input ID type as ENTREZ ID
+
+# 准备基因表达量数据，用于可视化 | Prepare gene expression data for visualization
+geneList <- id.fc$log2fc                  # 提取log2折叠变化值 | Extract log2 fold change values
+names(geneList) <- id.fc$ENTREZID         # 设置基因列表的名称为ENTREZ ID | Set names of the gene list to ENTREZ IDs
+
+# 绘制基因-功能富集网络环形图 | Plot circular gene-function enrichment network
+cnetplot(egox, 
+         foldChange = geneList,           # 显示基因表达量变化 | Show gene expression fold change
+         #foldChange = NULL,             # 不展示表达量变化(注释掉) | Do not show fold change (commented out)
+         circular = TRUE,                 # 设置为环形布局 | Set circular layout
+         #node_label = FALSE,            # 如果基因太多，可关闭基因名显示(注释掉) | Hide gene names if too many (commented out)
+         showCategory = 4,                # 显示富集的term数量 | Number of enriched terms to display
+         colorEdge = TRUE)                # 按关系类型着色边 | Color edges by relationship type
+
+# 将环形图保存为PDF文件 | Save circular plot to PDF file
+ggsave("clusterProfiler_circle.pdf", width = 8, height = 5)
+
+# 绘制基因-功能富集网络图(非环形) | Plot non-circular gene-function enrichment network
+cnetplot(egox, 
+         foldChange = geneList,           # 显示基因表达量变化 | Show gene expression fold change
+         #foldChange = NULL,             # 不展示表达量变化(注释掉) | Do not show fold change (commented out)
+         #circular = TRUE,               # 关闭环形布局(注释掉) | Disable circular layout (commented out)
+         #node_label = FALSE,            # 不显示基因名(注释掉) | Hide gene names (commented out)
+         showCategory = 4,                # 显示富集的term数量 | Number of enriched terms to display
+         colorEdge = TRUE)                # 按关系类型着色边 | Color edges by relationship type
+
+# 将非环形图保存为PDF文件 | Save non-circular plot to PDF file
+ggsave("clusterProfiler_not_circle.pdf", width = 8, height = 5)
+```
+
+## 把clusterProfiler输出的富集分析结果转成GOplot所需的格式
+
+##Convert the enrichment analysis results output by clusterProfiler into the format required by GOplot
+
+```{r}
+# 读取富集分析结果 | Read enrichment analysis results
+ego <- read.csv("enrichGO_output.csv", header = T)
+# 查看第一行数据 | View the first row of data
+ego[1,]
+
+# 准备GO富集结果数据框 | Prepare data frame for GO enrichment results
+go <- data.frame(Category = "BP",               # 设置类别为生物学过程(Biological Process) | Set category to Biological Process
+                 ID = ego$ID,                    # GO条目ID | GO term ID
+                 Term = ego$Description,         # GO条目描述 | GO term description
+                 Genes = gsub("/", ", ", ego$geneID), # 将基因ID分隔符从斜杠改为逗号 | Replace gene ID separator from '/' to ', '
+                 adj_pval = ego$p.adjust)        # 校正后的p值 | Adjusted p-value
+
+# 读取基因表达量变化数据 | Read gene expression fold change data
+id.fc <- read.csv("very_easy_input_Mm.csv", as.is = T)
+# 查看数据前几行 | View the first few rows of data
+head(id.fc)
+# 创建基因表达量数据框 | Create data frame for gene expression
+genelist <- data.frame(ID = id.fc$ENTREZID, logFC = id.fc$log2fc)             
+
+# 整合富集分析结果与表达量变化数据 | Integrate enrichment results with expression data
+circ <- circle_dat(go, genelist)
+# 查看整合后数据前几行 | View the first few rows of integrated data
+head(circ)
+
+# 将ENTREZ ID转换为基因符号 | Convert ENTREZ IDs to gene symbols
+id.gsym <- bitr(circ$genes,                    # 基因ID列 | Gene ID column
+                fromType = "ENTREZID",          # 输入ID类型为ENTREZ ID | Input ID type: ENTREZ ID
+                toType = "SYMBOL",             # 输出ID类型为基因符号 | Output ID type: gene symbol
+                OrgDb = "org.Mm.eg.db")        # 小鼠注释数据库 | Mouse annotation database
+
+# 将整合数据中的ENTREZ ID替换为基因符号 | Replace ENTREZ IDs with gene symbols in integrated data
+rownames(id.gsym) <- id.gsym$ENTREZID          # 设置行名为ENTREZ ID | Set row names to ENTREZ IDs
+circ.gsym <- circ                               # 创建副本 | Create a copy
+circ.gsym$genes <- id.gsym[circ$genes,]$SYMBOL # 替换基因为符号 | Replace genes with symbols
+# 查看替换后数据前几行 | View the first few rows of updated data
+head(circ.gsym)
+
+# 使用GOplot包进行可视化（示例代码，未执行） | Visualization examples using GOplot (not executed)
+# GOBar(subset(circ, category == 'BP'))         # 绘制BP类别的柱状图 | Bar plot for BP category
+# GOBubble(circ, labels = 3)                    # 绘制气泡图 | Bubble plot
+# GOCircle(circ)                                 # 绘制环形图 | Circular plot
+```
+
+## 用GOplot画⭕️图
+
+参考资料：<http://wencke.github.io/>
+
+准备画⭕️图所需的数据格式
+
+##Draw with GOplot ⭕ ️ Image
+
+Reference materials:< http://wencke.github.io/ >
+
+Prepare to draw ⭕ The required data format for the image
+
+```{r, fig.width=6}
+# 参数设置 | Parameter settings
+n = 5 # 圈图需要选定term，这里画前面5个 | Select the top 5 enriched terms for chord diagram
+
+# 准备弦图数据 | Prepare data for chord diagram
+chord <- chord_dat(circ, genelist, go$Term[1:n])
+# 查看数据前几行 | View the first few rows of the data
+head(chord)
+
+# 将ENTREZ ID转换为基因符号 | Convert ENTREZ IDs to gene symbols
+id.gsym <- bitr(row.names(chord),          # 基因ID列 | Column containing gene IDs
+                fromType = "ENTREZID",      # 输入ID类型为ENTREZ ID | Input ID type: ENTREZ ID
+                toType = "SYMBOL",         # 输出ID类型为基因符号 | Output ID type: gene symbol
+                OrgDb = "org.Mm.eg.db")    # 小鼠注释数据库 | Mouse annotation database
+
+# 将chord数据框中的ENTREZ ID行名替换为基因符号 | Replace row names (ENTREZ IDs) with gene symbols
+rownames(id.gsym) <- id.gsym$ENTREZID      # 设置行名为ENTREZ ID | Set row names to ENTREZ IDs
+# 查看转换结果前几行 | View the first few rows of the conversion result
+head(id.gsym)
+chord.gsym <- chord                        # 创建数据框副本 | Create a copy of the data frame
+row.names(chord.gsym) <- id.gsym[row.names(chord),]$SYMBOL  # 替换行为基因符号 | Replace row names with gene symbols
+# 查看替换后数据前几行 | View the first few rows of the updated data
+head(chord.gsym)
+```
+
+用⭕️图展示每个term里的基因及其变化倍数
+
+use ⭕ The figure displays the genes and their fold changes in each term
+
+```{r, fig.width = 12, fig.height = 14}
+# 绘制基因与GO术语关联的弦图 | Plot chord diagram showing gene-GO term associations
+GOChord(chord.gsym, 
+        space = 0.02,           # 基因方块之间的间隙大小 | Gap between gene blocks
+        gene.order = 'logFC',   # 按log2折叠变化值排序基因 | Order genes by log2 fold change
+        lfc.col = c('darkgoldenrod1', 'black', 'cyan1'),  # 自定义表达量变化的颜色映射 | Custom color palette for fold change
+        gene.space = 0.25,      # 基因名称与圆环的相对距离 | Distance between gene names and circle
+        gene.size = 8,          # 基因名称的字体大小 | Font size for gene names
+        border.size = 0.1,      # 中间连接线黑色边框的粗细 | Thickness of black border for connections
+        process.label = 8)      # GO术语标签的字体大小 | Font size for GO term labels
+
+# 将弦图保存为PDF文件 | Save chord diagram to PDF file
+ggsave("GOChord.pdf", width = 12, height = 14)
+```
+
+用⭕️聚类图展示相似变化趋势的基因所在的term
+
+use ⭕ The clustering chart displays the terms of genes with similar trends of change
+
+```{r, fig.width=12}
+# 定义颜色向量，用于后续可视化 | Define color palette for visualization
+mycol <- c("#223D6C","#D20A13","#FFD121","#088247","#58CDD9","#7A142C","#5D90BA","#431A3D","#91612D","#6E568C","#E0367A","#D8D155","#64495D","#7CC767")
+
+# 绘制基因富集聚类图 | Plot gene enrichment cluster diagram
+GOCluster(circ.gsym, go$Term[1:n],              # 使用前n个富集的GO term | Use top n enriched GO terms
+          clust.by = 'logFC',                   # 按表达量变化值聚类基因 | Cluster genes by log2 fold change
+          #clust.by = 'term',                   # 按富集的term聚类基因(注释掉) | Cluster genes by enriched terms (commented out)
+          lfc.col = c('darkgoldenrod1', 'black', 'cyan1'), # 自定义表达量变化的颜色映射 | Custom color palette for fold change
+          lfc.space = 0.05,                     # 表达量变化与树形图之间的间距 | Space between fold change and tree
+          lfc.width = 0.01,                     # 表达量变化圆圈的宽度 | Width of fold change circles
+          term.col = mycol[1:n],                # 为每个term指定颜色 | Assign colors to terms
+          term.space = 0.05,                    # term与表达量变化之间的间距 | Space between terms and fold change
+          term.width = 0.15)                    # term圆圈的宽度 | Width of term circles
+
+# 将聚类图保存为PDF文件 | Save cluster diagram to PDF file
+ggsave("GOCluster.pdf", width = 12, height = 14)
+```
+
+```{r}
+sessionInfo()
+```
