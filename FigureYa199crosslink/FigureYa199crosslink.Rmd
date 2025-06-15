@@ -1,0 +1,392 @@
+---
+title: "FigureYa199crosslink"
+author: "Zongcheng Li"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+这幅连线图很有趣，比FigureYa174squareCross多了两层信息：点的大小和颜色。
+
+# Requirement Description
+
+This line diagram is interesting because it has two more layers of information than FigureYa174squareCross: the size and color of the dots.
+
+![](example1.png)
+
+出自<https://www.biorxiv.org/content/10.1101/2020.07.21.214387v1>
+from<https://www.biorxiv.org/content/10.1101/2020.07.21.214387v1>
+
+Figure 2: CellChat analysis of the communications between skin cells during wound repair. (a) **Hierarchical plot** shows the inferred intercellular communication network for TGFb signaling. **Left and right panels** highlight the autocrine and paracrine signaling to fibroblast states and other non-fibroblast skin cell states, respectively. **Solid and open circles** represent source and target, respectively. **Circle sizes** are proportional to the number of cells in each cell group. **Edge colors** are consistent with the signaling source.
+
+类似的图：
+similar plot:
+ 
+![](example2.png)
+
+出自<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-019-1066-3>
+from<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-019-1066-3>
+
+Fig. 2 m6A regulators are correlated with the activation and inhibition of cancer pathways. a Network diagram demonstrating the correlation between m6A regulators and cancer pathways. Red represents a positive correlation, and blue represents a negative correlation. The size of the nodes corresponds to the number of links. 
+
+# 应用场景
+
+任意两组、多组连线，同时用颜色大小展示节点的更多信息，用连线的颜色粗细展示关系的类别强弱等信息。
+
+根据自己数据的生物学意义，来排列各个节点的顺序。或许能够出现特殊的模式，从而展示出有意义的生物学规律。
+
+上下左右连线的方法可参考FigureYa174squareCross。
+
+# Application Scenario
+Connect any two or multiple groups with lines, while using color and size to display additional node information, and the color/thickness of the connecting lines to represent relationship categories and strengths.
+
+Arrange the order of nodes based on the biological significance of your data. This may reveal unique patterns, thereby demonstrating meaningful biological insights.
+
+For methods of connecting nodes (top, bottom, left, right), refer to FigureYa174squareCross
+
+# 环境设置
+
+使用国内镜像安装包
+.
+# Environment Setup
+
+Install packages using a domestic mirror.
+
+
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+devtools::install_github("zzwch/crosslinks")
+# 或者本地安装
+# Or install it locally
+install.packages("crosslinks-master.tar.gz", repos = NULL, type = "source")
+```
+
+加载包
+load package
+
+```{r}
+library(crosslinks)
+library(ggplot2)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # error messages are displayed in English
+options(stringsAsFactors = FALSE) #禁止chr转成factor # It is forbidden to convert chr into factor
+```
+
+# 输入文件
+# input files
+
+> 图中每个点、每条线的外观设置有两种方式供你选择。理解之后就可以灵活运用了，例如有些外观用代码写，有些外观填写在输入文件里。
+
+- 方式一：在输入文件中填写外观，个性化地写成不同的值。
+  - 优点：所见即所得，写什么样就画出什么样
+  - 缺点：麻烦
+
+- 方式二：在输入文件中最少可以只写id和type两列，其余外观都可以在画图时通过设置参数来实现。
+  - 优点：方便修改，能用代码就不去一个一个写，便于跟上游分析衔接。
+  - 缺点：外观种类太多时，其实不如“方式一”方便
+
+easy_input_nodes.csv，每个节点为一行。第一列是节点id，之后是其类别type、颜色color、大小size、透明度alpha和形状shape。例如一个节点代表一个基因；type列就写gene；颜色、大小、透明度和形状都可以代表基因的某一特征值，例如表达量等。
+
+easy_input_edges.csv，每两个被连起来的节点为一行，前两列是两个节点的id，之后是颜色color、类型type、透明度alpha和粗细size，这些外观信息可以代表每两个节点之间关系的强度、类型等。
+
+> There are two ways to customize the appearance of each point and line in the figure. Once understood, you can apply them flexibly—for example, setting some appearances via code while specifying others in the input file.
+
+-Option 1: Define appearances in the input file with custom values
+ Pros: WYSIWYG (What You See Is What You Get)—the output will match exactly what you write.
+ Cons: More tedious to set up.
+
+-Option 2: Keep the input file minimal (only id and type columns required) and control appearances via plotting parameters
+ Pros: Easier to modify; avoids manual editing for each element and integrates smoothly with upstream analysis.
+ Cons: Less convenient than Option 1 when dealing with too many appearance variations.
+
+-Input File Formats:easy_input_nodes.csv.Each row represents a node. The first column is the node id, followed by its type, color, size, alpha (transparency), and shape.
+
+Example: If a node represents a gene, set type as "gene."Other columns (color, size, alpha, shape) can encode additional features (e.g., expression levels).
+
+-easy_input_edges.csvEach row connects two nodes. The first two columns are the linked node ids, followed by color, type, alpha, and size (thickness).These attributes can reflect relationship strength, type, etc.
+
+
+
+```{r}
+# 载入节点信息
+# Load node information
+nodes <- read.csv("easy_input_nodes.csv", header = T)
+head(nodes)
+
+# 载入连线信息
+# Load the connection information
+edges <- read.csv("easy_input_edges.csv", header = T)
+head(edges)
+```
+
+# 开始画图
+
+## 方式一：所有外观都由输入文件决定
+
+# Start drawing
+
+## Method 1: All appearances are determined by the input file
+
+```{r}
+# 写入想画的type
+# Write the type you want to draw
+columns <- list(# 如果你只有两个type（或者只想画两列），就在list里写两行。# If you only have two types (or just want to draw two columns), write two lines in the list
+  Gene = nodes$id[nodes$type == "Gene"],
+  Drug = nodes$id[nodes$type == "Drug"],
+  Target = nodes$id[nodes$type == "Tar"], 
+  Pathway = nodes$id[nodes$type == "Path"]
+)
+
+columnCross2(edges, nodes, columns,
+             height = 1, flank_mult = rep(0.1, length(columns)), segment_shrink = 0.1,
+             linetype = "type", line_alpha = "alpha", line_color = "color", line_size = "size",
+             pt_shape = "shape", pt_alpha = "alpha", 
+             pt_color = "color", # 外圈颜色 # Outer ring color
+             pt_fill = "color", # 填充颜色 # Fill color
+             pt_size = "size", pt_stroke = 1)
+
+ggsave(filename = "crosslink_file.pdf", width = 8, height = 5)
+```
+
+## 方式二：画图时设置外观参数
+## Method 2: Set the appearance parameters when drawing
+
+```{r}
+# 写入想画的type
+# 如果你只有两个type（或者只想画两列），就在list里写两行。
+# Write the type you want to draw
+# If you only have two types (or just want to draw two columns), write two lines in the list.
+columns <- list(
+  Gene = nodes$id[nodes$type == "Gene"],
+  Drug = nodes$id[nodes$type == "Drug"],
+  Target = nodes$id[nodes$type == "Tar"], 
+  Pathway = nodes$id[nodes$type == "Path"]
+)
+
+# 以连线类型和节点形状为例，说明定义外观的两种方式，定义其他外观的方法类似
+# Take the line type and node shape as an example to illustrate the two ways to define appearances, and the methods for defining other appearances are similar
+columnCross2(edges, nodes, columns,
+             height = 1, flank_mult = rep(0.1, length(columns)), segment_shrink = 0.1,
+             
+             linetype = 1, # 默认值，所有连线都画成直线 # By default, all lines are drawn as straight lines
+             line_alpha = "alpha", line_color = "color", line_size = "size" ,
+             
+             #pt_shape = 21, # 统一画成实心圆 # Draw a solid circle in unison
+             # 或者Drug画成空心圆，其余画成实心圆 # Or the Drug is drawn as a hollow circle, and the rest is drawn as a solid circle
+             pt_shape = c(rep(16, length(columns$Gene)), rep(1, length(columns$Drug)), rep(16, (length(columns$Target) + length(columns$Pathway)))), 
+             
+             pt_alpha = .8, # 统一设置透明度 # Set transparency uniformly
+             pt_color = "color", pt_fill = "color", pt_size = "size", 
+             pt_stroke = 3) # 让空心圆的边粗一些 # Make the edges of the hollow circle thicker
+
+ggsave(filename = "crosslink_par.pdf", width = 8, height = 5)
+```
+
+# 再来一个例子
+
+如果某类节点太多，可以排成多列，就像需求描述的第二个例子那样。
+
+# One more example
+
+If there are too many nodes of a certain type, you can arrange them into multiple columns, as in the second example of the requirements description.
+
+## 输入文件
+
+## Input file
+
+```{r}
+# 载入节点信息
+# Load node information
+nodes <- read.csv("easy_input2_nodes.csv", header = T)
+head(nodes)
+
+# 载入连线信息
+# Load connection information
+edges <- read.csv("easy_input2_edges.csv", header = T)
+head(edges)
+```
+
+## 开始画图
+#start plot
+
+```{r,fig.width=5, fig.height=6}
+# 这里把P和N都拆成两列，当然你也可以拆成更多列
+# Split both P and N into two columns, but you can also split them into more columns
+columns <- list(
+  P1 = nodes$id[nodes$type == "P"][1:15],
+  P2 = nodes$id[nodes$type == "P"][16:30],
+  RBP = nodes$id[nodes$type == "RBP"],
+  N1 = nodes$id[nodes$type == "N"][1:15], 
+  N2 = nodes$id[nodes$type == "N"][16:30]
+)
+seq_len(length(columns))
+# 以连线类型和节点形状为例，说明定义外观的两种方式，定义其他外观的方法类似
+# Take the line type and node shape as an example to illustrate the two ways to define appearances, and the methods for defining other appearances are similar
+columnCross2(edges, nodes, columns,
+             height = 1, 
+             
+             # 默认值是1,2,3,4,5，每列之间是等距的
+             # 我们想让两边的两列距离近些，就这样改
+             # The default values are 1, 2, 3, 4, 5, and each column is equidistant
+             # We want to make the two columns on both sides closer, so change it like this
+             column_x = c(1, 1.5, 3, 4.5, 5), 
+             
+             # 默认值都是0.1
+             # 我们想让中间RBP那列短一些，就这样改
+             # The default value is 0.1
+             # We want to make the middle RBP column shorter, so change it like this
+             flank_mult = c(0.1, 0.1, 0.15, 0.1, 0.1), 
+             
+             segment_shrink = 0,
+             line_alpha = .2, line_size = 1, line_color = "color",
+             pt_shape = "shape",  pt_alpha = "alpha", pt_color = "color", pt_fill = "color", pt_size = "size", pt_stroke = 1)
+
+ggsave(filename = "crosslink_multiCol.pdf", width = 6, height = 8)
+```
+
+# 后期处理
+
+输出的pdf文件是矢量图，可以用矢量图编辑器打开（例如Illustrator）调整图形、文字。
+
+# 附
+
+## pt_shape的可选参数及其对应的形状
+
+# Post-processing
+
+The output pdf file is a vector image, which can be opened with a vector editor (e.g. Illustrator) to adjust graphics, text.
+
+# Attached
+
+## Optional parameters for pt_shape and their corresponding shapes
+
+![](points-symbols.png){width=200px}
+
+## 示例一的输入数据生成过程
+
+## Example 1 of the input data generation process
+
+```{r eval=FALSE}
+# 节点的颜色
+# The color of the node
+node_colors <- RColorBrewer::brewer.pal(11, "Spectral")
+# 连线的颜色
+# The color of the wire
+edge_colors <- RColorBrewer::brewer.pal(12, "Paired")
+
+# nodes
+nodes <- data.frame(
+  id = c(paste0("Gene", 1:10), paste0("Meth", 1:10),
+         paste0("Mir", 1:6), paste0("Drug", 1:8),
+         paste0("Tar", 1:8), paste0("Path", 1:6)),
+  type = c(rep("Gene", 10), rep("Meth", 10),
+           rep("Mir", 6), rep("Drug", 8),
+           rep("Tar", 8), rep("Path", 6)),
+  color = sample(node_colors, 48, replace = T),
+  size = sample(3:10, 48, replace = T),
+  alpha = sample((5:10)/10, 48, replace = T),
+  shape = sample(1:20, 48, replace = T)
+)
+write.csv(nodes, "easy_input_nodes.csv", quote = F, row.names = F)
+
+# edges
+edges <- data.frame(rbind(
+  # gene vs mir
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Gene"],
+                    replace = T, 30),
+    target = sample(nodes$id[nodes$type == "Mir"],
+                    replace = T, 30)),
+  # gene vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Gene"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 100)),
+  # meth vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Meth"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 100)),
+  # mir vs drug
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Mir"],
+                    replace = T, 20),
+    target = sample(nodes$id[nodes$type == "Drug"],
+                    replace = T, 20)),
+  
+  # drug vs target
+  data.frame(
+    source = nodes$id[nodes$type == "Drug"],
+    target = nodes$id[nodes$type == "Tar"]),
+  # target vs path
+  data.frame(
+    source = sample(nodes$id[nodes$type == "Tar"],
+                    replace = T, 15),
+    target = sample(nodes$id[nodes$type == "Path"],
+                    replace = T, 15))
+),
+color = sample(edge_colors, 273, replace = T),
+type = sample(1:5, 273, replace = T),
+alpha = sample((5:10)/10, 273, replace = T),
+size = sample(1:3, 273, replace = T))
+write.csv(edges, "easy_input_edges.csv", quote = F, row.names = F)
+```
+
+## 示例二的输入数据的生成过程
+## Example 2: The process of generating input data
+
+```{r eval=FALSE}
+# 节点的颜色
+# The color of the node
+node_colors <- RColorBrewer::brewer.pal(11, "Spectral")
+# 连线的颜色
+# The color of the wire
+edge_colors <- RColorBrewer::brewer.pal(12, "Paired")
+
+# nodes
+nodes <- data.frame(
+  id = c(paste0("P", 1:30),
+         paste0("RBP", 1:20),
+         paste0("N", 1:30)),
+  type = c(rep("P", 30),
+           rep("RBP", 20),
+           rep("N", 30)),
+  color = c(rep("firebrick",30), sample(node_colors, 20,replace = T), rep("dodgerblue", 30)),
+  size = sample(3:10, 80, replace = T),
+  alpha = sample((5:10)/10, 80, replace = T),
+  shape = c(rep(15,30), rep(16, 20), rep(15, 30))
+)
+write.csv(nodes, "easy_input2_nodes.csv", quote = F, row.names = F)
+
+# edges
+edges <- data.frame(rbind(
+  # Positive pathway vs RBP
+  data.frame(
+    source = sample(nodes$id[nodes$type == "P"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "RBP"],
+                    replace = T, 100)),
+  # Negative pathway vs RBP
+  data.frame(
+    source = sample(nodes$id[nodes$type == "N"],
+                    replace = T, 100),
+    target = sample(nodes$id[nodes$type == "RBP"],
+                    replace = T, 100))
+),
+color = c(rep("red", 100), rep("cornflowerblue", 100)))
+write.csv(edges, "easy_input2_edges.csv", quote = F, row.names = F)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
