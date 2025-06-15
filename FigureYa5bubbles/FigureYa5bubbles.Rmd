@@ -1,0 +1,271 @@
+---
+title: "FigureYa5 bubbles"
+author: "Dekang Lv; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+想模仿出2016年XieWei老师那篇Nature的泡泡图。
+I want to imitate the bubble chart of Nature by Professor Xie Wei in 2016.
+
+![](https://media.springernature.com/m685/nature-assets/nature/journal/v534/n7609/images/nature18606-f4.jpg)
+
+出自<http://dx.doi.org/10.1038/nature18606>
+
+## 使用场景
+## usage scenario
+
+同时展示pvalue和表达量，例如：
+
+场景一、展示motif的pvalue和motif对应的转录因子的表达量，就能看出哪个转录因子在哪个group里富集且表达量高，预示着它对细胞状态的改变（例如细胞分化、转移、应激）起关键调控作用。
+
+场景二、做基因功能富集分析时，展示富集的通路qvalue和基因数量或geneRatio。
+
+在嘉因公众号回复“泡泡”查看详情。
+
+Show both p-value and expression quantity simultaneously, for example:
+
+Scenario 1, showing the p-value of the motif and the expression of the corresponding transcription factor of the motif, one can see which transcription factor is enriched and highly expressed in which group, predicting that it plays a key regulatory role in the alteration of the cellular state (e.g., cell differentiation, metastasis, and stress).
+
+Scenario 2: When doing gene function enrichment analysis, display the q-value of the enriched pathway and the number of genes or geneRatio.
+
+Reply with "Paopao" on the Jiayin public account to view details.
+
+## 输入数据
+## Input data
+
+第一种：
+
+把自己的数据整理成easy_input.txt的格式，就可以跳过“输入数据的格式化”，直接进入“开始画图”。第一列是基因名，后面几列依次是各个sample里motif的pvalue，然后是motif的名字，后面是FPKM值。
+
+第二种：
+
+motif的pvalue，用homer找motif，产生knownResults.txt，其中包含了在peak（目标基因组区域）中富集的已知motif。一共10个sample，分别保存在10个文件夹里。
+
+RNA-seq表达值，在终端里运行下面两行代码，下载并解压缩FPKM：
+
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE66nnn/GSE66582/suppl/GSE66582_stage_FPKM.txt.gz
+
+gunzip GSE66582_stage_FPKM.txt.gz
+
+需要对输入数据进行格式化。
+
+The first:
+
+Organize your data into easy_input.txt format, you can skip “Formatting input data” and go directly to “Start drawing”. The first column is the gene name, followed by the p-value of the motif in each sample, then the name of the motif, followed by the FPKM value.
+
+The second:
+
+The p-value of motifs, using homer to find motifs, produces knownResults.txt, which contains known motifs enriched in the peak (target genomic region). There are 10 samples in total, which are saved in 10 folders respectively.
+
+RNA-seq expression values, run the following two lines of code in a terminal, download and extract FPKM:
+
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE66nnn/GSE66582/suppl/GSE66582_stage_FPKM.txt.gz
+
+gunzip GSE66582_stage_FPKM.txt.gz
+
+The input data needs to be formatted.
+
+## 输入数据的格式化
+## Formatting input data
+```{r,message=FALSE,warning=FALSE}
+##读入knownResults.txt中的记录
+## Read the records in knownResults.txt
+library(data.table)
+cell2<-read.delim(file="2cell_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+cell8<-read.delim(file="8cell_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+cell4<-read.delim(file="4cell_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+icm<-read.delim(file="icm_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+es200<-read.delim(file="200_es_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+es1k<-read.delim(file="1k_es_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+es50k<-read.delim(file="50k_es_peaks_motifDir/knownResults.txt",header=T,as.is=T)
+
+##将这些数据框与motif名称合并，并将基因名称改为大写。
+##对于变量名，R默认是区分大小写的。knowResults.txt中motif中的基因名和FPKM中的基因名大小写规则是不同的。统一成大写后方便用R从FPKM文件中提出motif对应TF的表达量
+##merge these dataframes with motif names and change gene name to upper
+##For variable names, R is case-sensitive by default, and the case rules for gene names in motif and gene names in FPKM in knowResults.txt are different. It is convenient to use R to propose the expression amount of TF corresponding to motif from FPKM file after standardizing it to uppercase.
+rownames(cell2)<-paste(cell2[,1],cell2[,2],sep="-")
+rownames(cell4)<-paste(cell4[,1],cell4[,2],sep="-")
+rownames(cell8)<-paste(cell8[,1],cell8[,2],sep="-")
+rownames(icm)<-paste(icm[,1],icm[,2],sep="-")
+rownames(es200)<-paste(es200[,1],es200[,2],sep="-")
+rownames(es1k)<-paste(es1k[,1],es1k[,2],sep="-")
+rownames(es50k)<-paste(es50k[,1],es50k[,2],sep="-")
+
+##每个peak文件用homer跑出的结果文件knowResults.txt中都包含所有巳知motif的富集分析情况，它的行是按P-value从小到大排列的，因此，不同的knowResults.txt都会有364行记录。但motif 顺序是不同的，这条命令是把所有knowResults.txt的Log(P-value)取负后合并到一个数据框里，合并时行顺序是cell2的行名顺序，当然你也可以用任何一个knowResults.txt中motif的顺序。
+##The result file knowResults.txt run by homer for each peak file contains the enrichment analysis of all known motifs, and its rows are arranged from smallest to largest in terms of P-value, so there will be 364 rows of records for different knowResults.txt. But the order of motif is different, this command takes the negative Log(P-value) from all knowResults.txt files and merges them into one data frame. During merging, the row order follows the row names of cell2, of course, you can use the order of motifs in any knowResults.txt. cell2's rows
+myidx<-rownames(cell2)
+logpvals<-data.frame(cell2=-cell2$Log.P.value,
+                     cell4=-cell4[myidx,]$Log.P.value,
+                     cell8=-cell8[myidx,]$Log.P.value,
+                     icm=-icm[myidx,]$Log.P.value,
+                     es200=-es200[myidx,]$Log.P.value,
+                     es1k=-es1k[myidx,]$Log.P.value,
+                     es50k=-es50k[myidx,]$Log.P.value,
+                     row.names=myidx,
+                     gene=apply(cell2,1,function(x)(toupper(strsplit(strsplit(x[1],"/")[[1]][2],"-")[[1]][2]))))
+
+##按照paper中的标准筛选know motif
+##过滤P值<1e-10的行
+##Filter the know motif according to the criteria in the paper
+##filter rows with P-value< 1e-10
+filtvals<-logpvals[apply(logpvals,1,function(x)(max(as.numeric(x[1:7]))))>-log(1e-10),]
+filtvals$id<-rownames(filtvals)
+
+##读入RNA表达谱中的记录
+##读取FPKM文件并将基因名称更改为大写
+##read records from RNA expression profiles
+##read FPKM file and change gene name to upper
+fpkm<-read.table(file="GSE66582_stage_FPKM.txt",header=T)
+fpkm$gene<-toupper(fpkm$gene)
+
+##按基因合并p值文件和FPKM文件，并过滤掉FPKM低于5的行
+##merge pvalue file and fpkm file by gene and filter rows with a FPKM below 5
+mergefpkm<-merge(filtvals,fpkm,by="gene")
+mergefpkm<-mergefpkm[apply(mergefpkm,1,function(x)(max(as.numeric(x[13:17]))>5)),]
+mergefpkm<-mergefpkm[order(mergefpkm$gene),]
+write.table(mergefpkm,"easy_input.txt",row.names = F,quote = F,sep = "\t")
+```
+
+## 开始画图
+## Start drawing
+
+你可以把自己的数据整理成easy_input.txt这样的格式，就可以跳过上面调整格式的步骤。
+
+第一列是基因名，后面几列依次是各个sample里motif的pvalue，然后是motif的名字，后面是FPKM值。
+
+You can organize your data into a format like easy_input.txt so you can skip the formatting adjustment steps mentioned above.
+
+The first column is the gene name, the following columns are the pvalue of the motif in each sample, followed by the name of the motif, followed by the FPKM value.
+
+```{r,message=FALSE,warning=FALSE}
+mergefpkm<-read.table("easy_input.txt",header = T,as.is = 1)
+head(mergefpkm)
+
+##合并数据框并绘制图形
+##melt dataframe and draw figues
+library(reshape2)
+library(ggplot2)
+
+m1<-melt(mergefpkm[,1:9],id.var=c("id","gene"),variable.name = "type",value.name = "-logP")
+m2<-melt(mergefpkm[,c(1,9,13:17)],id.var=c("id","gene"),variable.name = "type",value.name = "FPKM")
+m3<-rbind(m2,m2[m2$type=="mESC",],m2[m2$type=="mESC",])
+m4<-cbind(m1,m3)
+m5<-m4[,c(1:4,8)]
+
+#设置logP范围和FPKM范围
+#set logP range and FPKM range
+quantile(m5$`-logP`,probs = c(0:10)/10)
+m5[m5$`-logP`>500,]$`-logP`<-500
+quantile(m5$`-logP`,probs = c(0:10)/10)
+m5[m5$`-logP`<10,]$`-logP`<-10
+quantile(m5$`-logP`,probs = c(0:10)/10)
+quantile(m5$FPKM,probs = c(0:10)/10)
+m5[m5$FPKM>20,]$FPKM<-20
+quantile(m5$FPKM,probs = c(0:10)/10)
+
+#filtered_motifs.pdf，按照paper的描述筛选出来的motif
+#filtered_motifs.pdf, filtered motifs according to the paper's description
+p1<-ggplot(m5,aes(type,id,size=`-logP`))+
+  geom_point(shape=21,aes(fill=FPKM),position =position_dodge(0))+
+  theme_minimal()+xlab(NULL)+ylab(NULL)+
+  scale_size_continuous(range=c(1,8))+
+  scale_fill_gradientn(colours=c("#2381B3","#F0E366"),guide="legend")+
+  theme(legend.position = "bottom",legend.box = "vertical",panel.grid.major =element_blank() )
+ggsave(file="filtered_motifs.pdf",height=18,width = 9)
+
+#filtered_genes.pdf，上述motif对应的转录因子
+#filtered_genes.pdf, transcription factors corresponding to the above motifs
+p2<-ggplot(m5,aes(type,id,size=`-logP`))+
+  geom_point(shape=21,aes(fill=FPKM),position =position_dodge(0))+
+  theme_minimal()+xlab(NULL)+ylab(NULL)+
+  scale_size_continuous(range=c(1,8))+
+  scale_fill_gradientn(colours=c("#2381B3","#F0E366"),guide="legend")+
+  theme(legend.position = "bottom",legend.box = "vertical",panel.grid.major =element_blank(),legend.margin=margin(t= 0, unit='cm'),legend.spacing = unit(0,"in"))+
+  scale_size_continuous(range=c(0,10))+
+  scale_y_discrete(labels=m5$gene)
+ggsave(file="filtered_genes.pdf",height=20,width = 4)
+```
+
+## 输出的图
+## Output graphs
+查看filtered_motifs.pdf，是按照paper的描述筛选出来的motif；
+
+查看filtered_genes.pdf，是上述motif对应的转录因子。
+
+可以看出，比paper的图多出了很多转录因子。而且同一转录因子对应多个motif，paper里的只出现一个motif，作者是怎么处理的呢？
+
+Check filtered_motifs.pdf, which contains motifs filtered according to the description in the paper;
+
+Check the filtered_genes.pdf, which shows the transcription factors corresponding to the aforementioned motif.
+
+It can be observed that there are significantly more transcription factors compared to the paper's diagram. Additionally, the same transcription factor corresponds to multiple motifs, whereas only one motif is shown in the paper. How did the author address this?
+
+## paper作者Jingyi答复：
+## Reply by paper author Jingyi:
+
+我认为你有更多motif的原因是我们使用了不同版本的motif数据库。我在2016年的论文中使用的是一个旧版本，其中包含的motif相对较少。
+
+如果一个基因有多个富集值，我会选择最高的富集值赋值给该基因。
+
+I think the reason why you have more motif is the different version of motif database we are using. The one I used in 2016 paper was an old one with relatively less motif included.
+
+If one gene has multiple enrichment value, I choose the highest enrichment value to assign to that gene.
+
+为了模仿出原版的效果，我们把paper里出现的转录因子对应的数据提取出来，重新画图
+
+To imitate the effect of the original version, we extracted the data corresponding to the transcription factors mentioned in the paper and redrew the graphs.
+
+```{r,fig.height=8,fig.width=3,message=FALSE,warning=FALSE}
+##在nature论文中筛选motifs：哺乳动物植入前胚胎中可获得染色质的全景
+##filtering with motifs in the nature paper: The landscape of accessible chromatin in mammalian preimplantation embryos
+papermotif<-c("GABPA","NANOG","SOX2","POU5F1","TFAP2C","GATA4","GATA3","GATA1","TEAD4","FOXA1","RARG","NR5A2","ESRRB","CTCF","KLF4")
+pmergefpkm<-merge(mergefpkm,data.frame(gene=papermotif),by="gene")
+pmergefpkm<-merge(mergefpkm,data.frame(gene=papermotif,sortid=letters[1:length(papermotif)]),by="gene")
+pmergefpkm<-pmergefpkm[order(pmergefpkm$sortid),]
+pmergefpkm$id<-apply(pmergefpkm,1,function(x)(paste(x[18],x[9],sep="-")))
+pm1<-melt(pmergefpkm[,1:9],id.var=c("id","gene"),variable.name = "type",value.name = "-logP")
+pm2<-melt(pmergefpkm[,c(1,9,13:17)],id.var=c("id","gene"),variable.name = "type",value.name = "FPKM")
+pm3<-rbind(pm2,pm2[pm2$type=="mESC",],pm2[pm2$type=="mESC",])
+pm4<-cbind(pm1,pm3)
+pm5<-pm4[,c(1:4,8)]
+pm5[pm5$`-logP`>500,]$`-logP`<-500
+pm5[pm5$`-logP`<10,]$`-logP`<-10
+pm5[pm5$FPKM>20,]$FPKM<-20
+
+#paper_motifs.pdf，paper的图里出现的转录因子对应的motif
+#paper_motifs.pdf, motif corresponding to the transcription factor shown in the paper's figure
+p3<-ggplot(pm5,aes(type,id,size=`-logP`))+
+  geom_point(shape=21,aes(fill=FPKM),position =position_dodge(0))+
+  theme_minimal()+xlab(NULL)+ylab(NULL)+
+  scale_size_continuous(range=c(1,15))+
+  scale_fill_gradientn(colours=c("#2381B3","#F0E366"),guide="legend")+
+  theme(legend.position = "bottom",legend.box = "vertical",panel.grid.major =element_blank(),legend.margin=margin(t= 0, unit='cm'),legend.spacing = unit(0,"in"))+
+  scale_size_continuous(range=c(0,10))
+ggsave(file="paper_motifs.pdf",height=8.4,width = 9)
+
+#paper_gene.pdf，paper的图里出现的转录因子
+#paper_gene.pdf, transcription factors shown in the paper's figures
+ggplot(pm5,aes(type,id,size=`-logP`))+
+  geom_point(shape=21,aes(fill=FPKM),position =position_dodge(0))+
+  theme_minimal()+xlab(NULL)+ylab(NULL)+
+  scale_size_continuous(range=c(1,15))+
+  scale_fill_gradientn(colours=c("#2381B3","#F0E366"),guide="legend")+theme(legend.position = "bottom",legend.box = "vertical",panel.grid.major =element_blank(),legend.margin=margin(t= 0, unit='cm'),legend.spacing = unit(0,"in"))+
+  scale_size_continuous(range=c(0,10))+scale_y_discrete(labels=pm5$gene)
+ggsave(file="paper_gene.pdf",height=8.4,width = 3.2)
+```
+在嘉因公众号回复“世界名画”，查看世界名画的配色代码
+
+Reply with "World Famous Paintings" on the Jiayin public account to see the color codes of world famous paintings.
+
+```{r}
+sessionInfo()
+```
+
