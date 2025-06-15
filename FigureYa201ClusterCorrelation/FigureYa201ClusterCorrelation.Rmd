@@ -1,0 +1,275 @@
+---
+title: "FigureYa201ClusterCorrelation"
+author: "Xiaofan Lu"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+根据基因表达进行非监督聚类，之后划分为正负相关基因集。
+
+# Requirement Description
+
+Unsupervised clustering was performed based on gene expression, after which it was divided into positive and negatively correlated gene sets.
+
+![](example.png)
+
+出自<https://www.cell.com/molecular-therapy-family/nucleic-acids/fulltext/S2162-2531(20)30259-6>
+from<https://www.cell.com/molecular-therapy-family/nucleic-acids/fulltext/S2162-2531(20)30259-6>
+
+Figure 2. Identification of Immunogenic Gene Subtypes
+A) Unsupervised clustering of common DEGs among three ICI cluster groups to classify patients into three groups: gene clusters A–C.
+
+# 应用场景
+
+根据基因表达进行非监督共识聚类，划分正负相关基因集。
+
+# Application Scenarios
+
+Unsupervised consensus clustering was performed based on gene expression, and positive and negative correlation gene sets were divided.
+
+FigureYa154immuneSubtypes和FigureYa202consensusGene也用到了ConsensusClusterPlus做共识聚类，可相互参考，灵活运用，设计出更有趣的展示方式。
+
+FigureYa154immuneSubtypes and FigureYa202consensusGene also use ConsensusClusterPlus for consensus clustering, which can be used for mutual reference and flexible use to design more interesting display methods.
+
+> “小丫画图群-数据处理”里的小伙伴CR问：“什么叫非监督共识聚类？”
+
+ConsensusClusterPlus包的描述：ConsensusClusterPlus function for determing cluster number and class membership by stability evidence.
+
+大鱼海棠作出以下解答：
+
+- **共识聚类**是对原数据集重新抽样，对抽样子集做聚类。
+  - **多次重复**来评估样本同属于相同类的概率，这种是常用的consensus clustering。
+  - 用**不同算法**聚类来综合结果是另一种共识，这个一般叫consensus ensemble。后者属于later integration后期整合的一种。
+
+- **非监督**就是在你并不知道有多少类的情况下，没有目的的进行聚类，然后根据一些统计量确定最优结果。
+- 当你有了一些先验知识，有目的的进行聚类分析，一般是在某个感兴趣的数据集上直接明确聚类数目就是**监督聚类**了。
+
+# What is Unsupervised Consensus Clustering?
+Here’s my explanation:
+
+**Consensus Clustering** involves resampling the original dataset and performing clustering on subsets.
+
+**Repeated iterations** assess the probability that samples consistently belong to the same class—this is the classic consensus clustering approach.
+
+**Combining results from different clustering algorithms** is another form of consensus, typically called consensus ensemble clustering. The latter falls under late integration in multi-method workflows.
+
+**Unsupervised** means clustering without prior knowledge of the number of classes, then determining the optimal result based on statistical metrics (e.g., consensus scores, silhouette width).
+
+When prior knowledge guides the analysis (e.g., a predefined cluster number in a target dataset), it becomes **supervised clustering**.
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Use the domestic mirror installation package
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+load packages
+
+```{r}
+library(ConsensusClusterPlus)
+library(pheatmap)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # Display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor # Prohibit converting chr to factor
+```
+
+# 输入文件
+
+
+easy_input_expr.txt，包含目标基因的表达矩阵，将从这里提取目标基因的表达矩阵。
+
+easy_input_cli.txt，样本信息，画热图时用颜色标注样本信息。每个sample为一行，每列为一种信息，这里用到性别Gender、生存状态Status、分期Grade、年龄Age。**如果你不想在图中标注样本信息，就不需要这个文件。**
+
+easy_input_gene.txt, 目标基因，用来聚类和画图，来自原文Table S2的三个亚型的差异表达基因，取并集。
+
+# File Descriptions
+
+-easy_input_expr.txt
+
+Contains the expression matrix of target genes.This file will be used to extract the expression profiles of the specified genes.
+
+-easy_input_cli.txt
+
+Stores sample metadata for heatmap annotation (e.g., color-coding by clinical features).Format: Each row represents a sample; columns represent attributes (e.g., Gender, Status, Grade, Age).Note: Optional—omit this file if sample annotation is not required in the visualization.
+
+-easy_input_gene.txt
+
+Lists target genes for clustering and plotting.Derived from the union of differentially expressed genes (DEGs) across three subtypes in Table S2 of the original publication.
+
+
+
+```{r}
+# 加载基因表达谱 # Load gene expression matrix
+expr <- read.table("easy_input_expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+dim(expr)
+expr[1:3, 1:3]
+
+# 加载样本信息 # Load sample information
+clin <- read.table("easy_input_sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+clin[1:3,]
+
+# 加载用于聚类的目标基因 # Load the target gene for clustering
+degs <- read.table("easy_input_gene.txt",sep = "\t", row.names = NULL, header = F,stringsAsFactors = F,check.names = F)
+head(degs)
+
+# 提取用于聚类的基因的表达矩阵 # Extract the expression matrix of genes used for clustering
+comgene <- intersect(rownames(expr), degs$V1) #提取有表达数据的目标基因
+comsam <- intersect(colnames(expr), rownames(clin)) #提取既有表达矩阵又有样本信息的样本
+indata <- log2(expr[comgene,comsam] + 1) #这里示例数据是FPKM值，+1再取log2，实际应用时根据自己的数据灵活处理
+# The example data here uses FPKM values, transformed by adding 1 and then taking log2. In practice, adjust the preprocessing steps flexibly based on your own data characteristics.
+indata[1:3,1:3]
+dim(indata)
+```
+
+# 共识聚类
+# ConsensusCluster
+
+用ConsensusClusterPlus决定聚类数量。
+Use ConsensusClusterPlus to determine the number of clusters.
+```{r}
+subtype <- ConsensusClusterPlus(d = as.matrix(indata),
+                                maxK = 4, # 原文参数 # Original text parameters
+                                pItem = 0.8, # 默认参数 # Default parameters
+                                pFeature = 1, # 默认参数 # Default parameters
+                                reps = 1000, # 原文参数 # Original text parameters
+                                clusterAlg = "pam", # 原文参数 # Original text parameters
+                                innerLinkage = "ward.D", # 原文参数 # Original text parameters
+                                finalLinkage = "ward.D", # 原文参数 # Original text parameters
+                                distance = "euclidean", # 原文参数 # Original text parameters
+                                seed = 123456,
+                                plot = "pdf", #或png # or png
+                                writeTable = TRUE,
+                                title = "ConsensusCluster") 
+# 打开ConsensusCluster文件夹里的consensus.pdf文件，查看不同分类数量下的聚类结果
+# 这里取k=3时的聚类结果
+# Open the consensus.pdf file in the ConsensusCluster folder to view the clustering results for different number of categories
+# Here we take the clustering result when k=3
+geneclust <- subtype[[3]]
+table(geneclust$consensusClass)
+samorder <- sort(geneclust$consensusClass)
+```
+
+题外话：
+
+- 你可能想要每个sample对应的cluster，用来进一步做生存分析、差异表达分析等。打开ConsensusCluster文件夹，ConsensusCluster.k=X.consensusClass.csv对应每种分类数量下sample所在的cluster。
+
+- ConsensusCluster.k=X.consensusMatrix.csv对应consensus.pdf文件里的热图，可以用这个matrix重新DIY更好看的热图。
+
+# Side Notes:
+-Sample Cluster Assignments:
+ You may want to retrieve the cluster labels for each sample to perform downstream analyses (e.g., survival analysis, differential expression).
+
+ File Location: Check the ConsensusCluster folder.
+
+ Output File: ConsensusCluster.k=X.consensusClass.csv contains the cluster assignments for each sample under different predefined cluster numbers (k=X).
+
+-Consensus Matrix for Custom Heatmaps:
+ The ConsensusCluster.k=X.consensusMatrix.csv file corresponds to the consensus matrix visualized in consensus.pdf.
+
+ You can use this matrix to customize enhanced heatmaps (e.g., using pheatmap or ComplexHeatmap in R).
+
+# 计算基因与cluster的相关性
+
+该部分我是与作者沟通的，作者回复如下：
+
+gene cluster a b c 分别对应1 2 3，由此计算皮尔森系数。同时随机森林降维也是根据 1 2 3 来进行的。也就是说计算皮尔森系数与降维的依据是一致的。同时 gene cluster 1 2 3是由一致性聚类自动分成的。为了方便表述，文中将其命名为gene cluster a b c。
+
+# Calculating Gene-Cluster Correlations
+This section is based on direct communication with the study authors. Their response is summarized below:
+
+1.Gene Clusters (a/b/c) correspond to numerical labels (1/2/3) for analysis purposes.
+
+2.Pearson correlation is calculated between gene expression and these cluster assignments (1/2/3).
+
+3.Random forest-based feature reduction also uses the same numerical labels (1/2/3) for consistency.
+
+4.Cluster derivation: The three gene clusters (1/2/3) were automatically generated by consensus clustering. For clarity in the manuscript, they were renamed as a/b/c in the text.
+
+
+
+```{r}
+outTab <- NULL
+for (i in rownames(indata)) {
+  tmp <- as.numeric(indata[i,names(samorder)])
+  cor.res <- cor.test(tmp, as.numeric(samorder), method = "pearson")
+  outTab <- rbind.data.frame(outTab,
+                             data.frame(gene = i,
+                                        r = cor.res$estimate,
+                                        p = cor.res$p.value,
+                                        stringsAsFactors = F),
+                             stringsAsFactors = F)
+}
+
+# 按相关性正负来分类
+# Categorized by positive and negative correlations
+outTab$direct <- ifelse(outTab$r > 0, "A","B") # 正相关标为A，否则标为B # The positive correlation is marked as A, otherwise it is marked as B
+outTab <- outTab[order(outTab$r, decreasing = T),]
+table(outTab$direct) # 事实上最终用于展示热图的基因数目更少，因为作者进一步采用了随机森林降维 # In fact, the number of genes used to display the heatmap was even smaller because the authors further employed random forest dimensionality reduction
+
+# 把基因与cluster的相关系数r、p值及其所属的基因集（A、B）保存到文件
+# # Save the correlation coefficients r, p, and gene sets (A, B) of genes to a file
+write.table(outTab,"ouput_ICIsignatureGene.txt",sep = "\t", row.names = F, col.names = T, quote = F)
+```
+
+# 开始画图
+
+用pheamap画图，把样本信息写到annotation里，在图中标注出来。
+
+# Start drawing
+
+Draw a map with pheamap, write the sample information into the annotation, and mark it in the image.
+
+```{r}
+annCol <- data.frame("Gene cluster" = ifelse(samorder == 1,"A", ifelse(samorder == 2, "B", "C")),
+                     row.names = names(samorder),
+                     check.names = F,
+                     stringsAsFactors = F)
+annCol <- cbind.data.frame(annCol,clin[rownames(annCol),])
+
+annRow <- data.frame("ICI signature gene" = outTab$direct,
+                     row.names = outTab$gene,
+                     check.names = F,
+                     stringsAsFactors = F)
+annColors <- list("Gene cluster" = c("A" = "#008ECB", "B" = "#EA921D", "C" = "#D14039"),
+                  "Gender" = c("Male" = "#79B789", "Female" = "#B5262A"),
+                  "Status" = c("Alive" = "#79B789", "Dead" = "#B5262A"),
+                  "Grade" = c("G1" = "#CBBEC1", "G2" = "#53B1E7", "G3" = "#C78157", "G4" = "#A54D48"),
+                  "Age" = colorRampPalette(c("#F7D202", "#96862A"))(64),
+                  "ICI signature gene" = c("A" = "#D14039", "B" = "#008ECB"))
+
+plotdata <- t(scale(t(indata[rownames(annRow), rownames(annCol)])))
+plotdata[plotdata > 3] <- 3 # 截断极端值 # Truncate extreme values
+plotdata[plotdata < -3] <- -3 # 截断极端值 # Truncate extreme values
+
+pheatmap(plotdata,
+         cluster_rows = F,
+         cluster_cols = F,
+         show_rownames = F,
+         show_colnames = F,
+         annotation_row = annRow,
+         annotation_col = annCol,
+         annotation_colors = annColors,
+         color = colorRampPalette(c("#343493", "white", "#C24A45"))(64))
+dev.copy2pdf(file = "ClusterCorrelation.pdf", width = 10, height = 8) # 保存图像 # save image
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
