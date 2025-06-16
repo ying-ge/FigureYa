@@ -1,0 +1,351 @@
+---
+title: "FigureYa288MutualExclusivity"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+瀑布图，重点是基因之间突变相关性pvalue。
+
+Waterfall plot focusing on mutation correlation p-values between genes.
+
+两个基因之间:
+
+Between two genes:
+
+![](example1.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S1097276520307292>
+
+图5. ZMAT3具有p53依赖性与非依赖性双重功能
+(G) 在子宫体子宫内膜癌(UCEC)中，ZMAT3突变与TP53突变呈现互斥模式。P值来源于DISCOVER互斥性检验。
+
+Source: <https://linkinghub.elsevier.com/retrieve/pii/S1097276520307292>
+
+Figure 5. ZMAT3 Has p53-Dependent and -Independent Activities
+(G) Mutations in ZMAT3 are mutually exclusive with TP53 mutations in UCEC. p value, DISCOVER mutual exclusivity test.
+
+多个基因之间：
+
+Among multiple genes:
+
+![](example2.png)
+
+出自<https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02230-w>
+
+图1. 通过全外显子组测序分析的30例上尿路尿路上皮癌(UTUC)体细胞突变图谱，包括15例肌层浸润性肿瘤和15例非肌层浸润性肿瘤。
+c图展示UTUC全队列中具有互斥或共现模式的基因热图。星号标注具有统计学显著性的相关性。
+
+Source: <https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02230-w>
+
+Fig. 1 Genetic landscape of somatic mutations identified by whole-exome sequencing of 30 upper tract urothelial carcinomas (UTUC), including 15 muscle-invasive tumors and 15 non-muscle-invasive tumors. 
+c Heatmap for genes with mutual exclusivity or co-occurrence in the whole UTUC cohort. Stars refer to correlations that are statistically significant.
+
+# 应用场景
+# Application Scenarios
+
+Mutual-exclusivity analysis，我们众筹过FigureYa70mutationEvents<https://k.youshop10.com/5qGbYAM3>，用Discover包实现TCGA的基因突变数据分析Co-occurrence/mutual exclusivity，未计算Odds Ratio。
+
+这次我们用单侧Fisher's exact检验，并计算**Odds Ratio和P值**。
+
+从费谢尔检验的代码来看，"less" 表示mutual-exclusivity analysis（二者“竞争”出现；OR<1）, 而"greater"则代表co-occurrence analysis（二者“共生”出现; OR>1）
+
+For mutual exclusivity analysis, our previous crowdsourced project FigureYa70mutationEvents<https://k.youshop10.com/5qGbYAM3> implemented the DISCOVER package to analyze TCGA gene mutation patterns (co-occurrence/mutual exclusivity) without calculating odds ratios.
+
+In this analysis, we employ one-sided Fisher's exact test to compute both **Odds Ratios (OR) and P values**.
+
+As demonstrated in the Fisher's test implementation:
+"less" alternative indicates mutual exclusivity (competitive pattern; OR < 1), "greater" alternative denotes co-occurrence (cooperative pattern; OR > 1)
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(maftools)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 第一种情况：一两个基因的作用
+# Case 1: Interaction between two genes
+
+按照原文所示，当考虑两个基因的作用时，计算mutual exclusivity并绘制热图：
+
+As shown in the paper, when analyzing two genes, calculate mutual exclusivity and plot heatmap.
+
+## 输入文件
+## Input Files
+
+easy_input_two_genes.txt，突变的MAF文件。这里文件事先处理了，只保存了原文的两个基因。
+
+The input file "easy_input_two_genes.txt" is a pre-processed MAF (Mutation Annotation Format) file containing only the two target genes from the original publication.
+
+```{r}
+maf <- read_tsv("easy_input_two_genes.txt", comment = "#")
+
+# 定义需要保留的列
+# Define columns to keep
+label <- c("Tumor_Sample_Barcode",
+           "Hugo_Symbol",
+           "Chromosome",
+           "Start_Position",
+           "End_Position",
+           "Variant_Classification",
+           "Variant_Type",
+           "Reference_Allele",
+           "Tumor_Seq_Allele1",
+           "Tumor_Seq_Allele2")
+
+# 保存一些可能会用到的列
+# Keep potentially useful columns
+maf <- maf[,label] 
+```
+
+## 计算突变二值矩阵（1为突变型，0为野生型）
+## Create binary mutation matrix (1=mutated, 0=wildtype)
+
+```{r}
+mut.binary <- matrix(0,nrow = length(unique(maf$Hugo_Symbol)),ncol = length(unique(maf$Tumor_Sample_Barcode)),dimnames = list(unique(maf$Hugo_Symbol),unique(maf$Tumor_Sample_Barcode)))
+for (i in colnames(mut.binary)) {
+  tmp <- maf[which(maf$Tumor_Sample_Barcode == i),]
+  
+  # 仅考虑如下非同义突变
+  # Consider only these non-synonymous mutations
+  tmp <- tmp[which(tmp$Variant_Classification %in% c("Frame_Shift_Del", "Frame_Shift_Ins", "Splice_Site", "Translation_Start_Site","Nonsense_Mutation", "Nonstop_Mutation", "In_Frame_Del","In_Frame_Ins", "Missense_Mutation")),]
+  for (j in tmp$Hugo_Symbol)
+    mut.binary[j,i] <- 1
+}
+mut.binary <- as.data.frame(mut.binary)#; rownames(mut.binary) <- toupper(rownames(mut.binary))
+
+write.table(mut.binary,"binary_mutation_matrix_two_genes.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+## 计算mutual exclusivity
+## Calculate mutual exclusivity
+
+```{r}
+tmp <- as.data.frame(t(mut.binary))
+print(fisher.test(table(tmp$TP53,tmp$ZMAT3)))
+```
+
+可以看到此时OR是小于1的，所以为“竞争”关系，采用单侧检验计算，可以看到置信区间发生了一些改变（大多数情况P值也会改变）。
+
+The observed odds ratio (OR) being less than 1 indicates a "mutually exclusive" relationship (competitive pattern), prompting the use of a one-sided test. Note this approach modifies the confidence interval boundaries (and typically alters the p-value as well).
+
+```{r}
+print(fisher.test(table(tmp$TP53,tmp$ZMAT3),alternative = "less"))
+```
+
+## 绘制热图
+## Plot heatmap
+
+这里简单采用maftools里的绘图方法，瀑布图的绘制众筹过许多，这里不再赘述使用方法。用ComplexHeatmap重绘瀑布图更灵活，可参考FigureYa42oncoprint <https://k.youshop10.com/CUxBnX=A>，或FigureYa113MutSigCV <https://k.youshop10.com/0VYtgolm>，或FigureYa276panSNV <https://k.youshop10.com/D1fxfyJr>分析泛癌中特定通路基因的突变情况。
+
+Here we employ the built-in plotting function from maftools, as waterfall plot construction has been extensively demonstrated in previous community-shared cases (see references below). For more customizable waterfall plots using ComplexHeatmap, please refer to: FigureYa42oncoprint <https://k.youshop10.com/CUxBnX=A>, FigureYa113MutSigCV <https://k.youshop10.com/0VYtgolm>, FigureYa276panSNV <https://k.youshop10.com/D1fxfyJr>
+which demonstrate pan-cancer mutation patterns in specific pathway genes.
+
+```{r}
+maf <- read.maf("easy_input_two_genes.txt")
+pdf("oncoprint_two_genes.pdf", width = 10,height = 3)
+oncoplot(maf,
+         drawColBar = F,
+         drawRowBar = F,
+         titleFontSize = 1.2,
+         #titleText = "UCEC",
+         legendFontSize = 1)
+invisible(dev.off())
+```
+
+# 第二种情况：多基因相互之间的mutual exclusivity
+# Case 2: Mutual exclusivity among multiple genes
+
+当存在许多基因时，考虑相互之间的mutual exclusivity，更多情况下可以考虑使用如下展示方法：
+
+When analyzing multiple genes, assessing their mutual exclusivity patterns often warrants the following visualization approach:
+
+## 输入文件
+## Input Files
+
+easy_input_multiple_genes.txt，突变矩阵，行为样本，列为感兴趣基因，入值元素1为突变型，0为野生型。
+
+easy_input_multiple_genes.txt，mutation matrix with rows as samples and columns as genes of interest, where matrix elements of 1 indicate mutated status and 0 indicate wildtype status.
+
+```{r}
+mutMat <- read.table("easy_input_multiple_genes.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T) 
+
+# 初始化结果
+# Initialize results
+res <- NULL 
+```
+
+## 循环计算每一个基因
+## Calculate for each gene pair
+
+```{r}
+for(i in 1:ncol(mutMat)){ 
+  for(j in i:ncol(mutMat)){
+    # 构建2x2列联表
+    # Create 2x2 contingency table
+    tab <- table(mutMat[,i], mutMat[,j]) 
+    if(i!=j){
+      # 使用双边费谢尔精确检验
+      # Two-sided Fisher's exact test
+      f <- fisher.test(tab)
+      # 处理当2x2列联表存在有0元素的情况
+      # Handle tables with zero counts
+      if(f$estimate == 0) { 
+        # 当双侧列联表OR估计值为0时，表明可能为“竞争”, 因此采用单侧“less”重新计算OR值和P值
+        # When the odds ratio (OR) estimate equals 0 in a two-way contingency table analysis, this suggests potential "mutual exclusivity" (competitive relationship), thus necessitating recalculation using a one-sided "less" alternative hypothesis test to obtain valid OR and p-value estimates.
+        f <- fisher.test(tab,alternative = "less") # 
+        # 所构建的结果表格包括以下内容
+        # The constructed results table contains the following components
+        res <- rbind.data.frame(res,cbind.data.frame(geneA=colnames(mutMat)[i], 
+                                                     geneB=colnames(mutMat)[j], 
+                                                     Neither=tab[1,1], 
+                                                     AnotB=tab[2,1], 
+                                                     BnotA=tab[1,2], 
+                                                     Both=tab[2,2], 
+                                                     oddsRatio=f$estimate, 
+                                                     pvalue=fisher.test(tab,alternative = "less")$p.value), 
+                                stringsAsFactors = F)
+      } else {
+        if(is.infinite(f$estimate)) { 
+          # 如果双侧检验出现无穷值，表明2x2列联表中存在0元素, 对表格元素+1以便估计OR值
+          # If the two-sided test yields infinite values, this indicates the presence of zero cells in the 2×2 contingency table. We therefore apply a pseudocount adjustment (adding 1 to all cells) to enable odds ratio (OR) estimation.
+          f <- fisher.test(tab + 1)  
+          if(log(f$estimate) > 0) { 
+            # 此时若OR值>1，测表明可能“共生”, 重新采用单侧“greater”检验
+            # When the odds ratio (OR) exceeds 1, this indicates potential "co-occurrence" (cooperative relationship), prompting the use of a one-sided "greater" alternative hypothesis test.
+            f <- fisher.test(tab + 1,alternative = "greater")  
+            res <- rbind.data.frame(res,cbind.data.frame(geneA=colnames(mutMat)[i],
+                                                         geneB=colnames(mutMat)[j],
+                                                         Neither=tab[1,1],
+                                                         AnotB=tab[2,1],
+                                                         BnotA=tab[1,2],
+                                                         Both=tab[2,2],
+                                                         oddsRatio=f$estimate,
+                                                         pvalue=fisher.test(tab,alternative = "greater")$p.value),
+                                    stringsAsFactors = F)
+          } else{ 
+            # 此时若OR值<1，测表明可能“竞争”, 重新采用单侧“less”检验
+            # When the odds ratio (OR) is less than 1, this suggests potential "mutual exclusivity" (competitive relationship), and thus we apply the one-sided "less" alternative hypothesis test.
+            f <- fisher.test(tab + 1,alternative = "less")  
+            res <- rbind.data.frame(res,cbind.data.frame(geneA=colnames(mutMat)[i],
+                                                         geneB=colnames(mutMat)[j],
+                                                         Neither=tab[1,1],
+                                                         AnotB=tab[2,1],
+                                                         BnotA=tab[1,2],
+                                                         Both=tab[2,2],
+                                                         oddsRatio=f$estimate,
+                                                         pvalue=fisher.test(tab,alternative = "less")$p.value),
+                                    stringsAsFactors = F)
+          }
+          
+        } else { 
+          # 若不存在0原则，则无无穷之，如下计算
+          # If no zero values exist in the contingency table (thus avoiding infinite odds ratios), the calculation proceeds as follows.
+          if(log(f$estimate) > 0) {
+            f <- fisher.test(tab,alternative = "greater")
+          } else{f <- fisher.test(tab,alternative = "less")}
+          res <- rbind.data.frame(res,cbind.data.frame(geneA=colnames(mutMat)[i],
+                                                       geneB=colnames(mutMat)[j],
+                                                       Neither=tab[1,1],
+                                                       AnotB=tab[2,1],
+                                                       BnotA=tab[1,2],
+                                                       Both=tab[2,2],
+                                                       oddsRatio=f$estimate,
+                                                       pvalue=f$p.value),
+                                  stringsAsFactors = F)
+        }   
+      }
+    }
+  }
+}
+
+# 结果后处理
+# Post-processing
+res <- as.data.frame(res)
+res$Tendency <- ifelse(as.numeric(res$oddsRatio) > 1,"Co-occurrence","Mutual-exclusivity")
+
+# 设置基因顺序
+# Set gene order
+res$geneA <- factor(res$geneA,levels=c("MLL2","FGFR3","MLL3","KDM6A","ZFP36L1","STAG2","CRIPAK","ARID1A","TP53","GANAB")) 
+res$geneB <- factor(res$geneB,levels=c("MLL2","FGFR3","MLL3","KDM6A","ZFP36L1","STAG2","CRIPAK","ARID1A","TP53","GANAB"))
+res$oddsRatio <- as.numeric(as.character(res$oddsRatio))
+
+# 对数转换 (有OR值可能很大，因此取对数，但有可能存在OR值为0，因此加上0.1)
+# Log transform (Since odds ratios (OR) can be very large, we apply logarithmic transformation. However, to handle cases where OR equals zero, we add a small constant (0.1) before log transformation.)
+res$log2OR <- log2(as.numeric(as.character(res$oddsRatio))+0.1) 
+
+res$pvalue <- as.numeric(as.character(res$pvalue))
+
+# 添加显著性标记
+# Add significance stars
+res$stars <- cut(res$pvalue, breaks=c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf), label=c("***", "**", "*", ".","")) 
+write.table(res,"mutual_exclusivity_multiple_genes.txt",sep = "\t",row.names = F)
+```
+
+## 开始画图
+## Plotting
+
+这里用ggplot2来画图，还可以用corrplot来画，可参考FigureYa70mutationEvents。
+
+Here, we use ggplot2 for plotting, but corrplot can also be used as an alternative. For reference, see FigureYa70mutationEvents.
+
+```{r}
+p <- ggplot(res, aes(geneA, geneB)) + 
+  geom_tile(aes(fill = log2OR),colour = "white") + 
+  scale_fill_gradient2(low = "darkblue",mid = "grey80",
+                       high = "darkred",midpoint=0) + 
+  geom_text(aes(label=stars), color="white", size=5) + 
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"),
+        axis.title = element_blank())
+p
+ggsave("mutual_exclusivity_multiple_genes.pdf",width = 5,height = 5)
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
