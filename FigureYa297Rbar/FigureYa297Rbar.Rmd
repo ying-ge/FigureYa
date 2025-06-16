@@ -1,0 +1,306 @@
+---
+title: "FigureYa297Rbar"
+params:
+  author: "Yandong Zheng; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+我想从形式上众筹这个图，这个柱状图是填充色的，看上去比较好看。想看看大神们是怎么复现出来的，学习一下，想学习用R实现。
+
+I want to recreate this figure in form. This bar chart has gradient fills and looks visually appealing. I'd like to see how experts reproduce it and learn how to implement it in R.
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41585-021-00442-8>
+
+图4 | 选定亚洲国家、英格兰和美国中转移性前列腺癌的患病率。除日本外，许多亚洲国家的晚期疾病发生率（25-44%）高于美国（19%）。日本广泛开展的PSA筛查项目与这一时期全国死亡率的显著下降相关。
+
+Source: <https://www.nature.com/articles/s41585-021-00442-8>
+
+Fig. 4 | The prevalence of metastatic prostate cancer in selected Asian countries, England and the USA. Except for Japan, many Asian countries have higher rates (25–44%) of advanced-stage disease than the USA (19%). The widespread PSA screening programme in Japan has been associated with a significant decrease in national mortality rate during this time period.
+
+# 应用场景
+# Application scenarios
+
+R默认的简约严肃版柱形图就挺好看了。不过，如果你（或许是你老板）喜欢办公软件的审美，不妨试一下本文档的操作。
+
+我们也画过花哨一点的柱状图：
+
+- FigureYa39bar <https://k.youshop10.com/P75DHMrs>
+- FigureYa170ImmuLncRNA <https://k.youshop10.com/Zkj985gv>
+- FigureYa173fancybar <https://k.youshop10.com/wCHBYmko>
+- FigureYa180FGAplot <https://k.youshop10.com/FdC5u=Yd>
+- FigureYa209batchEnrich <https://k.youshop10.com/dXk-kWCX>
+
+R's default minimalist bar charts are quite good-looking. However, if you (or perhaps your supervisor) prefer the aesthetic of office software, you might want to try the approach in this document.
+
+We've also created some fancier bar charts:
+
+- FigureYa39bar <https://k.youshop10.com/P75DHMrs>
+- FigureYa170ImmuLncRNA <https://k.youshop10.com/Zkj985gv>
+- FigureYa173fancybar <https://k.youshop10.com/wCHBYmko>
+- FigureYa180FGAplot <https://k.youshop10.com/FdC5u=Yd>
+- FigureYa209batchEnrich <https://k.youshop10.com/dXk-kWCX>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+# 渐变柱状图用到了ggpattern包中的pattern_fill参数，共两个参数
+# pattern_fill和pattern_fill2，只能设置两个渐变色
+# The gradient bar chart uses the pattern_fill parameter from the ggpattern package
+# There are two parameters: pattern_fill and pattern_fill2, allowing only two gradient colors
+install.packages("remotes")
+remotes::install_github("coolbutuseless/ggpattern")
+install.packages("magick")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(ggpattern)
+library(ggplot2)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.csv，the prevalence of metastatic prostate cancer。第一列对应图中横坐标，第二、三列是图中每个bar的两部分，第四列是二三列之和。
+
+easy_input.csv, the prevalence of metastatic prostate cancer. The first column corresponds to the x-axis in the figure, the second and third columns are the two parts of each bar in the figure, and the fourth column is the sum of the second and third columns.
+
+```{r}
+# 读取数据
+# Read data
+df <- read.csv("easy_input.csv")
+
+# 获取行数
+# Get number of rows
+maxID <- nrow(df)
+
+# 添加ID列用于绘图
+# Add ID column for plotting
+df$ID <- 1:maxID
+```
+
+# 开始画图
+# Plotting
+
+```{r}
+# 数据重塑为长格式
+# Reshape data to long format
+plot.df.all <- reshape2::melt(df, id.var = c("Country", "ID"), value.name = "Percentage", variable.name = "Type")
+
+# 筛选需要绘制的数据类型
+# Filter data types to plot
+plot.df <- subset(plot.df.all,Type %in% c("Metastatic", "Localized"))
+
+# 这里取Metastatic数据，后续进行图层叠加和文字注释
+# Extract Metastatic data for layer overlay and text annotation
+plot.df1 <- subset(plot.df, Type == "Metastatic") 
+
+### 设置填充颜色 ---------------
+### Set fill colors ---------------
+
+# 第一组数据的渐变色
+# Gradient colors for first dataset
+type.color.1 <- c('#dbeffc','#7bb8e5') 
+
+# 第二组数据的渐变色（图中靠下那组，覆盖在前一组之上）
+# Gradient colors for second dataset (lower part in figure, overlaying the first)
+type.color.2 <- c('#a7d7f3','#0079bb') 
+```
+
+这里提供两种方案：渐变模式是横向和中心辐射。
+
+Here we provide two approaches: horizontal gradient and radial gradient.
+
+## 方案一： 中心辐射渐变
+## Option 1: Radial gradient
+
+```{r}
+# 柱子宽度
+# Bar width
+barwidth <- 0.44 
+
+plot1 <- ggplot() +
+  # 画第一组
+  # Plot first group
+  geom_col_pattern(
+    data = plot.df,
+    mapping = aes(ID, Percentage),
+    width = barwidth,
+    position = "stack",
+    pattern = 'gradient',
+    pattern_orientation = "radial",
+    pattern_fill = type.color.1[1], 
+    pattern_fill2 = type.color.1[2], 
+    fill = NA) + 
+  
+  # 画第二组，覆盖在前面画出的bar之上
+  # Plot second group, overlaying the previous bars
+  geom_col_pattern(
+    data = plot.df1,
+    mapping = aes(ID, Percentage),
+    width = barwidth,
+    pattern = 'gradient',
+    pattern_orientation = "radial",
+    pattern_fill = type.color.2[1], 
+    pattern_fill2 = type.color.2[2], 
+    fill = NA) + 
+  
+  # 添加文字
+  # Add text
+  geom_text(data = plot.df1, mapping = aes(x = ID, y = (Percentage/2), label = paste0(Percentage, " %")),
+            size = 2.5, color = "white") + 
+  scale_x_continuous(breaks = seq(1, maxID, 1), labels = stringr::str_wrap(plot.df1$Country, 9)) + 
+  scale_y_continuous(limits = c(0,100), breaks = seq(0, 100, 10), expand = c(0, 0)) +
+  labs(x = "") +
+  theme_bw() +
+  theme(aspect.ratio = 0.5) +
+  theme(panel.grid.major.x = element_blank(), 
+        panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        legend.text = element_text(colour = 'black', size = 9),
+        axis.text = element_text(colour = 'black', size = 9),
+        axis.line = element_line(colour = 'black'),
+        panel.background = element_rect(fill = "white"),
+        panel.border = element_blank())
+plot1
+
+ggsave("bar_radial.pdf", width = 7, height = 5)
+```
+
+## 方案二： 横向渐变
+## Option 2: Horizontal gradient
+
+```{r}
+# 柱子宽度，左右分开画，一次画一半
+# Bar width, plot left and right halves separately
+barwidth <- 0.22 
+
+plot2 <- ggplot() +
+  # 填充左侧一半
+  # Fill left half
+  geom_col_pattern(
+    data = plot.df,
+    mapping = aes( (ID-(barwidth/2)), Percentage),
+    width = barwidth,
+    position = "stack",
+    pattern = 'gradient',
+    pattern_orientation = "horizontal", 
+    pattern_fill = type.color.1[2], 
+    pattern_fill2 = type.color.1[1], 
+    fill = NA) + 
+  
+  # 填充右侧一半
+  # Fill right half
+  geom_col_pattern(
+    data = plot.df,
+    mapping = aes( (ID+(barwidth/2)), Percentage),
+    width = barwidth,
+    position = "stack",
+    pattern = 'gradient',
+    pattern_orientation = "horizontal", 
+    pattern_fill = type.color.1[1], 
+    pattern_fill2 = type.color.1[2], 
+    fill = NA) + 
+  
+  # 填充左侧一半，覆盖在前面画的bar之上
+  # Fill left half, overlay previous bars
+  geom_col_pattern(
+    data = plot.df1,
+    mapping = aes( (ID-(barwidth/2)), Percentage),
+    width = barwidth,
+    pattern = 'gradient',
+    pattern_orientation = "horizontal",
+    pattern_fill = type.color.2[2], 
+    pattern_fill2 = type.color.2[1], 
+    fill = NA) + 
+  # 填充右侧一半，覆盖在前面画的bar之上
+  # Fill right half, overlay previous bars
+  geom_col_pattern(
+    data = plot.df1,
+    mapping = aes( (ID+(barwidth/2)), Percentage),
+    width = barwidth,
+    pattern = 'gradient',
+    pattern_orientation = "horizontal",
+    pattern_fill = type.color.2[1], 
+    pattern_fill2 = type.color.2[2],
+    fill = NA) +
+  
+  # geom_rect 添加黑色边框，不想要可以注释掉
+  # Add black borders with geom_rect, can be commented out if not needed
+  geom_rect(
+    data = plot.df1,
+    mapping = aes(xmin = ID - barwidth, xmax = ID + barwidth, ymin = 0, ymax = Percentage),
+    size = 0.3,
+    fill = NA,
+    color = "black")+
+  geom_rect(
+    data = df,
+    mapping = aes(xmin = ID-barwidth, xmax = ID + barwidth, 
+                  ymin = Metastatic, 
+                  ymax = Total),
+    size = 0.3,
+    fill = NA,
+    color = "black") + 
+  
+  # 添加文字
+  # Add text
+  geom_text(data = plot.df1, mapping = aes(x = ID, y = (Percentage/2), label = paste0(Percentage, " %")),
+            size = 2.5, color = "white") + 
+  scale_x_continuous(breaks = seq(1, maxID, 1), labels = stringr::str_wrap(plot.df1$Country, 9)) + 
+  scale_y_continuous(limits = c(0,100), breaks = seq(0,100,10), expand = c(0,0)) +
+  labs(x = "") +
+  theme_bw() +
+  theme(aspect.ratio = 0.5) +
+  theme(panel.grid.major.x = element_blank(), 
+        panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y = element_blank(), 
+        legend.text = element_text(colour = 'black', size = 9),
+        axis.text = element_text(colour = 'black', size = 9),
+        axis.line = element_line(colour = 'black'),
+        panel.background = element_rect(fill = "white"),
+        panel.border = element_blank())
+
+plot2
+
+ggsave("bar_horizontal.pdf", width = 7, height = 5)
+```
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
