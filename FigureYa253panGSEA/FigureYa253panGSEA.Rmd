@@ -1,0 +1,291 @@
+---
+title: "FigureYa253panGSEA"
+author: "Xiaofan Lu"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+基于FPI最高30%和最低30%的两个肿瘤组的转录组，对每个肿瘤进行基因集富集分析(GSEA)，研究高FPI和低FPI肿瘤组织之间的通路差异。
+
+# Requirement Description
+
+Based on the transcriptome of the two tumor groups with the highest and lowest 30% FPI, gene set enrichment analysis (GSEA) was performed for each tumor to study the pathway differences between high and low FPI tumor tissues.
+
+![](example.png)
+
+出自<https://www.cell.com/iscience/fulltext/S2589-0042(20)30489-2?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS2589004220304892%3Fshowall%3Dtrue>
+from<https://www.cell.com/iscience/fulltext/S2589-0042(20)30489-2?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS2589004220304892%3Fshowall%3Dtrue>
+
+Figure 3. Relationships between Ferroptosis and Signaling Pathways and Immunophenotypes
+(A and B) Enrichment analysis for metabolism pathway (A) and cancer signaling (B) between high- and low-FPI tumor tissues. NES is the normalized enrichment score in the GSEA algorithm.
+
+# 应用场景
+
+根据某一个基因的表达量高低给样本分组，然后做分组间的差异表达分析，进一步用差异分析结果做GSEA富集分析，可以推测该基因影响了哪些通路。
+
+进一步拓展，可将上述“某一个基因的表达量”替换为“某个基因集的富集得分”，就像这篇例文，用一组基因计算出的FPI值给样本分组，然后做分组间的差异表达分析，进一步用差异分析结果做GSEA富集分析，可以推测该基因集（FPI）跟哪些通路相关。
+
+# Application Scenarios
+
+The samples were grouped according to the expression level of a certain gene, and then the differential expression analysis between the groups was performed, and the GSEA enrichment analysis was performed with the results of differential analysis, which pathways affected by the gene could be inferred.
+
+For further expansion, you can replace the above "expression level of a certain gene" with "enrichment score of a certain gene set", just like this example, use the FPI value calculated by a group of genes to group the samples, and then do differential expression analysis between groups, and further use the results of differential analysis to do GSEA enrichment analysis, you can infer which pathways the gene set (FPI) is associated with.
+
+> 本文档将提供这两种情况的解决方案。
+
+更多富集分析展示方式看这里<https://k.youshop10.com/sm2p0xYn>
+
+更多pancancer分析画图FigureYa看这里<https://k.youshop10.com/C8RkTgR3>
+
+> This document will provide solutions for both scenarios.
+
+For more enrichment analysis display methods, see here <https://k.youshop10.com/sm2p0xYn>
+
+For more pancancer analysis plotting FigureYa see here <https://k.youshop10.com/C8RkTgR3>
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Use the domestic mirror installation packages
+
+```{r}
+options(download.file.method = 'libcurl')
+options(url.method='libcurl')
+BiocManager::install("clusterProfiler")
+```
+
+加载包
+load packages
+
+```{r}
+library(clusterProfiler)
+library(limma)
+library(ggplot2)
+library(data.table)
+library(ggpubr)
+library(GSVA)
+source("twoclasslimma.R")
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # error messages are displayed in English
+options(stringsAsFactors = FALSE) #禁止chr转成factor # chr is not allowed to be converted to factor
+```
+
+# 输入文件
+
+easy_input_sample_annotation.txt，样本分组信息。整理自注释文件merged_sample_quality_annotations.tsv，下载自<http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>。
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv，表达矩阵，第一列是基因，之后是其在每个样本中的表达量。下载自<http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>。这里以TCGA数据为例，对于非肿瘤数据或其他物种数据，套用其格式即可，可忽略文中对筛选正常样本的代码，搜索“非TCGA数据”着重修改。
+
+# Input files
+
+easy_input_sample_annotation.txt. Sample grouping information. Organize the self-annotated file merged_sample_quality_annotations.tsv, download it from <http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>.
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2. geneExp.tsv, the expression matrix, with the gene in the first column, followed by its expression in each sample. Download from <http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>. Taking TCGA data as an example, for non-tumor data or other species data, you can apply its format, you can ignore the code for screening normal samples in the text, and search for "non-TCGA data" to focus on modification.
+
+```{r eval=FALSE}
+# 注释文件预处理
+# Preprocessing of annotation files
+rawAnno <- read.delim("merged_sample_quality_annotations.tsv",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T) 
+rawAnno$simple_barcode <- substr(rawAnno$aliquot_barcode,1,15)
+samAnno <- rawAnno[!duplicated(rawAnno$simple_barcode),c("cancer type", "simple_barcode")]
+samAnno <- samAnno[which(samAnno$`cancer type` != ""),]
+# 输出样本分组信息
+# Output sample grouping information
+write.table(samAnno,"easy_input_sample_annotation.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+```{r}
+# 直接读取样本信息，这里是每个sample对应的肿瘤类型
+# Read the sample information directly, here is the tumor type corresponding to each sample
+samAnno <- read.table("easy_input_sample_annotation.txt", sep = "\t",header = T, check.names = F)
+
+# 快速读取表达谱数据并做数据预处理
+# Quickly read the expression spectrum data and do data preprocessing
+expr <- fread("EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",sep = "\t",stringsAsFactors = F,check.names = F,header = T)
+expr[1:3,1:3]
+expr <- as.data.frame(expr); rownames(expr) <- expr[,1]; expr <- expr[,-1]
+gene <- sapply(strsplit(rownames(expr),"|",fixed = T), "[",1)
+expr$gene <- gene
+expr <- expr[!duplicated(expr$gene),]
+rownames(expr) <- expr$gene; expr <- expr[,-ncol(expr)]
+expr[expr < 0] <- 0 # 对于这份泛癌数据，将略小于0的数值拉到0，否则不能取log（其他途径下载的泛癌数据可能不需要此操作） # For this pan-cancer data, pull the value slightly less than 0 to 0, otherwise the log cannot be retrieved (pan-cancer data downloaded from other channels may not need this operation)
+colnames(expr) <- substr(colnames(expr),1,15) # 非TCGA数据可忽略这行 # This line can be ignored for non-TCGA data
+gc()
+```
+
+# 用基因集计算富集得分（就像例文的FPI）
+
+两种情况，任选其一：
+
+第一种，用某一个基因的表达量给样本分为该基因表达量高低两组；
+
+# Calculate the enrichment score from the gene set (like FPI in the example)
+
+Choose one of two scenarios:
+
+First, the expression level of a certain gene is used to divide the sample into two groups: high and low expression of the gene;
+
+```{r eval=FALSE}
+genelist <- "TP53" # 以TP53为例 # Take TP53 as an example
+es <- log2(expr[rownames(expr) == genelist,] + 1) 
+row.names(es) <- "genelist"
+```
+
+第二种，用基因集（例如例文用一组基因计算FPI）给样本分为该基因集富集得分高低两组。
+Second, the samples are divided into two groups: the gene set is used (e.g., FPI is calculated with a set of genes) to divide the samples into two groups: the gene set enrichment score is high.
+
+```{r eval=FALSE}
+# 把自己感兴趣的基因集写进easy_input_genelist.txt这个文件
+# 读取感兴趣的基因
+# Write the gene set you are interested in into easy_input_genelist.txt file
+# Read the gene of interest
+#genelist <- read.table("easy_input_genelist.txt", header = T)$GeneSymbol
+# 或者直接从原文获取感兴趣的基因集 (TTC35/EMC2) 
+# Or obtain the gene set of interest directly from the original source (TTC35/EMC2)
+genelist <- c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1","FDFT1","SLC1A5","SAT1","TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4","EMC2")
+
+# 利用GSVA计算感兴趣基因集的富集得分，作为FPI
+# The enrichment score of the gene set of interest was calculated using GSVA as FPI
+es <- gsva(expr = as.matrix(log2(expr + 1)),
+           gset.idx.list = list("genelist" = genelist),
+           method = "ssgsea",
+           parallel.sz = 0) # 若采用LINUX或者MacOS可以设置为0，Windows请设置为1 # If you are using LINUX or MacOS, you can set it to 0, and Windows can set it to 1
+write.table(es, file = "output_ssgsea enrichment score of interested gene list in pancancer.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+```{r}
+es <- read.table("output_ssgsea enrichment score of interested gene list in pancancer.txt", sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+```
+
+# 差异分析及富集分析
+
+h.all.v7.2.symbols.gmt，这里使用的是HALLMARK背景集，可以改为自己感兴趣的基因集合，从MSigDB<https://www.gsea-msigdb.org/gsea/msigdb/>下载。
+
+# Difference analysis and enrichment analysis
+
+h.all.v7.2.symbols.gmt, which uses the HALLMARK background set, can be changed to your own gene collection of interest and downloaded from MSigDB<https://www.gsea-msigdb.org/gsea/msigdb/>.
+
+```{r}
+# 加载富集分析背景geneset
+# Load the enrichment analysis background geneset
+msigdb.hallmark <- read.gmt("h.all.v7.2.symbols.gmt") 
+
+# 30%阈值来定义高低组（原文所述）
+# 30% threshold to define high and low groups (As stated in the original text)
+pct <- 0.3 
+
+gseaTab <- NULL
+
+# 接下来批量做这些肿瘤中FPI高低的差异分析及GSEA富集分析
+# Next, batch FPI difference analysis and GSEA enrichment analysis were performed
+tumors <- c("BLCA","BRCA","CESC","CHOL","COAD",
+            "ESCA","GBM","HNSC","KICH","KIRC",
+            "KIRP","LIHC","LUAD","LUSC","PAAD",
+            "PRAD","READ","STAD","THCA","UCEC") #注意：这里包含正常和肿瘤样本 # Note: Normal and tumor samples are included here
+for (i in tumors) {
+  message("--",i,"...")
+  sam <- samAnno[which(samAnno$`cancer type` == i),"simple_barcode"]
+  comsam <- intersect(colnames(es), sam) # 得到特定肿瘤类型中基因集的富集得分（或某一基因的表达量） # Obtain enrichment scores (or expression of a gene) in a specific tumor type
+  
+  tumsam <- comsam[substr(comsam,14,14) == "0"] # 仅提取肿瘤样本 # Only tumor samples are taken
+  # tumsam <- comsam # 对于非TCGA数据，可将上面一行替换为这行 # For non-TCGA data, you can replace the above row with this row
+  es_subset <- as.data.frame(t(es[,tumsam]))
+  es_subset <- es_subset[order(es_subset$genelist,decreasing = T),,drop = F] # 对富集得分（或基因表达量）排序 # Sort the enrichment score (or gene expression).
+  
+  high.es <- rownames(es_subset[1:(nrow(es_subset) * pct),,drop = F]) # 取前30%为高组 # The top 30% is the high group
+  low.es <- rownames(es_subset[nrow(es_subset):(nrow(es_subset) - nrow(es_subset) * pct + 1),,drop = F]) # 取后30%为低组 # The last 30% is the low group
+  
+  # 高低两组样本的limma差异表达分析
+  # Differential expression analysis of LIMMA between the two groups of samples
+  subt <- data.frame(condition = rep(c("high","low"),c(length(high.es),length(low.es))),
+                     row.names = c(high.es, low.es),
+                     stringsAsFactors = F)
+  gset <- log2(na.omit(expr[,rownames(subt)]) + 1)
+  twoclasslimma(subtype  = subt, # 亚型信息（必须包含一列为condition） # Subtype information (must contain a column condition)
+                featmat  = gset, # 表达谱（会自动检测数据标准化与否） # Expression profile (automatically detects whether the data is normalized or not)
+                treatVar = "high", # “治疗组”的名字 # Name of "Treatment Group".
+                ctrlVar  = "low", # “对照组”的名字 # Name of the "control group".
+                prefix   = paste0("TCGA_enrichment_score_",i), # 差异表达文件的前缀 # The prefix of the diff file
+                overwt   = T, # 决定是否覆盖已经存在的差异表达结果 # Decide whether to overwrite existing differential expression results
+                sort.p   = F, # 决定是否对结果按照FDR排序 # Decide whether to sort the results by FDR
+                verbose  = TRUE, # 决定是否显示一些提示 # Decide if to show some prompts
+                res.path = ".") # 确定结果路径 # Determine the result path
+  
+  # 加载差异表达分析结果
+  # Load differential expression analysis results
+  res <- read.table(paste0("TCGA_enrichment_score_",i,"_limma_test_result.high_vs_low.txt"),sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+  
+  # 产生pre-ranked基因列表
+  # Generate a list of pre-ranked genes
+  res <- res[order(res$log2fc, decreasing = T),]
+  glist <- res$log2fc; names(glist) <- rownames(res)
+  
+  # 运行GSEA富集分析
+  # Run a GSEA enrichment analysis
+  set.seed(20211114)
+  gsea <- GSEA(geneList = glist,
+               pvalueCutoff = 1, # 得到所有结果 # Get all results
+               seed = TRUE,
+               TERM2GENE = msigdb.hallmark)
+  gc()
+  gsea.df <- as.data.frame(gsea) # 数据转换为数据框 # Convert data to data frames
+  write.table(gsea.df,file = "output_gsea between high and low group of enrichment score in pancancer.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+  
+  gseaTab <- rbind.data.frame(gseaTab,
+                              data.frame(term = gsea.df$ID,
+                                         NES = gsea.df$NES,
+                                         FDR = gsea.df$p.adjust,
+                                         tumor = i,
+                                         stringsAsFactors = F),
+                              stringsAsFactors = F)
+}
+
+# 将所有肿瘤的富集分析结果输出到文件
+# Output the results of the enrichment analysis of all tumors to a file
+write.table(gseaTab, "output_TCGA_pancan_gsea_regarding_es_group.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+# 开始画图 - Figure 3A
+# Start Drawing - Figure 3A
+
+```{r, fig.width = 12, fig.height = 10}
+# 设置颜色
+# Set the color
+darkblue <- "#303B7F"
+darkred <- "#D51113"
+yellow <- "#EECA1F"
+
+# 生成泡泡图
+# Generate a bubble map
+tmp <- gseaTab
+tmp$term <- gsub("HALLMARK_","",tmp$term)
+my_palette <- colorRampPalette(c(darkblue,yellow,darkred), alpha=TRUE)(n=128)
+ggplot(tmp, aes(x=tumor,y=term)) +
+  geom_point(aes(size=-log10(FDR),color=NES)) +
+  scale_color_gradientn('NES', 
+                        colors=my_palette) + 
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank(),
+        axis.text.x = element_text(angle = 45, size = 12, hjust = 0.3, vjust = 0.5, color = "black"),
+        axis.text.y = element_text(size = 10, color = "black"),
+        axis.title = element_blank(),
+        panel.border = element_rect(size = 0.7, linetype = "solid", colour = "black"),
+        legend.position = "bottom",
+        plot.margin = unit(c(1,1,1,1), "lines"))
+ggsave("GSEA regarding enrichment score group in pancancer.pdf", width = 12,height = 10)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
