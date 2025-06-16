@@ -1,0 +1,337 @@
+---
+title: "FigureYa316RF_XGBoost_Boruta"
+params:
+  author: "Guoqi Li; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+想众筹这篇文章的Figure S2；就是用4种机器学习来筛选生物标志物。
+
+We want to crowdfund Figure S2 from this paper; which uses 4 machine learning methods to screen biomarkers.
+
+![](example.png)
+
+出自：<https://www.ijbs.com/v18p0360>
+
+通过LASSO、SVM-RFE、随机森林(RF)和XGBoost算法，分别筛选出36、15、35和31个基于mRNAsi表型的差异表达基因(DEGs)，各算法的具体结果如图S2所示。
+
+Source: <https://www.ijbs.com/v18p0360>
+
+A total of 36, 15, 35 and 31 mRNAsi phenotype-based DEGs were selected by LASSO, SVM-RFE, RF and XGBoost, separately; results of each algorithm were shown in Figure S2.
+
+# 应用场景
+# Application scenarios
+
+文章补充图2中展示的图形为4种算法的结果（LASSO，XGBoost，RF，Boruta），但方法学描述的确是5种（LASSO，SVM-REF，XGBoost，RF，Boruta）。
+
+其中XGBoost是我们第一次众筹。FigureYa65SVM已经实现了前两种（LASSO，SVM-REF），本文档实现3种算法（XGBoost，RF，Boruta）。
+
+我们众筹过的LASSO、SVM-REF、RF和Boruta如下。作者不同，可对比学习。
+
+LASSO
+
+- FigureYa31lasso <https://k.youshop10.com/BflugKvZ>
+- FigureYa65SVM <https://k.youshop10.com/5RZm-I9h>
+- FigureYa128Prognostic <https://k.youshop10.com/5be2BiFs>
+- FigureYa220repeatedLasso <https://k.youshop10.com/4TzImkC6>
+- FigureYa238corRiskMut <https://k.youshop10.com/nUP=aC-n>
+- FigureYa293machineLearning <https://k.youshop10.com/vkyERKZ7>
+- FigureYa45iCluster <https://k.youshop10.com/puSQ=xuo>
+
+SVM-REF
+
+- FigureYa65SVM <https://k.youshop10.com/5RZm-I9h>
+- FigureYa130coxSVM <https://k.youshop10.com/eUd6aHnK>
+- FigureYa217RMR <https://k.youshop10.com/S6owwKd8>
+- FigureYa293machineLearning <https://k.youshop10.com/vkyERKZ7>
+
+RF
+
+- FigureYa159LR_RF <https://k.youshop10.com/YgeCQyJm>
+- FigureYa184ranger <https://k.youshop10.com/ZvyyYkr9>
+- FigureYa221tenFoldRF <https://k.youshop10.com/3mnuaz7y>
+
+Boruta
+
+- FigureYa204PCAscore <https://k.youshop10.com/=bRTDwW7>，不同于常规的lasso, cox回归系数与基因表达量的乘积，这篇文章采用Boruta降维，联合主成分分析第一主成分构建 signature score，特别适合做分子分型分析。
+
+另外，我们众筹过的FigureYa可以实现文中的几个图：
+
+- Figure 1A，可以用FigureYa161stemness来计算mRNAsi并画图。
+- Figure 2A，可参考FigureYa71ssGSEA<https://k.youshop10.com/hhH631te>。
+- Figure 2B，ESTIMATE可参考FigureYa211multiCohortImmSubtype<https://k.youshop10.com/VwpAWxx0>或FigureYa230immunelandscape<https://k.youshop10.com/wQSoNWJ0>，相关性展示可参考<https://k.youshop10.com/Eig1YOB4>。
+- Figure 2D，CIBERSORT可参考FigureYa211multiCohortImmSubtype<https://k.youshop10.com/VwpAWxx0>，画图可参考FigureYa12box<https://k.youshop10.com/GyC0Qm3g>
+- Figure 3C，ClusterProfiler衔接GOplot可参考FigureYa52GOplot<https://k.youshop10.com/DmEbg3iO>
+- Figure 3E，可参考FigureYa69cancerSubtypes<https://k.youshop10.com/kdKt1Kit>
+- Figure 5K，可参考FigureYa131CMap<https://k.youshop10.com/7kOjUwPe>
+- Figure 6D，可参考FigureYa102multipanelROC<https://k.youshop10.com/7bYkTnXu>
+
+
+Figure S2 displays the results of four algorithms (LASSO, XGBoost, Random Forest [RF], and Boruta), while the Methods section describes five algorithms (LASSO, SVM-RFE, XGBoost, RF, and Boruta).
+
+This represents our first crowdfunding initiative for XGBoost implementation. FigureYa65SVM has already covered the first two algorithms (LASSO and SVM-RFE), while this document implements the remaining three (XGBoost, RF, and Boruta).
+
+For reference, our previous crowdfunded implementations of LASSO, SVM-RFE, RF, and Boruta (from different authors) are listed below for comparative study.
+
+LASSO
+
+- FigureYa31lasso <https://k.youshop10.com/BflugKvZ>
+- FigureYa65SVM <https://k.youshop10.com/5RZm-I9h>
+- FigureYa128Prognostic <https://k.youshop10.com/5be2BiFs>
+- FigureYa220repeatedLasso <https://k.youshop10.com/4TzImkC6>
+- FigureYa238corRiskMut <https://k.youshop10.com/nUP=aC-n>
+- FigureYa293machineLearning <https://k.youshop10.com/vkyERKZ7>
+- FigureYa45iCluster <https://k.youshop10.com/puSQ=xuo>
+
+SVM-REF
+
+- FigureYa65SVM <https://k.youshop10.com/5RZm-I9h>
+- FigureYa130coxSVM <https://k.youshop10.com/eUd6aHnK>
+- FigureYa217RMR <https://k.youshop10.com/S6owwKd8>
+- FigureYa293machineLearning <https://k.youshop10.com/vkyERKZ7>
+
+RF
+
+- FigureYa159LR_RF <https://k.youshop10.com/YgeCQyJm>
+- FigureYa184ranger <https://k.youshop10.com/ZvyyYkr9>
+- FigureYa221tenFoldRF <https://k.youshop10.com/3mnuaz7y>
+
+Boruta
+
+- FigureYa204PCAscore <https://k.youshop10.com/=bRTDwW7>，Unlike conventional methods that multiply LASSO/Cox regression coefficients with gene expression values, this study employs Boruta for feature selection combined with the first principal component from PCA to construct signature scores - an approach particularly well-suited for molecular subtyping analysis.
+
+In addition, the FigureYa we have crowdfunded can realize several of the images mentioned in the figure:
+
+- Figure 1A, Use FigureYa161stemness to calculate mRNAsi and generate plots.
+- Figure 2A, Refer to FigureYa71ssGSEA <https://k.youshop10.com/hhH631te>.
+- Figure 2B, For ESTIMATE analysis, see FigureYa211multiCohortImmSubtype  <https://k.youshop10.com/VwpAWxx0> or FigureYa230immunelandscape <https://k.youshop10.com/wQSoNWJ0>; for correlation visualization, use<https://k.youshop10.com/Eig1YOB4>
+- Figure 2D, CIBERSORT implementation via FigureYa211multiCohortImmSubtype  <https://k.youshop10.com/VwpAWxx0>, with plotting templates from FigureYa12box <https://k.youshop10.com/GyC0Qm3g>.
+- Figure 3C, Integrate ClusterProfiler with GOplot using FigureYa52GOplot <https://k.youshop10.com/DmEbg3iO>.
+- Figure 3E, Adapt FigureYa69cancerSubtypes <https://k.youshop10.com/kdKt1Kit>.
+- Figure 5K, Leverage FigureYa131CMap<https://k.youshop10.com/7kOjUwPe>.
+- Figure 6D, Reproduce using FigureYa102multipanelROC <https://k.youshop10.com/7bYkTnXu>.
+
+# 环境设置
+# Requirements Description
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("randomForest")
+```
+
+
+```{r}
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.csv，带有分组信息的矩阵。来自FigureYa65 <https://k.youshop10.com/5RZm-I9h>。
+
+可自行准备，至少包含以下信息：
+
+- 第一列：sample ID
+- 第二列：样本分组信息，最好为二分类变量
+- 第三列之后：表达矩阵
+
+easy_input.csv, matrix with grouping information. From FigureYa65 <https://k.youshop10.com/5RZm-I9h>.
+
+Can be prepared by yourself, must contain at least:
+
+- First column: sample ID
+- Second column: sample grouping info, preferably binary
+- Third column onwards: expression matrix
+
+```{r}
+# 读取数据
+# Read data
+data <- read.csv("easy_input.csv", row.names = 1, as.is = F)
+set.seed(100)
+```
+
+# RF算法
+# Random Forest Algorithm
+
+```{r fig.width=5, fig.height=5}
+library(randomForest)
+
+# 为了节约时间，使用部分数据进行展示
+# Use partial data for demonstration
+rf_input <- data[, 1:51]
+
+# 寻找最佳mtry参数 
+# Find optimal mtry parameter
+n <- length(names(rf_input))
+outTab <- data.frame()
+for (i in 1:(n-1)) {
+  mtry_fit <- randomForest(group~., data = rf_input, mtry = i)
+  err <- mean(mtry_fit$err.rate)
+  print(err)
+  outTab <- rbind(outTab,err)
+  colnames(outTab) <- "err"
+}
+
+# 选取randomforest –mtry节点值，对应误差最小的节点值为41
+# Select the randomForest mtry parameter value - the node value with minimum error is 41.
+which.min(outTab$err)
+
+# 随机设置决策树的大小，以找到模型内误差基本稳定点所对应的决策树数目
+# Randomly set the number of decision trees to identify the point where the model's internal error stabilizes and determine the corresponding optimal number of trees.
+ntree_fit <- randomForest(group~., data = rf_input, mtry = 41, ntree = 2000)
+
+# 绘制误差曲线
+# Plot error curve
+plot(ntree_fit)
+
+# 保存图形
+# Save plot
+pdf("A_RF.pdf", width = 5, height = 5)
+plot(ntree_fit)
+dev.off()
+
+# 之后选择ntree值，ntree指定随机森林所包含的决策树数目，默认为500；
+# 在1500左右时，模型内误差基本稳定，故取ntree = 1500
+# Then select the ntree value. ntree specifies the number of decision trees in the random forest, with a default of 500.
+# When reaching around 1500, the model's internal error stabilizes, therefore we set ntree = 1500.
+rf <- randomForest(group ~., data = rf_input, mtry = 41, ntree = 1500, importance = T)
+rf
+
+# 获取变量重要性
+# Get variable importance
+importance <- importance(x=rf)
+importance
+
+# 保存结果
+# Save results
+write.table(importance,"output_importance_RF.txt", col.names = T, row.names = T, sep = "\t", quote = F)
+
+# 绘制重要性图
+# Plot importance
+pdf("B_RF.pdf", width = 5, height = 5)
+varImpPlot(rf)
+dev.off()
+```
+
+# XGBoost算法
+# XGBoost Algorithm
+
+```{r fig.width=5, fig.height=5}
+library(xgboost)
+library(Matrix)
+#install.packages("Ckmeans.1d.dp")
+#如果此处报错，例如
+#Error in install.packages : ERROR: failed to lock directory ‘C:\Users\96251\Documents\R\win-library\4.1’ for modifying
+#Try removing ‘C:\Users\96251\Documents\R\win-library\4.1/00LOCK’
+#只需要去上述所指定的路径下（例子为C:\Users\96251\Documents\R\win-library\4.1/）删除00LOCK文件夹即可
+
+#install.packages("Ckmeans.1d.dp")
+#If encountering errors like:
+#Error in install.packages : ERROR: failed to lock directory ‘C:\Users\96251\Documents\R\win-library\4.1’ for modifying
+#Try removing the ‘00LOCK’ folder at the specified path (e.g., C:\Users\96251\Documents\R\win-library\4.1/)
+
+# 数据准备
+# Prepare data
+matrix <- sparse.model.matrix(group ~ .-1, data = data)
+label <- as.numeric(ifelse(data$group=="NR", 0, 1))
+fin <- list(data=matrix,label=label) 
+dmatrix <- xgb.DMatrix(data = fin$data, label = fin$label) 
+
+# 模型训练
+#Model training
+xgb <- xgboost(data = dmatrix,max_depth=6, eta=0.5,  
+               objective='binary:logistic', nround=25)
+
+# 重要重要性排序 
+# Feature importance ranking
+xgb.importance <- xgb.importance(matrix@Dimnames[[2]], model = xgb)  
+head(xgb.importance)
+
+# 保存结果
+# Save results
+write.table(xgb.importance, "output_importance_XGBoost.txt", col.names = T, row.names = T, sep = "\t", quote = F)
+
+# 绘制重要性图 
+# Plot importance
+pdf("XGBoost.pdf", width = 5, height = 5)
+xgb.ggplot.importance(xgb.importance)
+dev.off()
+```
+
+# Boruta算法
+# Boruta Algorithm
+
+```{r fig.width=5, fig.height=5}
+library(Boruta)
+library(mlbench)
+
+# 为了节约时间，使用部分数据进行展示
+# Use partial data for demonstration
+Boruta_input <- data[, 1:51]
+
+# 运行Boruta算法
+# Run Boruta algorithm
+boruta <- Boruta(group ~ ., data = Boruta_input, doTrace = 2, maxRuns = 500)
+
+# 查看结果
+# View results
+print(boruta)
+
+# 通过计算发现19个特征是重要特征，对应下图绿色，29个是不重要的特征，对应下图红色，2个是不明确重要特征，对应下图蓝色
+# Analysis shows: 19 important features (green), 29 unimportant features (red), and 2 uncertain features (blue) in the plot
+
+# 可视化选择的结果
+# Visualize selection results
+pdf("A_Boruta.pdf",width = 5, height = 5)
+plot(boruta, las = 2, cex.axis = 0.7)
+dev.off()
+
+# 可视化具体的选择过程
+# Visualize selection process
+pdf("B_Boruta.pdf", width = 5, height = 5)
+plotImpHistory(boruta)
+dev.off()
+
+#采用TentativeRoughFix的方法来解析不确定的特征
+# Resolve tentative features using TentativeRoughFix method
+bor <- TentativeRoughFix(boruta)
+print(bor)
+
+# 显示最终特征选择的结果
+# Show final feature selection
+attStats(boruta)
+write.table(attStats(boruta), "output_importance_Boruta.txt", col.names = T, row.names = T, sep = "\t", quote = F)
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
