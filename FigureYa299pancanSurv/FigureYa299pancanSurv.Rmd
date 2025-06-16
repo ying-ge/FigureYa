@@ -1,0 +1,531 @@
+---
+title: "FigureYa299pancanSurv"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+想众筹下这张图，泛癌预后KM+Cox分析后，热图形式展示，最后再单独展示OS结果，内容看起来更立体丰富一点。
+
+We want to crowdfund this figure - After pan-cancer prognostic KM + Cox analysis, display results in heatmap format, then separately showcase OS outcomes to make the content more three-dimensional and enriched.
+
+![](example.png)
+
+出自：<https://www.frontiersin.org/articles/10.3389/fonc.2021.665870/full>
+
+图3 | (A) 基于单变量Cox回归和Kaplan-Meier模型，展示PDIA3表达与总生存期（OS）、疾病特异性生存期（DSS）、无病生存期（DFI）和无进展生存期（PFI）相关性的汇总结果。红色标注表示PDIA3是影响癌症患者预后的风险因素，绿色代表保护性因素。仅显示p值<0.05的显著性结果。
+(B) 森林图通过单变量Cox回归方法展示PDIA3在各类癌症中的预后作用。红色标注的癌症类型表示PDIA3作为具有统计学意义的危险因素。
+
+Source: <https://www.frontiersin.org/articles/10.3389/fonc.2021.665870/full>
+
+FIGURE 3 | (A) Summary of the correlation between expression of PDIA3 with overall survival (OS), disease-specific survival (DSS), disease-free interval (DFI) and progression-free interval (PFI) based on the univariate Cox regression and Kaplan-Meier models. Red indicates that PDIA3 is a risk factor affecting the prognosis of cancer patients, and green represents a protective factor. Only p values < 0.05 are shown. 
+(B) The forest plot exhibited the prognostic role of PDIA3 in cancers by univariate Cox regression method. The cancer type in red represents the PDIA3 acts as a risky factor with statistical significance. 
+
+# 应用场景
+# Application scenarios
+
+在泛癌中根据某感兴趣基因的表达计算该表达与预后的相关性；绘制预后热图。
+
+更多泛癌FigureYa看这里<https://k.youshop10.com/C8RkTgR3>
+
+In pan-cancer analysis, calculate the correlation between the expression of a gene of interest and prognosis based on its expression; plot a prognostic heatmap.
+
+For more pan-cancer FigureYa, check here<https://k.youshop10.com/C8RkTgR3>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(ggplot2)
+library(data.table)
+library(survival)
+library(ComplexHeatmap)
+library(forestplot)
+library(survminer)
+library(circlize)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+跟FigureYa291PancanProgSigature<https://k.youshop10.com/OH-gnWgI>的输入文件相同，不用重复下载。
+
+merged_sample_quality_annotations.tsv，肿瘤注释文件。下载自<https://gdc.cancer.gov/about-data/publications/pancanatlas>，下载地址<http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>。
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv，表达矩阵，第一列是基因，之后是其在每个样本中的表达量。下载自<http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>。
+
+Survival_SupplementalTable_S1_20171025_xena_sp，生存数据。来自<https://xenabrowser.net/datapages/?dataset=Survival_SupplementalTable_S1_20171025_xena_sp&host=https%3A%2F%2Fpancanatlas.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>。
+
+The input files are the same as those for FigureYa291PancanProgSignature <https://k.youshop10.com/OH-gnWgI>, so there is no need to download them again.
+
+merged_sample_quality_annotations.tsv: Tumor annotation file. Downloaded from <https://gdc.cancer.gov/about-data/publications/pancanatlas>, direct download link: <http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>.
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv: Expression matrix, where the first column contains gene names and subsequent columns show expression levels in each sample. Downloaded from<http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>.
+
+Survival_SupplementalTable_S1_20171025_xena_sp: Survival data. Source: <https://xenabrowser.net/datapages/?dataset=Survival_SupplementalTable_S1_20171025_xena_sp&host=https%3A%2F%2Fpancanatlas.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>.
+
+```{r}
+# 读取肿瘤注释文件
+# Read tumor annotation file
+rawAnno <- read.delim("merged_sample_quality_annotations.tsv",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+rawAnno$simple_barcode <- substr(rawAnno$aliquot_barcode,1,15)
+samAnno <- rawAnno[!duplicated(rawAnno$simple_barcode),c("cancer type", "simple_barcode")]
+samAnno <- samAnno[which(samAnno$`cancer type` != ""),]
+write.table(samAnno,"output_simple_sample_annotation.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+
+# 读取生存数据
+# Read survival data
+surv <- read.delim("Survival_SupplementalTable_S1_20171025_xena_sp", sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 快速读取表达谱数据并做数据预处理
+# Quickly read expression matrix and preprocess data
+expr <- fread("EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",sep = "\t",stringsAsFactors = F,check.names = F,header = T)
+expr <- as.data.frame(expr); rownames(expr) <- expr[,1]; expr <- expr[,-1]
+gene <- sapply(strsplit(rownames(expr),"|",fixed = T), "[",1)
+expr$gene <- gene
+expr <- expr[!duplicated(expr$gene),]
+rownames(expr) <- expr$gene; expr <- expr[,-ncol(expr)]
+
+# 对于这份泛癌数据，将略小于0的数值拉到0，否则不能取log（其他途径下载的泛癌数据可能不需要此操作）
+# For this pan-cancer dataset, values slightly less than 0 should be adjusted to 0; otherwise, taking the logarithm is not possible (pan-cancer data downloaded from other sources may not require this operation).
+expr[expr < 0] <- 0 
+
+colnames(expr) <- substr(colnames(expr),1,15)
+gc()
+
+# 设置感兴趣的基因
+# Set gene of interest
+geneOfInterest <- "PDIA3"
+if(!is.element(geneOfInterest, rownames(expr))) {
+  warning("The gene ", geneOfInterest," cannot be found!")
+} else {
+  message("The gene ", geneOfInterest," can be matched!")
+}
+
+# 去掉对于感兴趣基因存在NA值的样本
+# Remove samples with NA values for the gene of interest
+expr.sub <- expr[geneOfInterest, ]
+expr.sub <- as.data.frame(t(na.omit(t(expr.sub)))) 
+keepSam <- colnames(expr.sub)
+expr <- expr[geneOfInterest,keepSam] 
+rm(expr.sub); gc()
+
+# 确定肿瘤样本以及对应肿瘤类型
+# Identify tumor samples and their cancer types
+sam <- samAnno[which(samAnno$`cancer type` != "LAML"),"simple_barcode"] 
+comsam <- intersect(intersect(colnames(expr), sam), rownames(surv)) 
+tumsam <- comsam[substr(comsam,14,14) == "0"] 
+tumAnno <- samAnno[which(samAnno$simple_barcode %in% tumsam),] 
+tumAnno <- tumAnno[order(tumAnno$`cancer type`),]
+tumors <- unique(tumAnno$`cancer type`)
+
+# 合并表达和生存数据
+# Merge expression and survival data
+exprSurv <- cbind.data.frame(expr = log2(as.numeric(expr[geneOfInterest,comsam]) + 1),
+                             surv[comsam,c("OS","OS.time","DSS","DSS.time","DFI","DFI.time","PFI","PFI.time")])
+write.table(exprSurv, "output_combined dataframe with both gene expression and survival information.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# 根据感兴趣基因的连续值进行单变量Cox模型计算风险
+# Perform univariate Cox model analysis based on continuous values of genes of interest
+
+```{r}
+outTab.cox <- NULL
+for(i in tumors) {
+  sam <- tumAnno[which(tumAnno$`cancer type` == i),"simple_barcode"]
+  exprSurvSub <- exprSurv[sam,]
+  
+  ## OS
+  coxres <- summary(coxph(Surv(OS.time, OS) ~ expr, data = exprSurvSub))
+  outTab.cox <- rbind.data.frame(outTab.cox,
+                                 data.frame(tumor = i, 
+                                            event = "OS", 
+                                            beta = coxres$coefficients[1,1], 
+                                            hr = coxres$coefficients[1,2], 
+                                            lower = coxres$conf.int[1,3], 
+                                            upper = coxres$conf.int[1,4], 
+                                            p = coxres$coefficients[1,5], 
+                                            stringsAsFactors = F),
+                                 stringsAsFactors = F)
+  
+  ## DSS
+  coxres <- summary(coxph(Surv(DSS.time, DSS) ~ expr, data = exprSurvSub))
+  outTab.cox <- rbind.data.frame(outTab.cox,
+                                 data.frame(tumor = i,
+                                            event = "DSS",
+                                            beta = coxres$coefficients[1,1],
+                                            hr = coxres$coefficients[1,2],
+                                            lower = coxres$conf.int[1,3],
+                                            upper = coxres$conf.int[1,4],
+                                            p = coxres$coefficients[1,5],
+                                            stringsAsFactors = F),
+                                 stringsAsFactors = F)
+  
+  ## DFI
+  if(i %in% c("SKCM","THYM","UVM","GBM")) { 
+    # 前三个肿瘤没有对应的DFI数据，GBM只有3个样本有对应的DFI，也去除（和原文不符）
+    # The first three cancers lack DFI data, and GBM has only 3 samples with DFI (inconsistent with the original paper)  
+    outTab.cox <- rbind.data.frame(outTab.cox,
+                                   data.frame(tumor = i,
+                                              event = "DFI",
+                                              beta = NA,
+                                              hr = NA,
+                                              lower = NA,
+                                              upper = NA,
+                                              p = NA,
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+  } else {
+    coxres <- summary(coxph(Surv(DFI.time, DFI) ~ expr, data = exprSurvSub))
+    outTab.cox <- rbind.data.frame(outTab.cox,
+                                   data.frame(tumor = i,
+                                              event = "DFI",
+                                              beta = coxres$coefficients[1,1],
+                                              hr = coxres$coefficients[1,2],
+                                              lower = coxres$conf.int[1,3],
+                                              upper = coxres$conf.int[1,4],
+                                              p = coxres$coefficients[1,5],
+                                              stringsAsFactors = F),
+                                   stringsAsFactors = F)
+  }
+  
+  ## PFI
+  coxres <- summary(coxph(Surv(PFI.time, PFI) ~ expr, data = exprSurvSub))
+  outTab.cox <- rbind.data.frame(outTab.cox,
+                                 data.frame(tumor = i,
+                                            event = "PFI",
+                                            beta = coxres$coefficients[1,1],
+                                            hr = coxres$coefficients[1,2],
+                                            lower = coxres$conf.int[1,4],
+                                            upper = coxres$conf.int[1,4],
+                                            p = coxres$coefficients[1,5],
+                                            stringsAsFactors = F),
+                                 stringsAsFactors = F)
+}
+write.table(outTab.cox, file = "output_summary of cox result in pancancer.txt",sep = "\r",row.names = F,col.names = T,quote = F)
+```
+
+# 根据感兴趣基因的最佳cutoff做KM
+# Perform KM analysis based on the optimal cutoff of genes of interest
+
+有些肿瘤因为数据问题无法估计HR，不过不影响绘图。
+
+Some tumors cannot estimate HR due to data issues, but this does not affect plotting.
+
+```{r}
+minprop <- 0.2
+outTab.km <- NULL
+for(i in tumors) {
+  sam <- tumAnno[which(tumAnno$`cancer type` == i),"simple_barcode"]
+  exprSurvSub <- exprSurv[sam,]
+  
+  ## OS
+  bestcut <- surv_cutpoint(exprSurvSub, 
+                           time = "OS.time", 
+                           event = "OS", 
+                           variables = "expr", 
+                           
+                           #默认组内sample不能低于20%
+                           # Minimum sample proportion per group set to 20%
+                           minprop = minprop) 
+  
+  cutoff <- bestcut$cutpoint[1,1]
+  exprSurvSub$group <- factor(ifelse(exprSurvSub$expr > cutoff,"High","Low"), levels = c("Low","High"))
+  fitd <- survdiff(Surv(OS.time, OS) ~ group, data=exprSurvSub, na.action=na.exclude)
+  p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+  HR <- (fitd$obs[2]/fitd$exp[2])/(fitd$obs[1]/fitd$exp[1])
+  outTab.km <- rbind.data.frame(outTab.km,
+                                data.frame(tumor = i, 
+                                           event = "OS", 
+                                           hr = HR, 
+                                           lower = exp(log(HR) - qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                           upper = exp(log(HR) + qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                           p = p.val, 
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+  
+  ## DSS
+  bestcut <- surv_cutpoint(exprSurvSub, 
+                           time = "DSS.time", 
+                           event = "DSS", 
+                           variables = "expr", 
+                           
+                           #默认组内sample不能低于20%
+                           # Minimum sample proportion per group set to 20%
+                           minprop = minprop) 
+  
+  cutoff <- bestcut$cutpoint[1,1]
+  exprSurvSub$group <- factor(ifelse(exprSurvSub$expr > cutoff,"High","Low"), levels = c("High","Low"))
+  fitd <- survdiff(Surv(DSS.time, DSS) ~ group, data=exprSurvSub, na.action=na.exclude)
+  p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+  outTab.km <- rbind.data.frame(outTab.km,
+                                data.frame(tumor = i, 
+                                           event = "DSS", 
+                                           hr = (fitd$obs[2]/fitd$exp[2])/(fitd$obs[1]/fitd$exp[1]), 
+                                           lower = exp(log(HR) - qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])),
+                                           upper = exp(log(HR) + qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                           p = p.val, 
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+  
+  ## DFI
+  if(i %in% c("SKCM","THYM","UVM","GBM")) { 
+    # 前三个肿瘤没有对应的DFI数据，GBM只有3个样本有对应的DFI，也去除（和原文不符）
+    # First three tumor types lack DFI data; GBM has only 3 samples with DFI (inconsistent with original paper)
+    outTab.km <- rbind.data.frame(outTab.km,
+                                  data.frame(tumor = i,
+                                             event = "DFI",
+                                             hr = NA,
+                                             lower = NA,
+                                             upper = NA,
+                                             p = NA,
+                                             stringsAsFactors = F),
+                                  stringsAsFactors = F)
+  } else {
+    bestcut <- surv_cutpoint(exprSurvSub, 
+                             time = "DFI.time", 
+                             event = "DFI", 
+                             variables = "expr", 
+                             
+                             #默认组内sample不能低于20%
+                             # Minimum sample proportion per group set to 20%
+                             minprop = minprop) 
+    
+    cutoff <- bestcut$cutpoint[1,1]
+    exprSurvSub$group <- factor(ifelse(exprSurvSub$expr > cutoff,"High","Low"), levels = c("High","Low"))
+    fitd <- survdiff(Surv(DFI.time, DFI) ~ group, data=exprSurvSub, na.action=na.exclude)
+    p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+    outTab.km <- rbind.data.frame(outTab.km,
+                                  data.frame(tumor = i,
+                                             event = "DFI", 
+                                             hr = (fitd$obs[2]/fitd$exp[2])/(fitd$obs[1]/fitd$exp[1]), 
+                                             lower = exp(log(HR) - qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                             upper = exp(log(HR) + qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                             p = p.val, 
+                                             stringsAsFactors = F),
+                                  stringsAsFactors = F)
+  }
+  
+  ## PFI
+  bestcut <- surv_cutpoint(exprSurvSub, 
+                           time = "PFI.time", 
+                           event = "PFI", 
+                           variables = "expr", 
+                           
+                           #默认组内sample不能低于20%
+                           # Minimum sample proportion per group set to 20%
+                           minprop = minprop) 
+  
+  cutoff <- bestcut$cutpoint[1,1]
+  exprSurvSub$group <- factor(ifelse(exprSurvSub$expr > cutoff,"High","Low"), levels = c("High","Low"))
+  fitd <- survdiff(Surv(PFI.time, PFI) ~ group, data=exprSurvSub, na.action=na.exclude)
+  p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+  outTab.km <- rbind.data.frame(outTab.km,
+                                data.frame(tumor = i, 
+                                           event = "PFI",
+                                           hr = (fitd$obs[2]/fitd$exp[2])/(fitd$obs[1]/fitd$exp[1]), 
+                                           lower = exp(log(HR) - qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])), 
+                                           upper = exp(log(HR) + qnorm(0.975)*sqrt(1/fitd$exp[2]+1/fitd$exp[1])),
+                                           p = p.val, 
+                                           stringsAsFactors = F),
+                                stringsAsFactors = F)
+}
+write.table(outTab.km, file = "output_summary of km result in pancancer.txt",sep = "\r",row.names = F,col.names = T,quote = F)
+```
+
+# 开始画图
+# Plotting
+
+## 绘制热图
+## Generate Heatmap
+
+```{r}
+# 设置颜色
+# Set colors
+blue   <- "#A0CEE3"
+yellow <- "#EFEFBE"
+sea    <- "#37BCDF"
+green  <- "#71BC5D"
+cherry <- "#E5588C"
+red    <- "#E46A6B"
+purple <- "#8959A3"
+
+# 制作热图绘制数据
+# Prepare heatmap data
+hmInput <- NULL
+for (i in tumors) {
+  
+  cox.res <- outTab.cox[which(outTab.cox$tumor == i),]
+  km.res <- outTab.km[which(outTab.km$tumor == i),]
+  
+  cox.res$dirct <- ifelse(cox.res$hr > 1 & cox.res$p < 0.05, "Risky",
+                          ifelse(cox.res$hr < 1 & cox.res$p < 0.05, "Protective","Nonsense"))
+  km.res$dirct <- ifelse(km.res$hr > 1 & km.res$p < 0.05, "Risky",
+                         ifelse(km.res$hr < 1 & km.res$p < 0.05, "Protective","Nonsense"))
+  hmInput <- rbind.data.frame(hmInput,
+                              data.frame(OS.cox = cox.res[1,"dirct"],
+                                         OS.km = km.res[1,"dirct"],
+                                         DSS.cox = cox.res[2,"dirct"],
+                                         DSS.km = km.res[2,"dirct"],
+                                         DFI.cox = cox.res[3,"dirct"],
+                                         DFI.km = km.res[3,"dirct"],
+                                         PFI.cox = cox.res[4,"dirct"],
+                                         PFI.km = km.res[4,"dirct"],
+                                         row.names = i,
+                                         stringsAsFactors = F),
+                              stringsAsFactors = F)
+}
+hmInput[is.na(hmInput)] <- "N/A"
+write.table(hmInput, file = "output_summary of gene prognositicationin pancancer.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+# 注意：结果在某些肿瘤上有较大出入，可能的原因有：
+# 1. 泛癌表达谱使用不一致
+# 2. 最佳生存曲线cutoff的minprop选择不一致
+# 3. 对KM分析中HR的计算不一致，原作者可能依然采用Cox回归估计二分类下的HR
+# Note: Results show significant discrepancies in some tumors, possible reasons:  
+# 1. Inconsistent pan-cancer expression profiles used  
+# 2. Different minprop selections for optimal survival curve cutoff  
+# 3. Inconsistent HR calculation in KM analysis - original authors might still use Cox regression to estimate HR for binary classification
+
+# 修改热图数据
+# Modify heatmap data
+indata <- hmInput
+# 为了使得risky出现在图例的顶部，所以设置一个最小值0
+# Set to 0 to display "Risky" at top of legend  
+indata[indata == "Risky"] <- 0 
+# 根据原文，依次设置为1
+# Set to 1 following original paper 
+indata[indata == "Protective"] <- 1 
+# 根据原文，依次设置为2
+# Set to 2 following original paper 
+indata[indata == "N/A"] <- 2 
+# 根据原文，依次设置为3
+# Set to 3 following original paper 
+indata[indata == "Nonsense"] <- 3 
+
+# 构建列注释
+# Create column annotations
+annCol <- data.frame("Method" = rep(c("Cox","Log-rank"),4),
+                     "Survival Type" = rep(c("OS","DSS","DFI","PFI"), each = 2),
+                     check.names = F, 
+                     row.names = colnames(indata))
+annColors <- list("Method" = c("Cox" = blue, "Log-rank" = yellow),
+                  "Survival Type" = c("OS" = sea, "DSS" = green, "DFI" = cherry, "PFI" = purple))
+col_fun = circlize::colorRamp2(c(0, 1, 2, 3), c(red,green,"grey50","white"))
+
+# 绘制热图
+# Generate heatmap
+hm <- Heatmap(matrix = as.matrix(indata),
+              border = "black", 
+              rect_gp = gpar(col = "black"), 
+              name = "Prognostic role", 
+              cluster_rows = F, 
+              cluster_columns = F, 
+              col = c(red,green,"grey50","white"),
+              show_row_names = T, 
+              show_column_names = F, 
+              row_names_side = "left", 
+              top_annotation = HeatmapAnnotation(df = annCol,
+                                                 col = annColors,
+                                                 gp = gpar(col = "black"),
+                                                 border = TRUE),
+              width = grid::unit(8, "cm"),
+              height = grid::unit(15, "cm"),
+              heatmap_legend_param = list(at = c(0, 1, 2, 3), 
+                                          legend_gp = grid::gpar(fill = col_fun(c(0,1,2,3))),
+                                          labels = c("Risky", "Protective","N/A","Nonsense")))
+pdf("prognostic heatmap.pdf", width = 10,height = 10)
+draw(hm)
+invisible(dev.off())
+```
+
+![](prognostic heatmap.pdf)
+
+## 绘制基于OS的森林图
+## Generate forest plot based on OS
+
+```{r}
+fpInput <- outTab.cox[which(outTab.cox$event == "OS"),]
+hrtable <- fpInput[,c("tumor","event","beta","hr","lower","upper","p")]
+
+tabletext <- cbind(c("Cancers",hrtable$tumor),
+                   c("p value",ifelse(round(as.numeric(hrtable$p),3) < 0.001,"<0.001",round(as.numeric(hrtable$p),3))),
+                   c("HR (95L-95H)",paste0(round(as.numeric(hrtable$hr),3), " (",
+                                          round(as.numeric(hrtable$lower),3),"-",
+                                          round(as.numeric(hrtable$upper),3),")")))
+
+pdf("forestplot of os risk table in pancancer.pdf", width = 8, height = 8)
+forestplot(labeltext=tabletext,
+           mean=c(NA,as.numeric(hrtable$hr)),# HR
+           lower=c(NA,as.numeric(hrtable$lower)), 
+           upper=c(NA,as.numeric(hrtable$upper)),
+           graph.pos = 4,
+           graphwidth = unit(.3,"npc"),
+           fn.ci_norm="fpDrawDiamondCI",
+           col=fpColors(box="grey50", lines="grey50", zero = "black"),
+           boxsize=c(NA,ifelse(as.numeric(hrtable$p) < 0.05,0.8,0.4)),
+           lwd.ci=1,
+           ci.vertices.height = 0.1,ci.vertices=F,
+           zero=1,
+           lwd.zero=2,
+           xticks = c(0,1,2,4,8,13),
+           lwd.xaxis=2,
+           xlab="Hazard ratio",
+           hrzl_lines=list("1" = gpar(lwd=2, col="black"),
+                           "34" = gpar(lwd=2, col="black")),
+           txt_gp=fpTxtGp(label=gpar(cex=1),
+                          ticks=gpar(cex=0.85),
+                          xlab=gpar(cex=1),
+                          title=gpar(cex=1.2)),
+           lineheight = unit(.55,"cm"),
+           colgap = unit(0.4,"cm"),
+           mar=unit(rep(1.5, times = 4), "cm"),
+           new_page = F
+)
+invisible(dev.off())
+```
+
+![](forestplot of os risk table in pancancer.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
