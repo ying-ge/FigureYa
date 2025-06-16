@@ -1,0 +1,202 @@
+---
+title: "FigureYa313CircularPlot"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements description
+
+画出圆圈图。
+
+Create circular visualization plot.
+
+![](example.png)
+
+出自：<https://aacrjournals.org/cancerres/article/78/23/6575/543748/TIP-A-Web-Server-for-Resolving-Tumor>
+
+图2. 特定BRCA样本（TCGA-A2-A0ST-01A-12R-A084-07）的免疫表型可视化。
+C部分，六个环形图展示了该特定样本（红色指针）的抗癌免疫活性评分与TCGA BRCA数据库中所有肿瘤样本（外圈绿色点）和正常样本（内圈红色点）的对比结果。
+
+Source: <https://aacrjournals.org/cancerres/article/78/23/6575/543748/TIP-A-Web-Server-for-Resolving-Tumor>
+
+Figure 2. Visualization of immunophenotype for one specific BRCA sample, TCGA-A2-A0ST-01A-12R-A084-07. 
+C, Six circular plots show the comparison of activity scores of anticancer immunity for this specific sample (red pointer) with those for all tumor (green points in outer circle) and normal (red points in inner circle) samples from TCGA BRCA data.
+
+# 应用场景
+# Application scenarios
+
+对比两个群体的数值分布，无需一一对应，可以用散点图展示。
+
+我们在垂直坐标系中画过很多散点图<https://k.youshop10.com/PqTXapih>，用不同颜色或形状分组。这次画成圆圈，用不同圆圈来分组。
+
+Compare the numerical distributions between two groups without requiring one-to-one correspondence, which can be displayed using scatter plots.
+
+We have previously created many scatter plots in vertical coordinate systems <https://k.youshop10.com/PqTXapih>, using different colors or shapes for grouping. This time we will plot them as circles, using different circles for grouping.
+
+# 环境设置
+# Requirements Description
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(circlize)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.csv，包含四列，每行对应图中一个数据点。sector写为main即可，分组信息Group决定该数据点画在哪个圆圈上，数据点的实际值Value决定数据点在圆圈上的角度，y决定数据点与圆心的距离。
+
+easy_input.csv contains four columns, with each row corresponding to a data point in the figure. Set sector as "main". The grouping information Group determines which circle the data point is plotted on. The actual value Value determines the angle of the data point on the circle. y determines the distance of the data point from the center of the circle.
+
+```{r}
+# 加载模拟数据
+# Loading simulated data
+plot.data <- read.delim(file = "easy_input.txt",sep = "\t",row.names = NULL,header = T,check.names = F,stringsAsFactors = F)
+head(plot.data)
+```
+
+# 开始画图
+# Plotting
+
+```{r}
+# 设置参数
+# Parameter settings
+prop = 0.05 
+mark = 20   
+
+# 因子化分组变量 
+# Factorize group variable
+plot.data$Group <- factor(plot.data$Group, levels = c("Circle1", "Circle2"))
+
+# 生成绘图用数据
+# Prepare plotting data
+plot.region <- c(min(plot.data$Value), max(plot.data$Value))
+plot.region <- rbind(plot.region, (plot.region-min(plot.region))*prop)
+plot.data <- split(plot.data[, 1:3], plot.data$Group)
+
+# 开始绘图
+# Start Plotting
+## 调整起始角度，以保证上下对称
+## Adjust the starting angle to ensure top-bottom symmetry
+deg.adjust <- 360 * 0.5 * prop
+circos.par("start.degree" = 360-deg.adjust)
+circos.initialize(sectors = c("main", "spare"), xlim = plot.region)
+
+## 绘制第一环
+## Draw first ring
+# 绘制背景
+# Draw background
+draw.sector(deg.adjust, 360-deg.adjust,
+            rou1 = 0.99, rou2 = 0.79, clock.wise = FALSE,
+            col = "#FF000080", border = NA) 
+
+# 绘制数据点
+# Plot data points
+circos.track(sectors = plot.data[[1]]$sector, 
+             x = plot.data[[1]]$Value, 
+             y = plot.data[[1]]$y, panel.fun = function(x, y) {
+               circos.points(x, y, col = "deepskyblue3", bg = "deepskyblue", 
+                             pch = 21, cex = 1.0)
+             }, ylim = c(0, 1), bg.border = NA) 
+
+# 绘制中位数线
+# Draw median line
+circos.lines(rep(median(plot.data[[1]]$Value), 2), c(0, 1), 
+             sector.index = "main", track.index = 1, 
+             col = "#618895", lwd = 2) 
+
+## 绘制第二环
+## Draw second ring
+# 绘制背景
+# Draw background
+draw.sector(deg.adjust, 360-deg.adjust,
+            rou1 = 0.77, rou2 = 0.57, clock.wise = FALSE, 
+            col = "#B1CFC3", border = NA) 
+# 绘制数据点
+# Plot data points
+circos.track(sectors = plot.data[[1]]$sector, 
+             x = plot.data[[1]]$Value, 
+             y = plot.data[[1]]$y, panel.fun = function(x, y) {
+               circos.points(x, y, col = "firebrick3", bg = "firebrick1", 
+                             pch = 21, cex = 1.0)
+             }, ylim = c(0, 1), bg.border = NA) 
+
+# 绘制中位数线
+# Draw median line
+circos.lines(rep(median(plot.data[[2]]$Value), 2), c(0, 1), 
+             sector.index = "main", track.index = 2, 
+             col = "#618895", lwd = 2) 
+
+## 绘制坐标轴
+## Draw axis
+circos.xaxis(sector.index = "main", track.index = 1, h = "top", 
+             labels.facing = "clockwise") 
+
+## 绘制特定数值标注线
+## Draw specific value indicator
+deg.mark <- get.cell.meta.data(name = "cell.xlim", sector.index = "main")
+deg.range <- get.cell.meta.data(name = "xplot", sector.index = "main")
+deg.mark <- deg.range[1] + (mark-deg.mark[1])*diff(deg.range)/diff(deg.mark)
+draw.sector(deg.mark, deg.mark, rou1 = 1, rou2 = 0,
+            border = "#FF000080", lwd = 2)
+
+# 添加文字
+# Add text
+text(x = 0, y = 0, "Score: 20")
+
+# 清理环形布局
+# Clear circular layout
+circos.clear()
+
+# 输出PDF
+# Export PDF
+dev.copy2pdf(file = "Circular.pdf", width = 7, height = 7)
+```
+
+# 后期修改
+# Post-processing
+
+输出的pdf文件是矢量图，图中四边文字有遮挡，可以用Illustrator等矢量图编辑器打开，进行移动图形、放大画布、编辑文字等操作。
+
+The output PDF file is a vector graphic. If text at the four edges is obscured, you can open it in vector graphic editing software like Illustrator to perform operations such as moving graphics, enlarging the canvas, and editing text.
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
