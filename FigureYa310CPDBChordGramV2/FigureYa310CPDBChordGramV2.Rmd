@@ -1,0 +1,390 @@
+---
+title: "FigureYa310CPDBChordGramV2"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+以CellPhoneDB的结果文件作为输入，画出细胞沟通的弦图
+
+Using the CellPhoneDB result file as input, draw a chord diagram of cell communication.
+
+![](example.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S1535610822004998>
+
+图3. 细胞互作分析。
+(A) **LUAD与LUSC**中癌细胞对主要免疫细胞的互作关系环形图
+展示的是差异表达最显著的10种癌细胞配体。
+**红色**连线表示在LUAD中上调的互作，**蓝色**连线表示在LUSC中上调的互作。
+
+Source: <https://linkinghub.elsevier.com/retrieve/pii/S1535610822004998>
+
+Figure 3. Cellular crosstalk analysis.
+(A) Circos plot of the cellular crosstalk of cancer cells toward the major immune cells in **LUAD versus LUSC**. 
+Shown are the top 10 differentially expressed cancer cell ligands. 
+**Red** interactions are upregulated in LUAD, and **blue** interactions are upregulated in LUSC.
+
+# 应用场景
+# Application scenarios
+
+用cellphoneDB结果，对比展示**两组样本**的配体-受体差异。
+
+- 用本地CellPhoneDB分析配体-受体，用ggplot2画泡泡图（可参考FigureYa178receptorLigand <https://k.youshop10.com/YICoy-XB>）
+- 用cellchat分析对比**两组样本**的配体-受体差异（可参考FigureYa267scCellChat <https://k.youshop10.com/qruuYZow>）
+
+Using CellPhoneDB results to comparatively visualize ligand-receptor differences between **two sample groups**.
+
+- Perform local CellPhoneDB analysis of ligand-receptor pairs and use 
+ggplot2 to generate a bubble plot (reference: FigureYa178receptorLigand <https://k.youshop10.com/YICoy-XB>).
+- Use CellChat to analyze and compare ligand-receptor differences between **two sample groups** (reference: FigureYa267scCellChat <https://k.youshop10.com/qruuYZow>).
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+devtools::install_github("zktuong/ktplots")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(ktplots)
+library(SingleCellExperiment)
+library(reshape2)
+library(Seurat)
+library(circlize)
+library(igraph)
+library(ggraph)
+library(ggrepel)
+library(RColorBrewer)
+library(grid)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+自定义函数，用于两组之间的差异分析、画图
+
+Custom function for inter-group differential analysis and visualization
+
+```{r}
+limit <- function(vec, min, max){
+  vec[vec<min] = min
+  vec[vec>max] = max
+  return(vec)
+}
+
+# 细胞通讯弦图生成函数
+# Cell-cell communication chord diagram generator
+cpdb.chordgram <- function(seu, means, pvalues, 
+                           source.group, target.group,
+                           comparison, celltypes, 
+                           ident.1, ident.2,
+                           min.frac = 0.1, padj.cutoff = 0.05,
+                           return_df = F, cell.col = NULL){
+  
+  # 数据预处理：读取CellPhoneDB结果
+  # Data preprocessing: Load CellPhoneDB results
+  variable <- c("id_cp_interaction", "interacting_pair", "partner_a", "partner_b", 
+                "gene_a", "gene_b", "secreted", "receptor_a", "receptor_b", "annotation_strategy", "is_integrin")
+  mean.df <- melt(means, id.vars = variable, variable.name = "pair", value.name = "mean")
+  pvalues.df <- melt(pvalues, id.vars = variable, variable.name = "pair", value.name = "pval")
+  
+  # 对每种细胞类型进行差异分析
+  # Perform DE analysis for each cell type
+  deg.df <- lapply(unique(seu@meta.data[[celltypes]]), function(celltype){
+    sub.seu <- subset(seu, seurat_annotations == celltype)
+    group_vector <- as.character(sub.seu@meta.data[[comparison]])
+    group_vector <- factor(group_vector, levels = c(ident.2, ident.1))
+    Idents(sub.seu) <- group_vector
+    deg <- FindMarkers(sub.seu, ident.1 = ident.1, ident.2 = ident.2, min.pct = min.frac, verbose = F)
+    deg$celltype <- celltype
+    deg$gene <- rownames(deg)
+    return(deg)
+  })
+  deg.df <- do.call(rbind, deg.df)
+  deg.df <- deg.df[deg.df$p_val_adj<padj.cutoff, ]
+  
+  # 合并CellPhoneDB结果与差异分析结果
+  # Merge CellPhoneDB and DE results
+  cpdb.df <- cbind(mean.df, "pval" = pvalues.df$pval)
+  cpdb.df$pair <- as.factor(cpdb.df$pair)
+  cpdb.df$source <- gsub("(.+)\\|(.+)", "\\1", cpdb.df$pair)
+  cpdb.df$target <- gsub("(.+)\\|(.+)", "\\2", cpdb.df$pair)
+  
+  ligand.df <- deg.df[match(paste0(cpdb.df$gene_a, "_", cpdb.df$source),
+                            paste0(deg.df$gene, "_", deg.df$celltype)),
+                      c("pct.1", "avg_log2FC", "p_val_adj")]
+  colnames(ligand.df) <- c("L_pct", "L_logFC", "L_pval")
+  receptor.df <- deg.df[match(paste0(cpdb.df$gene_b, "_", cpdb.df$target),
+                              paste0(deg.df$gene, "_", deg.df$celltype)),
+                        c("pct.1", "avg_log2FC", "p_val_adj")]
+  colnames(receptor.df) <- c("R_pct", "R_logFC", "R_pval")
+  
+  cpdb.df <- cbind(cpdb.df, ligand.df, receptor.df)
+  # cpdb.df <- subset(cpdb.df, !is.na(L_pval) & !is.na(R_pval) & pval < 0.05)
+  
+  # 数据过滤：保留配体显著且交互显著的记录
+  # Filter: keep significant ligands and interactions
+  cpdb.df <- subset(cpdb.df, !is.na(L_pval) & pval < 0.05) 
+  
+  # 绘图数据准备
+  # Plot data preparation
+  plot.data <- data.frame(
+    "ligand" = cpdb.df$gene_a, "receptor" = cpdb.df$gene_b,
+    "source" = cpdb.df$source,  "target" = cpdb.df$target,
+    "logpadj" = -log(cpdb.df$L_pval), "logFC" = cpdb.df$L_logFC,
+    "L_Fraction" = cpdb.df$L_pct, "R_Fraction" = cpdb.df$R_pct
+  )
+  
+  plot.data$from <- paste0(plot.data$ligand, "_", plot.data$source)
+  plot.data$to <- paste0(plot.data$receptor, "_", plot.data$target)
+  plot.data$logFC <- limit(plot.data$logFC, min = -2, max = 2)
+  plot.data$logpadj <- limit(plot.data$logpadj, min = 10, max = 20)
+  # plot.data <- subset(plot.data, L_Fraction>min.frac & R_Fraction>min.frac, )
+  
+  # 仅保留配体表达达标的
+  # Keep only ligands meeting fraction threshold
+  plot.data <- subset(plot.data, L_Fraction>min.frac, ) 
+  
+  if (!is.null(source.group)) plot.data <- subset(plot.data, source %in% source.group)
+  if (!is.null(target.group)) plot.data <- subset(plot.data, target %in% target.group)
+  
+  if (return_df == T){
+    return(plot.data)
+  }else{
+    
+    # 可视化数据准备
+    # Visualization data preparation
+    vertices <- data.frame(
+      name = c(plot.data$from, plot.data$to),
+      celltype = c(plot.data$source, plot.data$target),
+      type = rep(c("ligand", "receptor"), each = nrow(plot.data)),
+      frac = c(plot.data$L_Fraction, plot.data$R_Fraction),
+      label = c(plot.data$ligand, plot.data$receptor),
+      logpadj = c(plot.data$logpadj, plot.data$logpadj),
+      logFC = c(plot.data$logFC, plot.data$logFC)
+    )
+    
+    # 去重处理
+    # Remove duplicates
+    vertices <- vertices[!duplicated(vertices$name), ]
+    vertices$cellident <- paste0(vertices$celltype, "_", vertices$type)
+    
+    # 构建层级结构顶点数据
+    # Build hierarchical vertex data
+    vertices.head <- data.frame(matrix(ncol = ncol(vertices), 
+                                       nrow = length(unique(c(vertices$celltype, vertices$cellident)))+1))
+    colnames(vertices.head) <- colnames(vertices)
+    vertices.head$name <- c("root", unique(vertices$celltype), unique(vertices$cellident))
+    vertices <- rbind(vertices.head[, colnames(vertices)], vertices)
+    
+    # 边列表构建
+    # Edge list construction
+    edgelist <- rbind(
+      data.frame("from" = paste0(plot.data$source, "_ligand"), "to" = plot.data$from),
+      data.frame("from" = paste0(plot.data$target, "_receptor"), "to" = plot.data$to)
+    )
+    
+    # 添加层级结构边
+    # Add hierarchical edges
+    edgelist.head <- data.frame("to" = unique(na.omit(vertices$cellident)))
+    edgelist.head$from <- gsub("_receptor|_ligand", "", edgelist.head$to)
+    edgelist.head <- rbind(edgelist.head, data.frame("from" = "root", "to" = unique(na.omit(vertices$celltype))))
+    edgelist.head[, c("logFC", "logpadj")] = NA
+    edgelist <- rbind(edgelist.head[, colnames(edgelist)], edgelist)
+    
+    # 构建igraph对象
+    # Create igraph object
+    mygraph <- graph_from_data_frame(d = edgelist, directed = T, vertices=vertices)
+    d <- igraph::as_data_frame(mygraph, "both")
+    from  <-  match(plot.data$from, vertices$name)
+    to  <-  match(plot.data$to, vertices$name)
+    e.fun <- get_con(from = from, to = to)
+    e.df <- e.fun(create_layout(mygraph, layout = "dendrogram"))
+    e.df$logpadj[is.na(e.df$logpadj)] <- 0
+    
+    if (is.null(cell.col)){
+      cell = intersect(unique(seu@meta.data[[celltypes]]), vertices$celltype)
+      cell.col <- setNames(object = brewer.pal(length(cell), "Set3"),
+                           nm = cell)
+    }
+    
+    # 图形绘制
+    # Plot generation
+    g <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
+      geom_conn_bundle(data = get_con(from = from, to = to),
+                       aes(colour = logFC), width = 2, tension = .5,
+                       arrow = arrow(length = unit((e.df$logpadj)*0.2, "mm"))) +
+      geom_node_point(aes(size = frac, filter = leaf, color = celltype, shape = type)) + 
+      geom_text_repel(aes(x = x, y = y, label = label), 
+                      segment.square = TRUE, segment.inflect = TRUE, 
+                      segment.size = 0.2, force = 0.5, size = 3, 
+                      force_pull = 0) +
+      scale_edge_colour_gradientn(colors = c("#3E52C5", "#FFFFFF", "#B91129"), limits = c(-2, 2)) + 
+      scale_shape_manual(values = c("ligand" = 1, "receptor" = 19)) +  
+      scale_color_manual(values = cell.col) +         
+      theme_void()
+  }
+  return(g)
+}
+```
+
+# 输入文件的获得
+# Obtaining Input Files
+
+先运行cellphoneDB，然后以cellphoneDB的结果文件作为输入画图。
+
+ifnb.rds，A Seurat object。可以从语雀下载：<https://www.yuque.com/figureya/figureyaplus/easyinput/>
+
+First run CellPhoneDB, then use its output files as input for plotting
+
+ifnb.rds is a Seurat object. Can be downloaded from Yuque: <https://www.yuque.com/figureya/figureyaplus/easyinput/>
+
+```{r}
+# 准备cellphoneDB所需表达数据
+# Preparing expression data for CellPhoneDB
+seu <- readRDS("ifnb.rds")
+write.table(as.matrix(seu@assays$RNA@data), 'cellphonedb_count.txt', sep='\t', quote=F)
+
+meta_data <- cbind(colnames(seu), as.character(seu$seurat_annotations))
+meta_data <- as.matrix(meta_data)
+write.table(meta_data, 'cellphonedb_meta.txt', sep='\t', quote=F, row.names=F)
+```
+
+CellPhoneDB需要在终端（Linux、MAC系统）安装和运行。Windows用户用wsl<https://docs.microsoft.com/en-us/windows/wsl/install-win10>
+
+安装CellPhoneDB，参考<https://github.com/Teichlab/cellphonedb>
+
+CellPhoneDB needs to be installed and run on the terminal (Linux, MAC system). Windows users with WSL<https://docs.microsoft.com/en-us/windows/wsl/install-win10>
+
+Install CellPhoneDB, reference<https://github.com/Teichlab/cellphonedb>
+
+```bash
+# 创建虚拟环境
+# Create virtual environment
+python3 -m venv cpdb-venv
+
+# 激活环境 
+# Activate environment
+source cpdb-venv/bin/activate
+
+# 安装CellPhoneDB
+# Install CellPhoneDB
+pip install cellphonedb
+
+# 运行cellphoneDB，细胞信息为细胞类型
+# Run cellphoneDB, and the cell information is the cell type
+cellphonedb method statistical_analysis  cellphonedb_meta.txt  cellphonedb_count.txt  --counts-data=gene_name
+```
+
+运行完，会在当前文件夹下产生一个'out'文件夹，里面有四个文件means.txt、pvalues.txt、significant_means.txt、deconvoluted.txt
+
+'out'文件夹里的是cellphoneDB的运行结果文件。
+
+After execution, an 'out' folder will be created containing four files: means.txt, pvalues.txt, significant_means.txt, deconvoluted.txt
+
+The 'out' folder contains CellPhoneDB output files
+
+# 读取cellphoneDB运行结果
+# Loading CellPhoneDB results
+
+```{r}
+# 读取cellphoneDB运行结果
+# Read CellPhoneDB output files
+means <- read.delim('out/means.txt', check.names = FALSE)
+pvalues <- read.delim('out/pvalues.txt', check.names = FALSE)
+deconvoluted <- read.delim('out/deconvoluted.txt', check.names = FALSE)
+
+# 查看通过筛选的相互作用
+# View filtered interactions
+plot.data <- cpdb.chordgram(seu = seu, means = means, pvalues = pvalues,
+                            source.group = NULL, target.group = NULL,  
+                            comparison = "stim", celltypes = "seurat_annotations", 
+                            ident.1 = "STIM", ident.2 = "CTRL",       
+                            return_df = T)   
+
+# 筛选需要展示的相互作用对
+# Filter interaction pairs for visualization
+table(plot.data$source, plot.data$target)
+```
+
+# 差异分析并画图
+# Differential analysis and visualization
+
+```{r}
+# 指定细胞类型对应的颜色
+# Define colors for cell types
+node.color <- c("CD4 Memory T" = "#86bc86", 
+                "CD4 Naive T" = "#B07aa1",
+                "CD8 T" = "#ff7f0e", 
+                "CD14 Mono" = "#bcbd22",
+                "CD16 Mono" = "#17becf")
+
+# 箭头大小表示差异基因的padj（大小为logpadj*0.2mm）
+# Arrow size represents adjusted p-value of differentially expressed genes (size = logpadj*0.2mm)
+cpdb.chordgram(seu = seu, means = means, pvalues = pvalues,     
+               source.group = c("CD16 Mono"),  
+               target.group = c("CD4 Memory T", "CD4 Naive T", "CD8 T", "CD14 Mono"),
+               comparison = "stim", celltypes = "seurat_annotations", 
+               ident.1 = "STIM", ident.2 = "CTRL", 
+               cell.col = node.color)  
+
+# 保存图像
+# Save the plot
+ggsave("cpdb.chordgram.pdf", width = 10, height = 9)
+
+# 注意：箭头大小需要手动添加图例，箭头的大小对应着配体基因在两组之间的差异分析矫正后p值(logpadj)，可参考以下箭头大小：
+# Note: Arrow legend needs manual addition. Arrow size corresponds to adj.p-value of ligand genes (logpadj). Example arrow size reference:
+# grid.lines(x = unit(c(0.42, 0.74), "npc"),
+#            y = unit(c(0.8, 0.8), "npc"),
+#            gp = gpar(fill="black", lwd = 2),
+#            arrow = arrow(length = unit(plot.data$logpadj[7], "mm")))
+```
+
+> 注意：图中有些节点没有画圈，是因为采用例文的方式，针对ligand进行了剔除。
+
+- 第136行，位于“自定义函数”，针对ligand进行了剔除；
+- 如果不想剔除，就删掉第136行；
+- 如果想针对受体、配体都剔除，就改用上面的第135行。
+
+> Note: Some nodes appear without circles in the plot because the example workflow specifically filters out ligands.
+
+- Line 136 (in the custom function) implements this ligand-specific filtering
+- To disable filtering, simply delete line 136
+- To apply filtering to both receptors and ligands, use the commented alternative on line 135 instead
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
