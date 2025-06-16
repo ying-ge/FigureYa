@@ -1,0 +1,218 @@
+---
+title: "FigureYa284pairwiseLogrank"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+希望画出文章里面Figure2的a。
+
+We hope to draw a in Figure2 of the article.
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41586-019-1906-8>
+
+图2 | SICs和B细胞对STS患者生存期的预测价值
+b，多变量Cox比例风险回归分析结果，展示所有纳入分析的变量。各变量的参照水平均为首个分组。灰色条形表示P>0.05；绿色和红色条形分别表示该变量在多变量模型中与预后呈显著正相关和负相关。误差线代表95%置信区间。FNCLCC为法国国家抗癌中心联盟的缩写。
+
+Source: <https://www.nature.com/articles/s41586-019-1906-8>
+
+Fig. 2 | SICs and B cells are predictive of the survival of patients with STS. 
+b, Multivariate Cox proportional regression outcome, with all included variables represented. For each variable, the reference level is the first one. A grey bar indicates P > 0.05; and variables indicated by green and red bars are positively and negatively, respectively, significantly associated with prognosis in this multivariate model. Error bars represent the 95% confidence interval. FNCLCC, Fédération Nationale des Centres de Lutte Contrele Cancer.
+
+# 应用场景
+# Application Scenario
+
+对3组及以上的亚组进行生存分析，并打印配对比较的统计表格。
+
+参考：MOVICS包中compSurv()函数：<https://github.com/xlucpu/MOVICS/blob/master/R/compSurv.R>
+
+Survival analysis for 3+ subgroups with pairwise comparison statistics table.
+
+Reference: compSurv() function from MOVICS package <https://github.com/xlucpu/MOVICS/blob/master/R/compSurv.R>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(survival)
+library(survminer)
+library(RColorBrewer)
+library(tibble)
+library(ggpp)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.csv，生存和分组信息，这里是乳腺癌数据。
+
+easy_input.csv containing survival and grouping information (breast cancer data).
+
+```{r}
+# 加载示例数据
+# Load example data
+dat <- read.table("easy_input.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+```
+
+# 生存分析
+# Survival Analysis
+
+```{r}
+# 仿照原文将PAM50分型按照ABCDE标记
+# Label PAM50 subtypes as A-E following the paper
+dat$group <- sapply(dat$PAM50,function(x) {
+  switch(x, 
+         "Basal"  = "A", 
+         "Her2"   = "B", 
+         "LumA"   = "C", 
+         "LumB"   = "D", 
+         "Normal" = "E")}) 
+
+# 将生存时间转换为月份
+# Convert survival time to months
+dat$OS.time <- dat$OS.time * 12 
+
+# 生存分析
+# Survival analysis
+fitd <- survdiff(Surv(OS.time, OS) ~ group,
+                 data      = dat,
+                 na.action = na.exclude)
+p.val <- 1 - pchisq(fitd$chisq, length(fitd$n) - 1)
+
+# 拟合生存曲线
+# Fit survival curves
+fit <- survfit(Surv(OS.time, OS)~ group,
+               data      = dat,
+               type      = "kaplan-meier",
+               error     = "greenwood",
+               conf.type = "plain",
+               na.action = na.exclude)
+
+# 配对生存分析
+# Pairwise survival analysis
+ps <- pairwise_survdiff(Surv(OS.time, OS)~ group,
+                        data            = dat,
+                        p.adjust.method = "none") 
+```
+
+# 开始画图
+# Start Plotting
+```{r fig.width=6, fig.height=8}
+# 设置颜色
+# Set colors
+mycol <- brewer.pal(n = 10, "Paired")[c(2,4,6,8,10)]
+
+# 绘制基础图形
+# Draw the basic graphics
+
+## 隐藏类标记
+## Remove "group=" prefix
+names(fit$strata) <- gsub("group=", "", names(fit$strata))
+
+## 生存曲线图
+## Survival curve plot
+p <- ggsurvplot(fit               = fit,
+                # 不绘制置信区间 
+                # No confidence intervals
+                conf.int          = FALSE, 
+                # 生存风险表 
+                #Show risk table
+                risk.table        = TRUE, 
+                risk.table.col    = "strata",
+                # KM曲线颜色
+                # KM curve colors
+                palette           = mycol, 
+                data              = dat,
+                # 时间轴，一般考虑5年（原文）或者10年长度
+                # Time axis (5-10 year range)
+                xlim              = c(0,120), 
+                size              = 1,
+                # 时间轴的刻度（每年）
+                # Tick marks (annual)
+                break.time.by     = 12, 
+                legend.title      = "",
+                xlab              = "Time (months)",
+                ylab              = "Overall survival",
+                risk.table.y.text = FALSE,
+                # 风险表的高度
+                # Risk table height
+                tables.height     = 0.3) 
+p
+
+## 添加overall p value
+## Add overall p-value
+p.lab <- paste0("log-rank test P",
+                ifelse(p.val < 0.001, " < 0.001", 
+                       paste0(" = ",round(p.val, 3))))
+
+p$plot <- p$plot + annotate("text",
+                            x = 0, y = 0.55, 
+                            hjust = 0,
+                            fontface = 4,
+                            label = p.lab)
+p
+
+## 添加配对表格
+## Add pairwise comparison table
+addTab <- as.data.frame(as.matrix(ifelse(round(ps$p.value, 3) < 0.001, "<0.001",
+                                         round(ps$p.value, 3))))
+addTab[is.na(addTab)] <- "-"
+df <- tibble(x = 0, y = 0, tb = list(addTab))
+p$plot <- p$plot + 
+  geom_table(data = df, 
+             aes(x = x, y = y, label = tb), 
+             table.rownames = TRUE)
+p
+
+# 输出图像
+# Save plot
+pdf.options(reset = TRUE, onefile = FALSE)
+pdf("km curve with pairwise logrank test.pdf", width = 4.5, height = 6)
+print(p)
+dev.off()
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
