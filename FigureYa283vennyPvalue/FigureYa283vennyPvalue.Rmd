@@ -1,0 +1,168 @@
+---
+title: "FigureYa283vennyPvalue"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+主要是不知道这个韦恩图的p值是怎么实现的（exact test of multiset intersections）。
+
+The P value below the Venn diagram is associated with the intersection (exact test of multiset intersections).
+
+![](example.png)
+
+出自<https://www.nature.com/articles/s41588-022-01047-6>
+
+图1 | 体内外三阴性乳腺癌中基底态持久细胞群的鉴定。
+d. 图展示了三种PDX模型持久细胞中激活通路的交集情况（左），数据来源于MSicDB数据库的c2_curated（乳腺/乳房相关通路）和c7_Hallmark（特征基因集）两个分类。维恩图下方的P值代表该交集具有统计学显著性（基于多重集交集的精确检验）。条形图（右）显示了持久细胞中激活程度最高的五个通路（每个分类各选前五），横坐标对应PDX_95模型的-log10 q值。
+
+Source: <https://www.nature.com/articles/s41588-022-01047-6>
+
+Fig. 1 | identification of a pool of basal persister cells in TNBC in vivo and in vitro.
+d, Venn diagram displaying the intersection of pathways activated
+in persister cells from the three PDX models, among MSigDB c2_curated Breast/Mammary and c7_Hallmark pathways (left). The P value below the
+Venn diagram is associated with the intersection (exact test of multiset intersections). Barplot displaying the top five pathways (for each category) activated in persister cells (right). The x axis corresponds to –log10 q-values for the model PDX_95. 
+
+# 应用场景
+# Application Scenario
+
+韦恩图及p值计算（基于多个数据集交集精确检验，Exact test of multiset intersect）
+
+Venn diagram and p-value calculation (exact test of multiset intersections)
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+# 加载韦恩图画图软件包“VennDiagram”
+# For drawing Venn diagrams
+library(VennDiagram)
+
+# 加载可求多个交集精确检验P值的软件包
+# For calculating exact p-values of multiset intersections
+library(SuperExactTest) 
+
+# 显示英文报错信息
+# Display English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character conversion to factor
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+easy_input.txt，每个数据集为一列。这里以3个为例，可以有更多个数据集。
+
+easy_input.txt, each dataset as a column. Here we use 3 as example, can have more datasets.
+
+```{r}
+# 读入测试数据 (这里为了简单演示，由26个英文字母生成三个数据集)
+# Read test data (here using 26 letters to generate 3 datasets for demonstration)
+dat <- read.table("easy_input.txt",sep = "\t", header = T, stringsAsFactors = F,check.names = F) 
+
+# 转化为列表数据类型
+# Convert to list data type
+dat <- as.list(dat) 
+n.bk <- length(unique(unlist(dat)))
+```
+
+# 计算p value
+# Calculate p-value
+
+输出多个数据集重叠显著P值，基于软件包“SuperExactTest”中MSET函数: Calculate FE and significance of intersection among multiple sets.
+
+参考文献 Wang, M., Zhao, Y., & Zhang, B. (2015). Efficient test and visualization of multi-set intersections. Scientific reports, 5(1), 1-12.
+
+Calculate p-value for multiple dataset overlaps using MSET function from "SuperExactTest" package.
+
+Reference: Wang, M., Zhao, Y., & Zhang, B. (2015). Efficient test and visualization of multi-set intersections. Scientific reports, 5(1), 1-12.
+
+```{r}
+# x为定义的列表数据。n为背景群体数量，如基因总数，或这里的总的英文字母数26。lower.tail=FALSE表示计算上侧拖尾P值(统计量大于一个观察到的值概率)，即这里要计算的多个数据集重叠显著P值。
+# x is the defined list data. n is the background population size, such as total number of genes, or here the total number of English letters (26). lower.tail=FALSE means calculating the upper tail p-value (probability that the statistic is greater than an observed value), which is the significant overlap p-value we want to calculate for multiple datasets.
+mset.res <- MSET(x = dat, 
+                 n = 26, 
+                 lower.tail = FALSE) 
+p.value <- mset.res$p.value
+
+# 打印pvalue
+# Print p-value
+p.value
+```
+
+# 画venn图
+# Draw Venn diagram
+
+个人比较推荐采用在线工具绘制scale后的韦恩图，方便快捷可编辑，可尝试以下链接：
+<http://bioinformatics.psb.ugent.be/webtools/Venn/>
+<http://bioinfogp.cnb.csic.es/tools/venny/index.html>
+
+这里用R画，用的是VennDiagram包。
+还可以用ggVennDiagram包，标注各区域百分比，并且按百分比填充颜色，可参考<https://www.yuque.com/figureya/figureyaplus/figureya112p>。
+如果有>=5个数据集，可尝试eulerr<https://cran.r-project.org/web/packages/eulerr/vignettes/venn-diagrams.html>或nVennR包<https://cran.r-project.org/web/packages/nVennR/vignettes/nVennR.html>
+
+Personally recommend using online tools for scaled Venn diagrams, easy and editable:
+<http://bioinformatics.psb.ugent.be/webtools/Venn/>
+<http://bioinfogp.cnb.csic.es/tools/venny/index.html>
+
+Here we use R with VennDiagram package. 
+Can also use ggVennDiagram package to show percentages and color by percentage, see<https://www.yuque.com/figureya/figureyaplus/figureya112p>.
+For >=5 datasets, try eulerr<https://cran.r-project.org/web/packages/eulerr/vignettes/venn-diagrams.html> or nVennR<https://cran.r-project.org/web/packages/nVennR/vignettes/nVennR.html>
+
+```{r}
+# 创建韦恩图对象
+# Create Venn diagram object 
+venn <- venn.diagram(x = dat, 
+                     filename = NULL, 
+                     fill = c('red','steelblue','yellow'))
+
+# 初始化新图形页面
+# Initialize new graphics page 
+grid.newpage()
+
+# 渲染韦恩图
+# Render the Venn diagram  
+grid.draw(venn)
+
+# 导出PDF文件（5x5英寸）
+# Export to PDF (5x5 inches) 
+dev.copy2pdf(file = "venny.pdf", width = 5, height = 5)
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
