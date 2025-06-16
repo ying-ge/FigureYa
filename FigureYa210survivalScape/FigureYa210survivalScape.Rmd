@@ -1,0 +1,380 @@
+---
+title: "FigureYa210survivalScape"
+author: "Xiaofan Lu"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+用survdiff复现文章里的图，把所有基因的HR、pvalue输出到文件。
+
+# Requirement Description
+
+Use survdiff to reproduce the graph in the article, and output the HR and pvalue of all genes to a file.
+
+![](example.png)
+
+出自<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-019-1066-3>
+from<https://molecular-cancer.biomedcentral.com/articles/10.1186/s12943-019-1066-3>
+
+Fig. 3 Clinical relevance of m6A regulators across cancer types. a Summary of the correlation between expression of m6A regulators and patient survival. **Red** represents a higher expression of m6A regulator associated with **worse survival**, and **blue** represents an association with **better survival**. Only p values < 0.05 are shown. 
+
+基于这一结果，下一步的做法：
+
+- 例文分析每个m6A基因在pancancer和GEO多个数据集中的hazard ratios，画出森林图Fig. 3b The distribution of hazard ratios across different cancer types. 可参考FigureYa66单因素cox。
+- 筛选获得显著影响生存的基因/癌症，然后批量画生存曲线，可参考FigureYa35batch_bestSeparation
+
+我们还复现过这篇文章的Fig. 2A，用`FigureYa199crosslink`带你实现连线自由。
+
+Based on these results, the next steps are as follows:
+
+-Analyze each m6A gene by calculating hazard ratios across pan-cancer and multiple GEO datasets, then generate a forest plot (Fig. 3b: The distribution of hazard ratios across different cancer types). Refer to FigureYa66 single Cox for implementation.
+
+-Screen for genes/cancers with significant survival impact, then batch-plot survival curves. Refer to FigureYa35batch_bestSeparation for guidance.
+
+We have also reproduced Fig. 2A from this paper—use FigureYa199crosslink to achieve flexible linkage visualization.
+
+# 应用场景
+
+场景一：像例文那样，用TCGA-pancancer表达数据计算某个基因集的survival landscape。
+
+场景二：批量筛选。或许你可以计算基因组上所有基因的survival landscape，筛选出genes associated with the overall survival of patients (worse/better survival) in at least one cancer type或你关心的几种癌症或所有癌症。
+
+这里提供cox和survdiff（logrank，中位数区分高低组）两种方式：
+
+- 方法一：（推荐）用cox来说明protective和risky是比较合理的做法。
+- 方法二：（需求者提出的）survdiff的logrank，对于输入FPKM和TPM都可以用。
+
+结果的可视化。例文用红蓝白表示风险、保护和不显著。或许你想用颜色的深浅来展示具体的数值，或者用形状和颜色同时展示HR和pvalue，可参考的FigureYa97correlation画法。
+
+# Application Scenarios
+
+Scenario 1: Calculate the survival landscape of a gene set using TCGA-pancancer expression data as in the example.
+
+Scenario 2: Batch filtering. Perhaps you can calculate the survival landscape of all genes on the genome and screen out genes associated with the overall survival of patients (worse/better survival) in at least one cancer type or a few or all cancers that you care about.
+
+There are two ways to use cox and survdiff (logrank, median distinguishes between high and low groups):
+
+- Method 1: (Recommended) It is reasonable to use COX to illustrate that Protective and Risky are used.
+- Method 2: The logrank of survdiff (proposed by the demander) can be used for both FPKM and TPM.
+
+Visualization of results. Examples are written in red, blue, and white for risk, protection, and non-significant. Maybe you want to use the shade of color to show specific values, or use shapes and colors to show HR and pvalue at the same time, you can refer to FigureYa97correlation.
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Use the domestic mirror installation package
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+load package
+
+```{r}
+library(data.table)
+library(survival)
+library(pheatmap)
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # error messages are displayed in English
+options(stringsAsFactors = FALSE) #禁止chr转成factor # chr is not allowed to be converted to factor
+```
+
+# 输入文件的获得
+
+需要表达矩阵和生存数据，如果你已经准备好easy_input_gene.txt、easy_input_expr.csv和easy_input_surv.csv文件，就可以跳过这步，直接进入“输入文件”。
+
+- easy_input_gene.txt，例文中的m6A基因，用到`Symbol`列，将提取这些基因的表达矩阵。
+
+- tcga_RSEM_gene_tpm和gencode.v23.annotation.gene.probemap，表达矩阵和Gene mapping，跟FigureYa208FPI的一样，微云链接：<https://share.weiyun.com/c8GQyxR4>。**建议自己动手，从xena网站下载**，下载方式：
+
+  - 这里跟FigureYa55panCancer_violin保持一致，从[XENA](https://xenabrowser.net/datapages/)下载UCSC Toil RNA-seq Recompute TPM：[TCGA Pan-Cancer (PANCAN) (41 datasets)](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)里的[TOIL RSEM tpm (n=10,535) UCSC Toil RNA-seq Recompute](https://toil.xenahubs.net/download/tcga_rsem_isoform_tpm.gz)，[Gene Mapping](https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.transcript.probemap)
+
+  - 或者下载GDC pipeline的FPKM-UQ：[GDC Pan-Cancer (PANCAN) (17 datasets)](https://xenabrowser.net/datapages/?cohort=GDC%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443) 里的[HTSeq - FPKM-UQ (n=11,768) GDC Hub](https://gdc.xenahubs.net/download/GDC-PANCAN.htseq_fpkm-uq.tsv.gz)，[Gene Mapping](https://gdc.xenahubs.net/download/gencode.v22.annotation.gene.probeMap)
+
+- pancancerSurvivalData.txt，样本注释及生存信息，从[XENA](https://xenabrowser.net/datapages/)下载后整理而成。
+
+  - 生存信息的下载方式：[Curated clinical data (n=12,591)](https://xenabrowser.net/datapages/?dataset=Survival_SupplementalTable_S1_20171025_xena_sp&host=https%3A%2F%2Fpancanatlas.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)里的[Curated clinical data](https://pancanatlas.xenahubs.net/download/Survival_SupplementalTable_S1_20171025_xena_sp.gz)
+
+  - 样本信息的下载方式：[TCGA Pan-Cancer (PANCAN) (41 datasets) phenotype](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)里的[sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub](https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz)。
+
+# Acquisition of input files
+
+Matrix and survival data need to be expressed, and if you already have easy_input_gene.txt, easy_input_expr.csv, and easy_input_surv.csv files ready, you can skip this step and go straight to the "Input File".
+
+- easy_input_gene.txt, the m6A gene in the example is used in the 'Symbol' column to extract the expression matrix of these genes.
+
+- tcga_RSEM_gene_tpm and gencode.v23.annotation.gene.probemap, expression matrix and gene mapping, the same as FigureYa208FPI, microcloud link: <https://share.weiyun.com/c8GQyxR4>。 **It is recommended to do it yourself, download it from the Xena website**, download method:
+
+- Consistent with FigureYa55panCancer_violin here, download UCSC Toil RNA-seq Recompute TPM from [XENA](https://xenabrowser.net/datapages/): [TCGA Pan-Cancer (PANCAN) (41 datasets)]( https://xenabrowser.net/datapages/?cohort=TCGA [TOIL RSEM tpm (n=10,535) UCSC Toil RNA-seq] in Pan-Cancer (PANCAN)&removeHub=https://xena.treehouse.gi.ucsc.edu:443). Recompute](https://toil.xenahubs.net/download/tcga_rsem_isoform_tpm.gz)，[Gene Mapping]( https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.transcript.probemap)
+
+- Or download the FPKM-UQ of GDC pipeline:[gdc Pan-Cancer (PANCAN) (17 datasets)](https://xenabrowser.net/datapages/?cohort=GDC Pan-Cancer (PANCAN)&removeHub=https:// [HTSeq - FPKM-UQ (n=11,768) GDC Hub](https://gdc.xenahubs.net/download/GDC-PANCAN.htseq_fpkm-uq.tsv.gz) in xena.treehouse.gi.ucsc.edu:443), [Gene Mapping](https://gdc.xenahubs.net/download/gencode.v22.annotation.gene.probeMap)
+
+- pancancerSurvivalData.txt, sample annotations and survival information, downloaded from [XENA](https://xenabrowser.net/datapages/)
+
+- Survival information is available as a download method: [Curated clinical data (n=12, 591)]( https://xenabrowser.net/datapages/?dataset=Survival_SupplementalTable_S1_20171025_xena_sp&host=https://pancanatlas.xenahubs.net&removeHub=https://xena.treehouse.gi.ucsc.edu:443 [Curated clinical data](https://pancanatlas.xenahubs.net/download/Survival_SupplementalTable_S1_20171025_xena_sp.gz)
+
+- How to download the sample information: [TCGA Pan-Cancer (PANCAN) (41 datasets) phenotype](https://xenabrowser.net/datapages/?cohort=TCGA Pan-Cancer (PANCAN)&removeHub=https://xena.treehouse.gi.ucsc.edu [sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub](https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz)。
+
+```{r eval=FALSE}
+## 读取泛癌表达谱和注释文件
+# 文件较大，占内存，请谨慎操作
+
+## Read pan-cancer expression profiles and annotation files
+# Please be cautious because the file size is large and occupies memory
+
+panexpr <- fread("tcga_RSEM_gene_tpm",sep = "\t",header = T,check.names = F,stringsAsFactors = F)
+annopb <- read.delim("gencode.v23.annotation.gene.probemap",row.names = 1,check.names = F,stringsAsFactors = F,header = T,sep = "\t")
+
+# 匹配基因名
+# Match the gene name
+panexpr <- as.data.frame(panexpr)
+rownames(panexpr) <- panexpr$sample; panexpr <- panexpr[,-1]
+comgene <- intersect(rownames(annopb), rownames(panexpr))
+panexpr <- panexpr[comgene,]; annopb <- annopb[comgene,]
+panexpr$genename <- annopb$gene; panexpr <- panexpr[!duplicated(panexpr$genename),]
+rownames(panexpr) <- panexpr$genename; panexpr <- panexpr[,-ncol(panexpr)]
+panexpr[1:3,1:3]
+
+## 读取目标基因及其所在的分组信息，用于最后画热图
+## Read the target gene and the grouping information it is in for final heat mapping
+gene_group <- read.table("easy_input_gene.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+gene_group[which(gene_group$Symbol == "VIRMA"),"Symbol"] <- "KIAA1429" # 根据GeneCards，该基因替换同义名，否则在TCGA数据里查不到 # According to GeneCards, this gene is replaced with a synonym, otherwise it will not be found in TCGA data
+
+# 提取目标基因的表达矩阵
+# Extract the expression matrix of the target gene
+panexpr <- panexpr[gene_group$Symbol,]
+gc() # 释放内存 # Free up memory
+
+# 还原表达谱（以下步骤请根据自己表达谱的情况来）
+# Restore the expression spectrum (please follow the following steps according to your own expression spectrum)
+panexpr <- 2^panexpr - 0.001 # 原始数据为log2(x+0.001) # The original data is log2 (x 0.001)
+panexpr[panexpr < 0] <- 0 # 小于0的值拉到0 # Values less than 0 are pulled to 0
+# 重新对数化
+# Re-logarithmic
+panexpr <- log2(panexpr + 1) 
+
+# 剔除表达量比较奇怪的基因，出自FigureYa35batch_bestSeparationV3_update
+# Eliminate the gene with strange expression levels, from FigureYa35batch_bestSeparationV3_update
+panexpr <- panexpr[,apply(panexpr, 1, sd) > 0] # 取方差大于1的基因 # Take genes with variances greater than 1
+
+## 读取样本注释和生存信息
+## Read sample annotations and survival information
+pansurv <- read.table("pancancerSurvivalData.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+rownames(pansurv) <- paste0(rownames(pansurv),"-01") # 创建原位癌barcode # Create a carcinoma-in-situ barcode
+
+# 取出例文癌症
+# Extract example cancer
+tumors <- unique(pansurv$type) # 提取有生存信息的癌种 # Extract cancer species with survival information
+comsam <- intersect(colnames(panexpr),rownames(pansurv)) # 提取共享的样本 # Extract shared samples
+pansurv <- pansurv[comsam,]
+panexpr <- panexpr[,comsam]
+tumors <- unique(pansurv$type)
+
+# 保存到文件，便于非TCGA数据套用格式
+# Save to a file for easy application of non-TCGA data
+write.csv(pansurv, "easy_input_surv.csv", quote = F)
+write.csv(panexpr, "easy_input_expr.csv", quote = F)
+```
+
+# 输入文件
+
+跟FigureYa35batch_bestSeparation类似，都需要表达矩阵和生存信息。
+
+另外，画热图时需要基因分组信息。
+
+- easy_input_surv.csv，生存信息。每行一个sample，三列分别是sample分组（这里是cancer type）、OS、OS.time。
+- easy_input_expr.csv，表达矩阵。每行一个基因，每列一个sample。
+- easy_input_gene.txt，例文中的m6A基因，用到Symbol和Function两列。前面用`Symbol`列提取了表达矩阵；`Function`列作为分组在热图中用不同颜色显示出来，非必需。可以替换成你感兴趣的基因及其分组信息，例如某些特征基因所在的通路等。
+
+# Input files
+
+Similar to FigureYa35batch_bestSeparation, both the matrix and the survival information need to be expressed.
+
+In addition, gene grouping information is required for heat mapping.
+
+- easy_input_surv.csv, survival information. Each row has a sample, and the three columns are sample grouping (here cancer type), OS, and OS.time.
+- easy_input_expr.csv, Expression Matrix. One gene per row and one sample per column.
+- easy_input_gene.txt, the m6A gene in the example uses the Symbol and Function columns. The expression matrix was extracted with the 'Symbol' column; The 'Function' column is shown as a grouping in different colors in the heatmap and is not required. It can be replaced with the gene you are interested in and its grouping information, such as the pathway where certain characteristic genes are located.
+
+```{r}
+# 读取生存信息和样品分组
+# Read survival information and sample grouping
+pansurv <- read.csv("easy_input_surv.csv", row.names = 1, check.names = F)
+tumors <- unique(pansurv$type)
+# 读取表达矩阵
+# Read the expression matrix
+panexpr <- read.csv("easy_input_expr.csv", row.names = 1, check.names = F)
+# 读取目标基因及其分组，用于最后画热图
+# Read the target gene and its grouping for final heat mapping
+gene_group <- read.table("easy_input_gene.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T)
+# 根据GeneCards，该基因替换同义名，否则在TCGA数据里查不到
+# According to GeneCards, this gene is replaced with a synonym, otherwise it will not be found in TCGA data
+gene_group[which(gene_group$Symbol == "VIRMA"),"Symbol"] <- "KIAA1429" 
+```
+
+# 循环计算基因与癌症的预后关系
+
+cox和logrank两种方式都计算出来
+
+# Cycle calculation of the prognostic relationship between genes and cancer
+
+Both cox and logrank are calculated
+
+```{r}
+# cox分析的数据初始化
+# Data initialization for COX analysis
+survland.coxhr <- matrix(NA,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化cox分析HR结果 # Initialize the cox analysis of HR results
+survland.coxp <- matrix(NA,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化cox分析p值结果 # Initialize the p-value result of COX analysis
+survland.coxplot <- matrix(0,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化绘图数据 # Initialize the plot data
+
+# logrank分析的数据初始化
+# Initialize the data analyzed by logrank
+survland.logrankhr <- matrix(NA,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化logrank分析hr值结果 # Initialize LogRank to analyze the HR value
+survland.logrankp <- matrix(NA,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化logrank分析p值结果 # Initialize logrank to analyze the p-value result
+survland.logrankplot <- matrix(0,nrow = nrow(gene_group),ncol = length(tumors),dimnames = list(gene_group$Symbol,tumors)) # 初始化绘图数据 # Initialize the plot data
+
+# 循环计算每一个癌症
+# Cycle counting each cancer
+for(t in tumors) {
+  for (g in gene_group$Symbol) { # 循环计算每一个基因 # Cycle count each gene
+    sam <- rownames(pansurv[which(pansurv$type == t),]) #提取当前癌症的sample ID # Extract the sample ID of the current cancer
+    expr <- as.numeric(panexpr[g,sam]) # 提取当前基因的表达量 # Extract the expression level of the current gene
+    
+    expr.surv <- data.frame(futime = pansurv[sam,"OS.time"], # 提取当前癌症的生存信息 # Extract the survival information of the current cancer
+                            fustat = pansurv[sam,"OS"], # 提取当前癌症的生存信息 # Extract the survival information of the current cancer
+                            expr = expr, # 基因表达量 # Gene expression
+                            stringsAsFactors = F)
+    
+    ## 方法一：cox
+    ## Method 1: cox
+    cox <- coxph(Surv(futime,fustat) ~ expr, data = expr.surv) # cox分析 # COX analysis
+    coxSummary <- summary(cox)
+    hr <- as.numeric(coxSummary$coefficients[,"exp(coef)"])[1] # 提出HR # Propose HR
+    pvalue <- as.numeric(coxSummary$coefficients[,"Pr(>|z|)"])[1] # 提出p值 # Propose a p-value
+    survland.coxhr[g,t] <- hr
+    survland.coxp[g,t] <- pvalue
+    
+    # 为画图准备矩阵
+    # Prepare the matrix for drawing
+    if(pvalue < 0.05) { # 如果p值显著的话存储数据 # Store data if the p-value is significant
+      survland.coxplot[g,t] <- ifelse(hr > 1, 1, -1) # HR>1为风险因素，记为“1”，HR<1为保护因素，记为-1，其余默认为0 # HR>1 is a risk factor, denoted as "1", HR<1 is a protective factor, denoted as -1, and the rest are defaulted to 0
+    }
+    
+    ## 方法二：logrank
+    # 用中值（median）为样本分组，如果想用最佳分组，可参考FigureYa35batch_bestSeparationV3_update
+    ## Method 2: logrank
+# Use the median value to group the samples, if you want to use the best grouping, you can refer to the FigureYa35batch_bestSeparationV3_update
+    
+    expr.surv$group = ifelse(expr > median(expr),"high","low")
+    expr.surv$group <- factor(expr.surv$group, levels = c("low", "high"))
+    
+    data.survdiff <- survdiff(Surv(futime,fustat) ~ group, data = expr.surv)
+    pvalue <- 1 - pchisq(data.survdiff$chisq, length(data.survdiff$n) - 1)
+    hr <- (data.survdiff$obs[2]/data.survdiff$exp[2])/(data.survdiff$obs[1]/data.survdiff$exp[1])
+    survland.logrankhr[g,t] <- hr
+    survland.logrankp[g,t] <- pvalue
+    
+    # 为画图准备矩阵
+    # Prepare the matrix for drawing
+    if(pvalue < 0.05) { # 如果p值显著的话存储数据 # Store data if the p-value is significant
+      survland.logrankplot[g,t] <- ifelse(hr > 1, 1, -1) # HR>1为风险因素，记为“1”，HR<1为保护因素，记为-1，其余默认为0 # HR>1 is a risk factor, denoted as "1", HR<1 is a protective factor, denoted as -1, and the rest are defaulted to 0
+    }
+  }
+}
+
+## 保存到文件，便于DIY其他形式的图
+# 或者以更大范围的基因（例如全基因组）作为输入，然后用HR和pvalue筛选出genes associated with the overall survival of patients (worse/better survival) in at least one cancer type或你关心的几种癌症或所有癌症
+# cox
+## Save to a file for DIY other forms of diagrams
+# Or take a larger range of genes (e.g., whole genome) as input, and then use HR and pvalue to filter out genes associated with the overall survival of patients (worse/better survival) in at least one cancer type or a few or all cancers you care about
+# cox
+write.table(survland.coxplot, file = "cox_genes associated with the OS.txt", sep = "\t", row.names = T, col.names = T, quote = F)
+write.table(survland.coxhr,file = "cox HR in survival landscape.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(survland.coxp,file = "cox pvalue in survival landscape.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+# logrank
+write.table(survland.logrankplot, file = "logrank_genes associated with the OS.txt", sep = "\t", row.names = T, col.names = T, quote = F)
+write.table(survland.logrankhr,file = "logrank HR in survival landscape.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+write.table(survland.logrankp,file = "logrank pvalue in survival landscape.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+```
+
+# 开始画图
+
+用pheatmap分别画出cox和logrank的结果。
+
+# Start drawing
+
+Use pheatmap to plot the results of cox and logrank, respectively.
+
+```{r}
+# 自定义颜色
+# Custom colors
+red <- "#D02E20"
+blue <- "#4D76B7"
+green <- "#50B544"
+yellow <- "#F8C77A"
+cyan <- "#5AC8F9"
+
+annRow <- gene_group # 行基因注释 # row gene annotation
+rownames(annRow) <- annRow$Symbol
+annColors <- list("Function" = c("Readers" = green,
+                                 "Writers" = yellow,
+                                 "Eraser" = cyan))
+
+# cox
+pheatmap(survland.coxplot,
+         border_color = "grey50",
+         show_rownames = T, # 显示行名 # Show the row name
+         show_colnames = T, # 显示列明 # Display column names
+         cluster_rows = F, # 行不聚类 # Rows are not clustered
+         cluster_cols = F, # 列不聚类 # Columns are not clustered
+         color = c(blue,"grey95",red),
+         annotation_row = annRow[,"Function",drop = F],
+         annotation_colors = annColors,
+         legend_breaks = c(-1,0,1), # 修改图例的显示位置 # Modify the display position of the legend
+         legend_labels = c("Protective","p>0.05","Risky"), # 修改图例标签 # Modify legend labels
+         cellwidth = 10, # 单元格宽度 # Cell width
+         cellheight = 10, # 单元格高度 # Cell height
+         filename = "m6A survival landscape using cox.pdf", # 保存文件 # Save the file
+         width = 8, # 图片宽度 # Image width
+         height = 6) # 图片高度 # Image height
+
+# logrank
+pheatmap(survland.logrankplot,
+         border_color = "grey50",
+         show_rownames = T, # 显示行名 # Show row names
+         show_colnames = T, # 显示列明 # Show column names
+         cluster_rows = F, # 行不聚类 # Rows are not clustered
+         cluster_cols = F, # 列不聚类 # Columns are not clustered
+         color = c(blue,"grey95",red),
+         annotation_row = annRow[,"Function",drop = F],
+         annotation_colors = annColors,
+         legend_breaks = c(-1,0,1), # 修改图例的显示位置 # Modify the display position of the legend
+         legend_labels = c("Protective","p>0.05","Risky"), # 修改图例标签 # Modify legend labels
+         cellwidth = 10, # 单元格宽度 # Cell width
+         cellheight = 10, # 单元格高度 # Cell height
+         filename = "m6A survival landscape using logrank.pdf", # 保存文件  # Save the file
+         width = 8, # 图片宽度 # Image width
+         height = 6) # 图片高度 # Image height
+```
+
+![](m6A survival landscape using cox.pdf)
+
+![](m6A survival landscape using logrank.pdf)
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
