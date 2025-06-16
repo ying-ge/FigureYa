@@ -1,0 +1,336 @@
+---
+title: "FigureYa219GMM"
+author: "Xiaofan Lu"
+reviewers: "Ying Ge,Hui Huang"
+date: "2025-5-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+这篇文章里用了高斯混合模型，从10个候选miRNA筛出了8个，并且获得了每个miRNA的系数，计算riskscore。
+
+# Requirement Description
+
+In this paper, a Gaussian mixture model was used to screen out 8 of the 10 candidate miRNAs, and the coefficients for each miRNA were obtained to calculate the riskscore.
+
+![](example.png)
+
+出自<https://www.thno.org/v10p8771.pdf>
+from<https://www.thno.org/v10p8771.pdf>
+
+Figure 4. The pattern of AUC and 1023 logistic regression models were based on Gaussian finite mixture models.
+(A) The pattern of the logistic regression model correlated with the AUC scores and was identified by a Gaussian mixture. There are eight clusters of 1023 combinations. 
+
+# 应用场景
+
+通过排列组合构建所有可能的逻辑回归并计算每个模型下的AUC，通过高斯混合模型聚类确定最优模型簇，并根据最高AUC得到最终预测模型。
+
+# Application Scenarios
+
+All possible logistic regressions were constructed through permutations and combinations, and the AUC under each model was calculated, the optimal model cluster was determined by Gaussian mixture model clustering, and the final prediction model was obtained according to the highest AUC.
+
+# 环境设置
+
+使用国内镜像安装包
+
+# Environment settings
+
+Use the domestic mirror installation package
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("miRBaseVersions.db")
+BiocManager::install("miRBaseConverter")
+BiocManager::install("SimDesign")
+```
+
+加载包
+load packages
+
+```{r}
+library(mclust)
+library(miRBaseVersions.db)
+library(miRBaseConverter)
+library(pROC)
+library(SimDesign)
+source("twoclasslimma.R") #差异表达分析 # Differential expression analysis
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 # error messages are displayed in English
+options(stringsAsFactors = FALSE) #禁止chr转成factor # chr is not allowed to be converted to factor
+```
+
+自定义函数
+Custom functions
+
+```{r}
+display.progress = function (index, totalN, breakN=20) {
+  
+  if ( index %% ceiling(totalN/breakN)  ==0  ) {
+    cat(paste(round(index*100/totalN), "% ", sep=""))
+  }
+}
+```
+
+# 输入文件
+
+分别从TCGA和来自GEO的数据集提取三阴性乳腺癌和**癌旁样本**。提取二者共有的miRNA，用于后续分析。
+
+- TCGA的miRNA数据
+  - BRCA-miRNA.txt，TCGA-miRNA表达矩阵。
+  - tcga.sinfo.txt，TCGA数据样本信息。
+- 来自GEO的miRNA芯片数据
+  - gse40525.expr.txt，GSE40525表达矩阵。
+  - gse40525.sinfo.txt，GSE40525样本信息。
+
+# Input files
+
+Triple-negative breast cancer and **paracancerous samples** were extracted from TCGA and datasets from GEO, respectively. miRNAs common to both were extracted for subsequent analysis.
+
+- miRNA data for TCGA
+- BRCA-miRNA.txt, TCGA-miRNA expression matrix.
+- tcga.sinfo.txt. TCGA data sample information.
+- miRNA microarray data from GEO
+- gse40525.expr.txt, GSE40525 expression matrix.
+- gse40525.sinfo.txt, GSE40525 sample information.
+
+```{r}
+# 设置目标事件
+# Set the target event
+event <- "PFI" # 数据里包括OS, PFI, DFI，原文研究复发 # Data include OS, PFI, DFI, and the original study of recurrence
+
+# 加载TCGA-miRNA表达谱
+# Load the TCGA-miRNA expression profile
+tcga.mirna <- read.table("BRCA-miRNA.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+miRNAs <- row.names(tcga.mirna)
+ver <- checkMiRNAVersion(miRNAs,verbose = T) # 查看miRNA版本 # Check the miRNA version
+res1 <- miRNA_NameToAccession(miRNAs, version = ver) # v21 高度匹配 # v21 height match
+res2 <- miRNA_AccessionToName(res1$Accession,targetVersion = "v21") # 使用v21版来匹配miRNA # Use v21 to match miRNAs
+result1 <- cbind(miRNAs,res2)
+
+# 加载GSE40525数据
+# Load GSE40525 data
+gse40525.mirna <- read.table("gse40525.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+miRNAs <- rownames(gse40525.mirna)
+ver <- checkMiRNAVersion(miRNAs,verbose = T) # 查看miRNA版本 # Check the miRNA version
+res1 <- miRNA_NameToAccession(miRNAs, version = ver)
+res2 <- miRNA_AccessionToName(res1$Accession,targetVersion = "v21") # 使用同样的v21版来匹配miRNA # Use the same v21 version to match the miRNA
+result2 <- cbind(miRNAs,res2)
+
+# 加载样本信息并提取三阴性乳腺癌和癌旁样本
+# Load sample information and extract triple negative breast cancer and paracancerous samples
+## TCGA
+tcga.sinfo <- read.table("tcga.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+tcga.sinfo <- tcga.sinfo[,c("PAM50",event)] # 原文研究复发 # Original study recurrence
+tcga.sinfo <- as.data.frame(na.omit(tcga.sinfo)) # 去掉无复发状态的样本 # Samples with no recurrence were removed
+basal.tcga <- intersect(rownames(tcga.sinfo[tcga.sinfo$PAM50 == "Basal",,drop = F]),colnames(tcga.mirna)) # 选取三阴性样本（这里我得到的三阴性乳腺癌比原文多大概60个，也许是造成结果不一致的原因） # Triple negative samples were selected (here I got about 60 more triple negative breast cancers than in the original text, which may be the reason for the inconsistent results)
+normal.tcga <- colnames(tcga.mirna)[substr(colnames(tcga.mirna),14,15) == "11"]
+normal.tcga <- intersect(substr(basal.tcga,1,12),substr(normal.tcga,1,12)) # 只取三阴性乳腺癌的癌旁 # Only the paracancerous group of triple-negative breast cancer was taken
+normal.tcga <- paste0(normal.tcga,"-11") # 添加样本名后缀 # Add a suffix to the sample name
+tcga.mirna <- tcga.mirna[,c(basal.tcga,normal.tcga)] # 重做表达谱，仅包含三阴性和三阴性癌旁 # Reworked the expression profile to include only the triple-negative group and the triple-negative paracancer group
+tcga.mirna$mirna <- result1$TargetName # 替换v21版本miRNA名称 # Replace the v21 miRNA name
+tcga.mirna <- as.data.frame(na.omit(tcga.mirna[!duplicated(tcga.mirna$mirna),])) # 去重去空值 # Remove duplicate values and null values
+rownames(tcga.mirna) <- tcga.mirna$mirna; tcga.mirna <- tcga.mirna[,setdiff(colnames(tcga.mirna),"mirna")]
+write.table(tcga.mirna,"tcga.miRNA.expr.TNBC.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+## GSE40525
+gse40525.sinfo <- read.table("gse40525.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+basal.gse <- rownames(gse40525.sinfo[gse40525.sinfo$`1:SUBTYPE (OF TUMOR OR MATCHED TUMOR)` == "Basal-like" & 
+                                       gse40525.sinfo$`1:TISSUE` == "Breast primary tumor",,drop = F]) # 提取三阴性乳腺癌 # Extraction of triple negative breast cancer
+normal.gse <- rownames(gse40525.sinfo[gse40525.sinfo$`1:SUBTYPE (OF TUMOR OR MATCHED TUMOR)` == "Basal-like" 
+                                      & gse40525.sinfo$`1:TISSUE` == "Peritumor breast tissue",,drop = F]) # 只取三阴性乳腺癌的癌旁 # Only take the next cancer of triple negative breast cancer
+gse.mirna <- gse40525.mirna[,c(basal.gse,normal.gse)]
+gse.mirna$mirna <- result2$TargetName
+gse.mirna <- as.data.frame(na.omit(gse.mirna))
+rownames(gse.mirna) <- gse.mirna$mirna; gse.mirna <- gse.mirna[,setdiff(colnames(gse.mirna),"mirna")]
+write.table(gse.mirna,"gse40525.miRNA.expr.TNBC.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+# 取出共有的miRNA
+# Remove the common miRNA
+comgene <- intersect(rownames(tcga.mirna),rownames(gse.mirna))
+tcga.mirna <- log2(tcga.mirna[comgene,] + 1) # TCGA数据对数化 # Logarithmicization of TCGA data
+gse.mirna <- gse.mirna[comgene,]
+
+# 修改行名以免后续模型报错
+# Change the row name to prevent subsequent models from reporting errors
+rownames(tcga.mirna) <- gsub("-","_",rownames(tcga.mirna))
+rownames(gse.mirna) <- gsub("-","_",rownames(gse.mirna))
+```
+
+# 正常与癌旁的差异表达
+
+TCGA和GEO来源的miRNA数据分别做差异表达分析，然后取交集。
+
+这步会生成差异表达分析结果文件：gse_tnbc_limma_test_result.tumor_vs_normal.txt和tcga_tnbc_limma_test_result.tumor_vs_normal.txt
+
+# Differential expression of normal and adjacent cancer
+
+The miRNA data derived from TCGA and GEO were analyzed for differential expression and then intersected.
+
+This step generates differential expression analysis results file:gse_tnbc_limma_test_result.tumor_vs_normal.txt and tcga_tnbc_limma_test_result.tumor_vs_normal.txt
+
+```{r}
+# TCGA
+subt <- data.frame(condition = rep(c("tumor","normal"),c(length(basal.tcga),length(normal.tcga))),
+                   row.names = colnames(tcga.mirna))
+twoclasslimma(subtype  = subt, # subtype information (must contain a column named 'condition')
+              featmat  = na.omit(tcga.mirna), # expression file (fill detect data scale automatically)
+              treatVar = "tumor", # name of treatment group
+              ctrlVar  = "normal", # name of control group
+              prefix   = "tcga_tnbc", # prefix of the DE file
+              overwt   = TRUE, # whether over write files that already existed
+              sort.p   = TRUE, # if sorting the results by adjusted p value
+              verbose  = TRUE, # if showing verbose result
+              res.path = ".") # path for result
+
+# GSE40525
+subt <- data.frame(condition = rep(c("tumor","normal"),c(length(basal.gse),length(normal.gse))),
+                   row.names = colnames(gse.mirna))
+twoclasslimma(subtype  = subt, # subtype information (must contain a column named 'condition')
+              featmat  = na.omit(gse.mirna), # expression file (fill detect data scale automatically)
+              treatVar = "tumor", # name of treatment group
+              ctrlVar  = "normal", # name of control group
+              prefix   = "gse_tnbc", # prefix of the DE file
+              overwt   = TRUE, # whether over write files that already existed
+              sort.p   = TRUE, # if sorting the results by adjusted p value
+              verbose  = TRUE, # if showing verbose result
+              res.path = ".") # path for result
+
+# 取出差异表达基因
+# Extract differentially expressed genes
+res1 <- read.table("tcga_tnbc_limma_test_result.tumor_vs_normal.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+res2 <- read.table("gse_tnbc_limma_test_result.tumor_vs_normal.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+deg1 <- res1[which(res1$padj < 0.05 & abs(res1$log2fc > 1)),]  # Extract differentially expressed miRNAs
+deg2 <- res2[which(res2$padj < 0.05 & abs(res1$log2fc > 1)),] # Extract differentially expressed miRNAs
+
+deg <- intersect(rownames(deg1),rownames(deg2)) # 提取交集的miRNA # Extract intersecting miRNAs
+```
+
+# 逻辑回归模型
+# Logistic regression model
+
+```{r}
+# 排列组合构建可能的逻辑回归模型
+# Permutations and combinations to build possible logistic regression models
+flist <- list()
+for (i in 1:length(deg)) {
+  message("--generate ",i," miRNA model...")
+  tmp <- combn(deg, m = i) # 选取miRNA数目为i情况下的排列组合 # Select the permutations and combinations when the number of miRNAs is i
+  for (j in 1:ncol(tmp)) {
+   f <- as.formula(paste0(event," ~ ",paste(tmp[,j],collapse = " + "))) # 构建当前模型 # Build the current model
+   flist <- append(flist, f) # 1023个模型，即2的10次方-1个模型 # 1,023 models, which is 2 to the power of 10 minus 1 models
+  }
+}
+
+# 运行逻辑回归模型并计算AUC
+# Run the logistic regression model and calculate the AUC
+df <- cbind.data.frame(tcga.sinfo[basal.tcga, event, drop = F],
+                       scale(t(tcga.mirna[deg,basal.tcga])))
+pred_LR <- list()
+aucDF <- NULL
+n.model <- 2^length(deg)-1
+for (i in 1:n.model) {
+  
+  # 显示运行进程
+  # Displays the running process
+  display.progress(index = i,
+                   totalN = n.model)
+  
+  f <- flist[[i]] # 提出当前逻辑回归公式 # Propose the current logistic regression formula
+  g <- setdiff(as.character(f),c(event,"~")) # 拆分公式得到当前公式里的miRNA # Split the formula to get the miRNA in the current formula
+  g <- unlist(strsplit(g," + ",fixed = T))
+  
+  # 运行逻辑回归
+  # Run logistic regression
+  l <- glm(formula = f, 
+           data = df, 
+           family = "binomial", 
+           control = list(maxit = 50), 
+           na.action = na.exclude)
+  
+  # 预测TCGA乳腺癌的复发
+  # Predict the recurrence of TCGA breast cancer
+  pred_LR[[i]] <- data.frame(prob = predict(l, newdata = df,type="response"),
+                             group = df[,event],
+                             stringsAsFactors = F)
+  
+  # 计算AUC
+  # Calculate AUC
+  a <- quiet(auc(pred_LR[[i]]$group,
+             pred_LR[[i]]$prob))
+  
+  # 生成结果
+  # Generate results
+  aucDF <- rbind.data.frame(aucDF,
+                            data.frame(model = i, # 当前模型数目 # Current number of models
+                                       auc = a, # 当前模型的AUC # AUC of the current model
+                                       n.mirna = length(g), # 当前模型包含的miRNA数目 # The number of miRNAs contained in the current model
+                                       stringsAsFactors = F),
+                            stringsAsFactors = F)
+}
+```
+
+# 运行高斯混合模型，并画图
+# Run the Gaussian mixture model and draw it
+
+```{r}
+mod <- Mclust(aucDF[,1:2])
+aucDF$mclust <- as.numeric(mod$classification)
+table(aucDF$mclust) # 查看有多少类 # See how many classes there are
+# 保存到文件
+# Save to file
+write.table(aucDF,"output_auc for all models with GMM clusters.txt",sep = "\t",row.names = F,quote = F)
+
+# 设置颜色
+# Set the color
+darkred  <- "#F2042C"
+lightred <- "#FF7FBF"
+nake     <- "#F8C364"
+cyan     <- "#00B3D0"
+darkblue <- "#21498D"
+
+pdf("GMM cluster of all auc model combination.pdf", width = 5,height = 4)
+par(bty = "o", mgp = c(2,0.5,0), mar = c(3.1,4.1,1.1,1.1),tcl = -.25,las = 1)
+plot(mod,
+     what = "classification",
+     colors = c(darkblue,darkred,cyan,lightred,nake), # 注意根据颜色判别类，蓝色第一类，红色第二类，绿色第三类，黄色第四类，灰色第五类 # Note that the classes are judged according to color, blue category 1, red category 2, green category 3, yellow category 4, gray category 5
+     xlab = paste0("Sorted logistic regression models (1:",n.model,")"),
+     ylab = "")
+mtext("AUC of training models", side = 2, line = 2.5, las = 3)
+text(300,0.46,"cluster 1", cex = 1.3)
+text(600,0.58,"cluster 2", cex = 1.3)
+text(100,0.65,"cluster 3", cex = 1.3)
+text(600,0.68,"cluster 4", cex = 1.3)
+text(900,0.64,"cluster 5", cex = 1.3)
+invisible(dev.off())
+```
+
+![](GMM cluster of all auc model combination.pdf)
+
+```{r}
+# 由图片可以看出末尾灰色区域（第五类）的类有着较高的AUC，取出第五类里AUC最大的逻辑回归公式
+# As you can see from the picture, the class in the gray area (category 5) at the end has a higher AUC, and the logistic regression formula with the largest AUC in category 5 is extracted
+tmp <- aucDF[which(aucDF$mclust == 5),]
+maxAuc <- tmp[which.max(tmp$auc),"auc"]
+print(maxAuc) # 最大的AUC # Maximum AUC
+
+bestModel <- flist[[tmp[which.max(tmp$auc),"model"]]]
+print(bestModel) # 最优的模型 # Optimal model
+
+g <- setdiff(as.character(bestModel),c(event,"~")) # 拆分公式得到当前公式里的miRNA # Split the formula to get the miRNA in the current formula
+g <- unlist(strsplit(g," + ",fixed = T)) # 最终组成模型的miRNA（9个miRNA的组合，原文是8个）# The final miRNA that makes up the model (a combination of 9 miRNAs, the original text is 8)
+
+# 把筛选到的miRNA保存到文件
+# Save the screened miRNA to a file
+write.table(g,"output_miRNA_selected.txt",sep = "\t",row.names = F,col.names = F,quote = F) # 输出miRNA # Export miRNA
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
