@@ -1,0 +1,255 @@
+---
+title: "FigureYa311PAM50Heatmap"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+作者根据PAM50乳腺癌分子分型方法进行了改良，在分类前从训练集和质心分数中移除 Her2 和 Normal 样本，从而将分类限制为 LumA、LumB 和 Basal。同时比较了这三个亚型在雄激素受体（AR）,神经内分泌（NE）得分，CCP，FGF-MEK签名，以及作者之前建立有关神经内分泌前列腺癌的6种分型（phenotype）间的差异热图。
+
+The authors modified the PAM50 molecular subtyping method for breast cancer by removing Her2 and Normal samples from the training set and centroid scores before classification, thereby restricting the classification to LumA, LumB, and Basal subtypes. They also compared the differences among these three subtypes in terms of androgen receptor (AR) expression, neuroendocrine (NE) scores, CCP, FGF-MEK signature, and the previously established six phenotypes related to neuroendocrine prostate cancer through a heatmap analysis.
+
+![](example.png)
+
+出自：<https://aacrjournals.org/clincancerres/article/28/14/3127/706873/Therapeutic-Implications-for-Intrinsic-Phenotype>
+
+图1. 转移性前列腺癌的PAM50分型与雄激素受体（AR）活性、增殖及基因型相关。
+A. PAM50分型将SU2C队列中的mCRPC（转移性去势抵抗性前列腺癌）肿瘤划分为LumA、LumB和Basal亚型。倍数差异标度反映RNA测序（RNAseq）的均值中心化log2 FPKM值。分子特征评分及表型显示在图表顶部，并依据右侧图例进行颜色标注。
+
+Source: <https://aacrjournals.org/clincancerres/article/28/14/3127/706873/Therapeutic-Implications-for-Intrinsic-Phenotype>
+
+Figure 1. PAM50 classification of metastatic prostate cancer associates with AR activity, proliferation, and genotype. 
+A, PAM50 classification partitions mCRPC tumors from the SU2C cohort into LumA, LumB, and Basal subtypes. Fold difference scale reflects mean-centered log2 FPKM values from RNAseq. Molecular signature scores and phenotypes shown at the top of plot and colored according to legends at the right side.
+
+# 应用场景
+# Application scenarios
+
+PAM50分型原本有5个，例文作者根据自己的研究对象的特点，仅用其中三类：LumA、LumB和 Basal，从训练集和质心分数中移除了另外两类：Her2和Normal的样本。你也可以根据自己的研究兴趣灵活取舍。
+
+我们有7个FigureYa用到过PAM50分型: <https://k.youshop10.com/h81FZiMR>
+
+The PAM50 classification originally includes five subtypes, but the authors of the example study tailored it to their research focus by using only three subtypes—LumA, LumB, and Basal—while removing the other two (Her2 and Normal) from both the training set and centroid scores. You can also flexibly select subtypes based on your research interests.
+
+We have previously applied the PAM50 classification in seven of our FigureYa analyses: <https://k.youshop10.com/h81FZiMR>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+BiocManager::install("genefu")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+# 用于获取乳腺癌PAM50分型
+# For breast cancer PAM50 subtyping
+library(genefu) 
+
+# 用于获得ENTREZID
+# For ENTREZID conversion
+library(AnnotationDbi) 
+
+# 人类基因组注释数据库
+# Human genome annotation database
+library(org.Hs.eg.db) 
+
+# 基因集变异分析 (signature scoring)
+# Gene Set Variation Analysis (signature scoring)
+library(GSVA) 
+
+# 热图可视化
+# Heatmap visualization
+library(ComplexHeatmap) # 用于画图
+
+# 用它的配色方案
+# Color scheme utilities
+library(circlize) 
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+data_mrna_seq_fpkm_polya.txt，表达矩阵。可以从百度网盘下载<https://pan.baidu.com/s/1vwBmgnDV5-ee6q5DP_-7Fg?pwd=m2mg>
+
+easyinput_signature.txt，基因签名，用于计算图中的Molecular signature scores ，即AR、NE、CCP、FGF-MEK签名。出自ccr-21-4289_supplementary_tables_ts1-13_suppts1-13.xlsx里的Table S13。可以替换成自己感兴趣的签名。
+
+easyinput_clin.txt，样本分组信息，对应图中的Phenotype。其中Sample列里是样本名，跟表达矩阵的列名一致。出自ccr-21-4289_supplementary_tables_ts1-13_suppts1-13.xlsx里的Table S1。可以替换成自己想要对比展示的注释信息。
+
+data_mrna_seq_fpkm_polya.txt - Expression matrix. Available for download on BaiduNetdisk<https://pan.baidu.com/s/1vwBmgnDV5-ee6q5DP_-7Fg?pwd=m2mg>
+
+easyinput_signature.txt - Gene signatures used to calculate the Molecular signature scores (AR, NE, CCP, FGF-MEK signatures) in the figures. Derived from Table S13 in ccr-21-4289_supplementary_tables_ts1-13_suppts1-13.xlsx. Can be replaced with signatures of interest.
+
+easyinput_clin.txt - Sample grouping information, corresponding to the Phenotype in the figures. The Sample column contains sample names, matching the column names in the expression matrix. Derived from Table S1 in ccr-21-4289_supplementary_tables_ts1-13_suppts1-13.xlsx. Can be replaced with custom annotation data for comparative analysis.
+
+```{r}
+# 读取原文表达谱
+# Load original expression matrix
+eset <- read.table("data_mrna_seq_fpkm_polya.txt", header = T, sep = "\t", check.names = F)
+
+# 去掉重名基因
+# Remove duplicate genes
+eset <- eset[!duplicated(eset$Hugo_Symbol), ] 
+
+rownames(eset) <- eset$Hugo_Symbol; eset$Hugo_Symbol <- NULL
+
+# 表达谱Log2转化
+# Log2-transform expression values
+eset <- log2(eset + 1) 
+
+# 读取基因签名
+# Load gene signatures
+signature <- read.table("easyinput_signature.txt", header = T, sep = "\t")
+signature <- split(signature$Gene.Symbol, signature$Signature)
+
+# 加载临床注释数据
+# Load clinical annotation data
+clin <- read.table("easyinput_clin.txt", header = T, sep = "\t")
+clin <- clin[match(colnames(eset), clin$Sample) , ]
+```
+
+# PAM50分型
+# PAM50 Classification
+
+使用genefu包进行PAM50分型，并只保留LumA，LumB和Basal亚型。
+
+The genefu R package was used to perform PAM50 molecular subtyping, with only the LumA, LumB, and Basal subtypes retained for downstream analysis.
+
+```{r}
+subtype.to.predict <- c("LumA", "LumB", "Basal")
+data(pam50.robust)
+
+#过滤质心矩阵，只保留目标子类型
+# Filter centroids matrix to retain only target subtypes  
+pam50.robust$centroids <- pam50.robust$centroids[, subtype.to.predict] 
+
+# 构建注释
+# Create annotation dataframe  
+eannot <- data.frame( 
+  row.names = rownames(eset),
+  "probe" = rownames(eset),
+  "Gene.Symbol" = rownames(eset)
+)
+
+# 检索获得Gene Symbol对应的ENTREZID
+# Map Gene Symbols to ENTREZ IDs  
+tmp <- AnnotationDbi::select(x = org.Hs.eg.db, keys = rownames(eset), columns = "ENTREZID", keytype = "SYMBOL")
+eannot$EntrezGene.ID <- tmp$ENTREZID[match(eannot$Gene.Symbol, tmp$SYMBOL)]
+
+# 采用单样本预测器(SSP)方法鉴定乳腺癌分子亚型"
+# identify breast cancer molecular subtypes using the Single Sample Predictor (SSP)
+pam50.predict <- intrinsic.cluster.predict(sbt.model = pam50.robust, 
+                                           data = t(eset), 
+                                           annot = eannot, 
+                                           do.mapping = T)
+
+# 计算Molecular signature scores
+# Calculate molecular signature scores  
+param <- gsvaParam(
+  exprData = as.matrix(eset),  
+  geneSets = signature        
+)
+
+gs.score <- gsva(param)
+```
+
+# 开始画图
+# Plotting
+
+```{r fig.width=10, fig.height=8}
+# 构建样本信息注释
+# Create sample annotation metadata
+sampleInfo <- data.frame(
+  row.names = colnames(eset),
+  "PAM50" = pam50.predict$subtype,
+  "AR.signature" = gs.score["AR", ],
+  "NE.signature" = gs.score["NE", ],
+  "CCP.signature" = gs.score["CCP", ],
+  "FGF-MEK.signature" = gs.score["FGF-MEK", ],
+  "Phenotype" = clin$polyA_phenotype
+)
+
+# 绘制热图
+# Generate heatmap visualization
+pam50.gene <- pam50.robust$centroids.map$probe
+plot.data <- t(scale(t(eset[intersect(pam50.gene, rownames(eset)), ]), center = T, scale = F)) 
+plot.data[plot.data > 4] = 4; plot.data[plot.data< (-4) ] = -4 
+
+sampleInfo$PAM50 <- factor(sampleInfo$PAM50, levels = c("LumA", "LumB", "Basal"))
+
+cell.col = c("#ADD9E3", "#3B5CCC", "#000000", "#C6C706", "#FDFB0B")
+PAM50.col = c("LumA" = "#395790", "LumB" = "#6BBD2A", "Basal" = "#FFA652")
+gsva.col = colorRamp2(breaks = c(-1, 0, 1), colors = c("#170B88", "#FFFFFF", "#D23C30"))
+pheno.col = c("ARlow_NEneg" = "#8029CE", "ARneg_NElow" = "#07C7CF", "ARneg_NEneg" = "#3D62CD",
+              "ARneg_NEpos" = "#EDAE11", "ARpos_NEneg" = "#478D06", "ARpos_NEpos" = "#CE0706")
+
+col_ha <- columnAnnotation(
+  df = sampleInfo,
+  col = list("PAM50" = PAM50.col, 
+             "AR.signature" = gsva.col,
+             "NE.signature" = gsva.col,
+             "CCP.signature" = gsva.col,
+             "FGF.MEK.signature" = gsva.col,
+             "Phenotype" = pheno.col),
+  annotation_name_side = "left"
+)
+
+hm = Heatmap(plot.data, 
+             col = cell.col, 
+             name = "Fold Change", 
+             cluster_columns = F, 
+             cluster_rows = T, 
+             cluster_column_slices = F,
+             column_split = sampleInfo$PAM50,
+             show_column_names = F, 
+             show_row_names = T, 
+             row_names_side = "left",
+             show_column_dend = F, 
+             show_row_dend = F,
+             top_annotation = col_ha)
+
+draw(hm)
+
+# 保存热图
+# Export heatmap to PDF
+pdf("logFC.PAM50Heatmap.pdf", width = 10, height = 8)
+draw(hm)
+invisible(dev.off())
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
