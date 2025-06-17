@@ -1,0 +1,321 @@
+---
+title: "FigureYa62twoAxis"
+author: "Xiaojian Liu; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+复现文中的线性回归，画出双坐标轴的图
+
+Reproduce the linear regression in the text and draw a dual-axis graph.
+
+![](example.png)
+
+出自<https://onlinelibrary.wiley.com/doi/full/10.1111/cas.13744>
+
+from<https://onlinelibrary.wiley.com/doi/full/10.1111/cas.13744>
+
+## 应用场景
+## application scenario
+
+同时计算和展示3组数据的相关性，A vs. B 和 A vs. C。
+
+例如例文中同时展示B7-H3表达跟mir-29a的相关性，以及跟甲基化的相关性。由此看出：In IDH‐wild grade II gliomas, B7‐H3 expression seemed to be downregulated by both methylation on cg10586317 and microRNA‐29a, rationalizing the paradox in grade II gliomas with wild‐type IDH.
+
+Simultaneously calculate and display the correlation of 3 groups of data, A vs. B and A vs. C.
+
+For example, the sample text simultaneously shows the correlation of B7-H3 expression with mir-29a, as well as with methylation. From this, it can be seen: In IDH‐wild grade II gliomas, B7‐H3 expression seemed to be downregulated by both methylation on cg10586317 and microRNA‐29a, rationalizing the paradox in grade II gliomas with wild‐type IDH.
+
+## 环境设置
+## environment setting
+
+使用国内镜像安装包
+
+use the domestic mirror installation package
+
+```r
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+install.packages("ggplot2")
+```
+
+加载包
+
+load package
+
+```{r}
+library(ggplot2)
+library(gtable) #方法二要用到 Method 2 is to be used
+library(grid) #方法二要用到 Method 2 is to be used
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+## 参数设置
+## parameter setting
+
+```{r}
+## 两个坐标轴的颜色
+## the color of the two axes
+s1Colour="#6B9EC2"
+s2Colour="#EE861A"
+
+## xlab
+xtitle="mRNA expression"
+## ylab
+ylefttitle="miRNA"
+yrighttitle="cg10586317"
+
+##Aspect ration of picture，图的宽高比例
+AspectRatio = 5/2
+```
+
+## 输入文件
+## Input file
+
+包含三列：对应X轴和两个Y轴
+
+分别对应例文中的X轴：mRNA表达量，可以是FPKM等值。
+
+左侧Y轴：miRNA的表达量
+
+右侧Y轴：DNA甲基化水平
+
+It contains three columns: corresponding to the X-axis and two Y-axes
+
+Corresponding to the X-axis in the example text respectively: mRNA expression level, which can be equivalent to FPKM.
+
+Left Y-axis: miRNA expression level
+
+Right Y-axis: DNA methylation level
+
+```{r}
+inputData <- read.table("easy_input.txt", header = T)
+head(inputData)
+#inputData$Y2 <- inputData$Y1 * 0.00001
+#所有次坐标轴必须基于主坐标轴的一一对应变换。
+#默认右侧Y轴跟左侧Y轴范围是一样的，然而示例数据的Y1和Y2范围差距很大，因此需要用Y1和Y2的数值计算两个Y轴的比例
+#All secondary axes must be based on a one-to-one transformation of the primary axes.
+#by default, range of the right Y-axis is the same as that of the left Y-axis, however, there is a big difference between the ranges of Y1 and Y2 in the example data, so we need to calculate the ratio of the two Y-axes using the values of Y1 and Y2
+(scaleFactor <- max(inputData$Y1) / max(inputData$Y2)) 
+#在画右侧Y轴、X和Y2的散点和拟合线时都要用这个比例来换算
+#除了用乘法，你还可以用加法
+#when drawing the scatter and fitting lines for the right Y-axis, X, and Y2, use this ratio for conversion
+#besides multiplication, you can also use addition
+
+#前面参数设置了图的宽高比例，保存在AspectRatio里
+#用Y1和Y2的数值换算坐标轴的宽高比，在后面的画图代码coord_fixed中要用到
+#the previous parameter sets the aspect ratio of the diagram, which is saved in AspectRatio
+#use the values of Y1 and Y2 to convert the aspect ratio of the axes, which will be used later in the drawing code coord_fixed
+(ratioValues <- ((max(inputData$X)-min(inputData$X))/(max(inputData$Y1)-min(inputData$Y1))) / AspectRatio)
+```
+
+## 计算相关系数
+## Calculate the correlation coefficient
+
+```{r}
+#写一个计算相关系数的函数，同时写成图中的格式
+#write a function that calculates the correlation coefficient while writing it in the format shown in the figure
+correlation <- function(data,X,Y){
+  #计算相关系数
+  #calculate the correlation coefficient
+  R <- cor(X,Y,method = "pearson") #或"pearson", "kendall"
+  
+  #把相关系数写成图中展示的格式
+  #write the correlation coefficients in the format shown in the figure
+  eq <- substitute(~~italic(R)~"="~r, list(r = format(round(R, 4),nsmall= 4)))
+  Req <- as.character(as.expression(eq))
+  return(Req)
+}
+
+#用上面的函数分别计算mRNA跟miRNA、DNA甲基化之间的相关系数
+#calculate the correlation coefficients between mRNA and miRNA and DNA methylation using the function above respectively
+(R1cor <- correlation(inputData,inputData$X,inputData$Y1))
+(R2cor <- correlation(inputData,inputData$X,inputData$Y2))
+```
+
+## 开始画图
+## Start drawing
+
+此处提供两种方法画图：
+
+- 方法一，优点：简单，易于理解；缺点：右侧Y轴的label的文字方向与原文相反。
+- 方法二，优点：完全复现原文的图；缺点：用到gtable、grid，小伙伴可能不熟悉。
+
+Here we provide two methods to draw the diagram:
+
+- Method 1, advantage: simple, easy to understand; disadvantage: the text direction of the label on the right Y-axis is opposite to the original.
+- Method 2, advantage: completely reproduce the original diagram; disadvantage: use gtable and grid, which may be unfamiliar to some colleagues.  
+
+### 方法一
+### Method 1
+
+```{r}
+p <- ggplot(inputData, aes(x=inputData$X )) + 
+  geom_point(aes(y=inputData$Y1), col=s1Colour) + #画X和Y1的散点 draw the scatter of X and Y1
+  geom_smooth(aes(x=inputData$X, y=inputData$Y1), 
+              method="lm", se=F, col=s1Colour) + #添加线性拟合线 add linear fit line
+  
+  geom_point(aes(y=(inputData$Y2) * scaleFactor), col=s2Colour) + #画X和Y2的散点 draw the scatter of X and Y2
+  geom_smooth(aes(x=inputData$X, y=inputData$Y2 * scaleFactor), 
+              method="lm", se=F, colour=s2Colour) + #添加线性拟合线 add linear fit line
+  
+  scale_y_continuous(name = ylefttitle, 
+                     #breaks = c(5000, 10000, 15000, 20000, 25000), #左侧Y轴刻度 left Y-axis scale
+                     sec.axis=sec_axis(trans = ~./scaleFactor, name = yrighttitle)) + #画右侧Y轴 draw the right Y-axis
+  coord_fixed(ratio = ratioValues) + #坐标轴的宽高比 aspect ratio of coordinate axes
+  
+  labs(x=xtitle) + theme_bw() + #去除背景色 remove background color
+  theme(panel.grid = element_blank(), #去除网格线 remove gridlines
+        axis.title.x = element_text(size=15), #X轴题目字号 X-axis title font size
+        axis.text.x = element_text(size=12), #X轴刻度字号 X-axis scale size
+        axis.title.y.right = element_text(size=15, color = s2Colour), #右侧Y轴刻度字体的颜色 color of the right y-axis scale font
+        axis.text.y.right = element_text(size=12, color = s2Colour), #右侧Y轴title颜色 right Y-axis title color
+        axis.title.y.left = element_text(size=15, colour = s1Colour), #左侧Y轴刻度字体的颜色 color of the left Y-axis scale font
+        axis.text.y.left = element_text(size=12, color = s1Colour)) #左侧Y轴title颜色 left Y-axis title color
+p
+```
+
+把前面计算出的相关系数R1cor和R2cor标在图上
+
+Label the previously calculated correlation coefficients R1cor and R2cor on the plot
+
+```{r}
+# 相关系数在图上的位置，需根据你自己的数据灵活调整
+# the position of the correlation coefficient on the graph needs to be adjusted flexibly according to your own data
+x <- max(inputData$X)*(0.95)
+y <- max(inputData$Y1)*(0.97)
+y2 <- max(inputData$Y1)*(0.9)
+
+# 标相关系数
+# mark correlation coefficient
+p1 <- p + annotate("text", x=x, y=y, label=R1cor, size=5, parse = TRUE, col=s1Colour ) +
+  annotate("text", x=x, y=y2, label=R2cor, size=5, parse = TRUE, col=s2Colour ) 
+p1
+
+# 保存到文件
+# save to file
+ggsave("TwoPlotOfLinearRegression.pdf", width = 6, height = 3)
+```
+右侧y轴的title头朝右，原文头朝左。我们用方法二来实现对原文完全复现。
+
+The title head of the right y-axis faces right, and the original head faces left. We use method 2 to achieve an exact reproduction of the original text.
+
+### 方法二
+### Method 2
+
+先用ggplot2拿到两套坐标的plot object，修改之后重新画图。
+
+First use ggplot2 to get the plot object for the two sets of coordinates, modify it and redraw it.
+
+#### 用ggplot拿到两套坐标的plot object
+#### Use ggplot to get the plot object for two sets of coordinates
+
+```{r}
+#X和Y1的散点、拟合线、相关系数文字
+#X and Y1 scatter, fitting lines, correlation coefficient text
+p1 <- ggplot(inputData, aes(x=inputData$X, y=inputData$Y1)) +
+  geom_point(col=s1Colour) +
+  geom_smooth(aes(x=inputData$X, y=inputData$Y1), method="lm", se=F, col=s1Colour)+
+  annotate("text", x=x, y=y , label=R1cor,size=5, parse = TRUE, col=s1Colour ) +
+  annotate("text", x=x, y=y2, label=R2cor,size=5, parse = TRUE, col=s2Colour )+
+  
+  labs(x=xtitle, y=ylefttitle) + theme_bw()+
+  theme(panel.grid = element_blank(), #去除网格线 remove gridlines
+        axis.title.x = element_text(size=15),
+        axis.text.x = element_text(size=12),
+        axis.title.y = element_text(size=15, colour = s1Colour),
+        axis.text.y = element_text(size=12, color = s1Colour))+
+  coord_fixed(ratio = ratioValues)
+
+#X和Y2的散点、拟合线、背景透明
+#X and Y2 scatter, fitting lines, background transparency
+p2 <- ggplot(inputData, aes(x=inputData$X, y=inputData$Y2)) +
+  geom_point(col=s2Colour) + 
+  geom_smooth(aes(x=inputData$X, y=inputData$Y2), method="lm", se=F, colour=s2Colour)+
+
+  labs(y=yrighttitle) + theme_bw() +
+  theme(panel.background = element_rect(fill = NA), 
+        panel.grid = element_blank(), #去除网格线 remove gridlines
+        axis.title.y = element_text(size=15, color = s2Colour),
+        axis.text.y = element_text(size=12, color = s2Colour)) +
+  coord_fixed(ratio = ratioValues)
+
+#提取plot object，保存到gtable数据结构里
+#extract plot object, save to gtable data structure
+g1 <- ggplot_gtable(ggplot_build(p1))
+g2 <- ggplot_gtable(ggplot_build(p2))
+
+#查看一下提取出的信息长啥样
+#view what the extracted information looks like
+head(g1$layout)
+head(g2$layout)
+```
+
+#### 重新画图
+#### redraw the picture
+
+**提示：**选择从grid.newpage()到任意一个grid.draw(g)之间的部分一起运行，就会看到这部分代码的画图效果。
+
+**Hint:** Select the part between grid.newpage() and any grid.draw(g) to run together to see the drawing effect of this part of the code.
+
+```{r}
+#pdf("TwoPlotOfLinearRegression_plus.pdf", width = 6, height = 3) #想保存到pdf文件，就把这句前的#删掉，同时把最后一句dev.off()前面的#删掉 to save to a pdf file, remove the # before this sentence, and also remove the # before the last sentence dev.off()
+grid.newpage()
+
+#画X和Y1的散点、拟合线、相关系数文字
+#draw X and Y1 scatter, fitting lines, correlation coefficient text
+pp <- c(subset(g1$layout, name == "panel", se = t:r))
+g <- gtable_add_grob(g1, g2$grobs[[which(g2$layout$name == "panel")]], pp$t, 
+                     pp$l, pp$b, pp$l)
+#head(g)
+grid.draw(g)
+
+#画X和Y2的散点、拟合线
+#draw X and Y2 scatter, fitting lines
+ia <- which(g2$layout$name == "axis-l")
+ga <- g2$grobs[[ia]]
+ax <- ga$children[[2]]
+
+ax$widths <- rev(ax$widths)
+ax$grobs <- rev(ax$grobs)
+
+g <- gtable_add_cols(g, g2$widths[g2$layout[ia, ]$l], length(g$widths) - 1)
+
+grid.draw(g)
+
+#画右侧Y轴刻度标签
+#draw the right y-axis scale label
+g <- gtable_add_grob(g, ax, pp$t, length(g$widths) - 1, pp$b)
+grid.draw(g)
+
+#画右侧Y轴title
+#draw the right y-axis title
+yLabTitle <- which(g2$layout$name == "ylab-l")
+gaYLT <- g2$grobs[[yLabTitle]] 
+axYLT <- gaYLT$children[[1]]
+
+axYLT$widths <- rev(axYLT$widths)
+axYLT$grobs <- rev(axYLT$grobs)
+
+g <- gtable_add_cols(g, g2$widths[g2$layout[yLabTitle, ]$l], length(g$widths) - 1)
+g <- gtable_add_grob(g, axYLT, pp$t, length(g$widths) - 1, pp$b)
+
+grid.draw(g)
+
+#dev.off()
+```
+
+![](TwoPlotOfLinearRegression_plus.pdf)
+
+```{r}
+sessionInfo()
+```
