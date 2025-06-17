@@ -1,0 +1,364 @@
+---
+title: "FigureYa55panCancer_violinV2"
+author: "Yi Xiong, Zhougeng Xu, Ying Ge; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+## 需求描述
+## requirement description
+
+TCGA里的正常组织太少，把GTEx的正常组织加进去，用分裂小提琴图展示某个基因在TCGA肿瘤和正常组织中的表达差异。
+
+There is too little normal tissue in TCGA, add normal tissue from GTEx and use split violin plots to show the difference in expression of a gene in TCGA tumor and normal tissue.
+
+![](example.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S0896627318308481>, Supplemental material, Figure 3b
+
+from<https://www.sciencedirect.com/science/article/pii/S0896627318308481>, Supplemental material, Figure 3b
+
+## 应用场景
+## application scenario
+
+适用于：
+
+1. 对比某一基因在TCGA肿瘤组织和正常组织(TCGA的normal和GTEx)基因表达量TPM值
+
+2. 用分裂小提琴图展示表达量数据
+
+Applicable to:
+
+1. compare gene expression TPM values for a gene in TCGA tumor tissue and normal tissue (TCGA's normal and GTEx)
+
+2. Display expression data using split violin plots
+
+## 环境设置
+## environment setting
+
+安装需要用到的包
+
+Install the required packages
+
+```r
+#使用国内镜像安装包
+#use the domestic mirror installation package
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.ustc.edu.cn/bioc/")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("TCGAbiolinks", version = "3.8")
+
+install.packages("stringr")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("RColorBrewer")
+```
+
+加载需要用到的包
+
+Load the required packages
+
+```{r}
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+source("read_part.R") # autor: 徐洲更 autor: Zhougeng Xu
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+## 参数设置
+## parameter setting
+
+```{r}
+targetGene <- "TP53" # 想要画的目标基因 target gene you want to draw
+```
+
+## 输入文件下载
+## Input file download
+
+如果你的数据已经整理成easy_input.csv的格式，就可以跳过这步，直接进入“输入数据预处理”。
+
+If your data has been organized into easy_input.csv format, you can skip this step and go directly to "Input data preprocessing".
+
+### 文件地址：
+### File address:
+
+从UCSC xena<https://xenabrowser.net/datapages/>下载经过TOIL流程统一处理的TCGA和GTEx的TPM，free of computational batch effects。
+
+参考资料：The goal of the Toil recompute was to process ~20,000 RNA-seq samples to create a **consistent meta-analysis** of four datasets **free of computational batch effects**. <https://xenabrowser.net/datapages/?hub=https://toil.xenahubs.net:443>
+
+用这套数据画出来的图跟xena的violin一致：<https://xenabrowser.net/transcripts/>
+
+- TCGA Pan-Cancer (PANCAN) (39 datasets)，点击gene expression RNAseq里的TOIL RSEM tpm (n=10,535) UCSC Toil RNAseq Recompute，下载TPM：<https://toil.xenahubs.net/download/tcga_RSEM_gene_tpm.gz>。点击phenotype里的sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub，下载phenotype：<https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz>
+
+- GTEX (11 datasets)，点击gene expression RNAseq里的TOIL RSEM tpm (n=7,862) UCSC Toil RNAseq Recompute，下载TPM：<https://toil.xenahubs.net/download/gtex_RSEM_gene_tpm.gz>。点击phenotype里的GTEX phenotype (n=9,783) UCSC Toil RNAseq Recompute，下载phenotype：<https://toil.xenahubs.net/download/GTEX_phenotype.gz>
+
+- ID和Gene symbol对应列表下载：<https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.gene.probemap>
+
+- TCGA跟GTEx的组织对应关系，参照GEPIA help的Differential analysis：<http://gepia.cancer-pku.cn/help.html>，整理成samplepair.txt文件
+
+**题外话：**
+
+- 在<https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>这个页面，还有基于TCGA数据加工过的iCluster、Molecular subtype等宝贝等你挖掘。
+
+- 在<https://xenabrowser.net/datapages/>目录下面，有TCGA的各种测序数据，下载链接有规律可循，可批量下载。
+
+Download TPMs of TCGA and GTEx from UCSC xena <https://xenabrowser.net/datapages/> that have been harmonized by the TOIL process, free of computational batch effects.
+
+Reference: The goal of the Toil recompute was to process ~20,000 RNA-seq samples to create a **consistent meta-analysis** of four datasets **free of computational batch effects**. <https://xenabrowser.net/datapages/?hub=https://toil.xenahubs.net:443>
+
+The plot drawn with this data set is consistent with xena's violin: <https://xenabrowser.net/transcripts/>
+
+- TCGA Pan-Cancer (PANCAN) (39 datasets), click on TOIL RSEM tpm (n=10,535) UCSC Toil RNAseq Recompute in gene expression RNAseq, download the TPM: <https://toil.xenahubs.net/download/tcga_RSEM_gene_tpm.gz>. Click on sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub in phenotype, download phenotype: <https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz>
+
+- GTEX (11 datasets), click on TOIL RSEM tpm (n=7,862) UCSC Toil RNAseq Recompute in gene expression RNAseq, download the TPM: <https://toil.xenahubs.net/download/gtex_RSEM_gene_tpm.gz>. Click on GTEX phenotype (n=9,783) UCSC Toil RNAseq Recompute in phenotype, download phenotype: <https://toil.xenahubs.net/download/GTEX_phenotype.gz>
+
+- ID and Gene symbol correspondence list download: <https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.gene.probemap>
+
+- The organizational correspondence between TCGA and GTEx is organized into a samplepair.txt file with reference to the Differential analysis of GEPIA help: <http://gepia.cancer-pku.cn/help.html>.
+
+**Digression: **
+
+- In <https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443> this page, there are also iCluster, Molecular subtype and other treasures based on processed TCGA data for you to dig out.
+
+- Under the <https://xenabrowser.net/datapages/> directory, there are various sequencing data from TCGA with regular download links for bulk downloads.
+
+### 检查一下：你的文件夹里应该有这些输入文件：
+### Check: you should have these input files in your folder:
+
+tcga_RSEM_gene_tpm.gz
+
+TCGA_phenotype_denseDataOnlyDownload.tsv.gz
+
+gtex_RSEM_gene_tpm.gz
+
+GTEX_phenotype.gz
+
+gencode.v23.annotation.gene.probemap
+
+samplepair.txt
+
+## 提取目的基因在各种肿瘤和正常组织里的TPM
+## Extract the TPM of the target gene in various tumors and normal tissues
+
+### 为GTEx的sample标注组织
+### Label tissue for GTEx's sample
+
+```{r}
+samplepair <- read.delim("samplepair.txt",as.is = T)
+gtexpair <- samplepair[,c(1,2,5)]
+gtexpair
+
+#以TCGA的缩写为GTEx的组织命名
+#name the tissues of GTEx after the abbreviation of TCGA
+gtexpair$type <- paste0(gtexpair$TCGA,"_normal_GTEx")
+gtexpair$type2 <-"normal"
+gtextcga <- gtexpair[,c(1,3:5)] #筛掉Detail列 filter out the Detail column
+colnames(gtextcga)[1:2] <- c("tissue","X_primary_site")
+head(gtextcga)
+
+#为GTEx的sample标出组织
+#label tissue for GTEx's sample
+gtexcase <- read.delim(file="GTEX_phenotype.gz",header=T,as.is = T)
+colnames(gtexcase)[1] <- "sample"
+gtexcase2tcga <- merge(gtextcga,gtexcase,by="X_primary_site")
+gtextable <- gtexcase2tcga[,c(5,2:4)]
+head(gtextable)
+```
+
+### 为TCGA的sample标注组织
+### Label tissue for TCGA's sample
+
+```{r}
+tissue <- gtexpair$TCGA
+names(tissue) <- gtexpair$Detail
+
+tcgacase <- read.delim(file="TCGA_phenotype_denseDataOnlyDownload.tsv.gz",header=T,as.is = T)
+
+tcgacase$tissue <- tissue[tcgacase$X_primary_disease]
+tcgacase$type <- ifelse(tcgacase$sample_type=='Solid Tissue Normal',paste(tcgacase$tissue,"normal_TCGA",sep="_"),paste(tcgacase$tissue,"tumor_TCGA",sep="_"))
+tcgacase$type2 <- ifelse(tcgacase$sample_type=='Solid Tissue Normal',"normal","tumor")
+tcgatable<-tcgacase[,c(1,5:7)]
+head(tcgatable)
+```
+
+### 删除没有TPM的sample
+### Delete samples without TPM
+
+```{r}
+headgtex <- read_part("gtex_RSEM_gene_tpm.gz", rows = 1)
+gtexsample <- headgtex[1,]
+gtextable2 <- gtextable[gtextable$sample %in% gtexsample,]
+
+headtcga <- read_part("tcga_RSEM_gene_tpm.gz", rows = 1)
+tcgasample <- headtcga[1,]
+tcgatable2 <- tcgatable[tcgatable$sample %in% tcgasample,]
+
+tcga_gtex<-rbind(tcgatable2,gtextable2)
+```
+
+### 比较现有数据跟GEPIA收录的sample数量
+### Compare the existing data with the number of samples included in GEPIA
+
+```{r}
+statable<-data.frame()
+for (tissuer in sort(unique(tcga_gtex$tissue))){
+  
+  tcga_gtex_tissuer<-tcga_gtex[tcga_gtex$tissue==tissuer,]
+
+  tissuer_tumor_TCGA <- paste0(tissuer,"_tumor_TCGA")
+  tissuer_normal_TCGA <- paste0(tissuer,"_normal_TCGA")
+  tissuer_normal_GTEx <- paste0(tissuer,"_normal_GTEx")
+
+  tissuerdf<-data.frame(TCGA=tissuer,
+                     TCGA_new_tumor=sum(tcga_gtex_tissuer$type==tissuer_tumor_TCGA),
+                     TCGA_new_normal=sum(tcga_gtex_tissuer$type==tissuer_normal_TCGA),
+                     GTEx_new_num=sum(tcga_gtex_tissuer$type==tissuer_normal_GTEx),
+                     stringsAsFactors=F)
+  #str(tissuerdf)
+  statable<-rbind(statable,tissuerdf)
+}
+cbind(statable, samplepair[,c(1,3:6)])
+```
+
+前4列是现有数据，后面是GEPIA数据
+
+The first 4 columns are existing data, followed by GEPIA data
+
+### 找出每个基因在TPM文件中的行号
+### Find the line number of each gene in the TPM file
+
+```{r}
+idmap <- read.delim("gencode.v23.annotation.gene.probemap",as.is=T)
+head(idmap)
+# 读取第一列, 所有行
+# read the first column, all rows
+tpmid2row <- read_part("gtex_RSEM_gene_tpm.gz", rows = -1, columns = 1)
+tpmid2row <- tpmid2row[2:nrow(tpmid2row)]
+tpmid2row <- data.frame(id = tpmid2row)
+tpmid2row$rownum <- seq(1,nrow(tpmid2row))
+head(tpmid2row)
+
+gene2id2row <- merge(idmap,tpmid2row,by="id")
+gene2id2row <- gene2id2row[order(gene2id2row$rownum),]
+head(gene2id2row)
+```
+
+### 提取目的基因在肿瘤和正常组织的TPM
+### Extract TPM of target gene in tumor and normal tissue
+
+此处以TP53基因为例，提取它的TPM
+
+Here we take the TP53 gene as an example to extract its TPM
+
+```{r}
+generownum <- gene2id2row[gene2id2row$gene==targetGene,]$rownum + 1
+gtex_colnames <- read_part("gtex_RSEM_gene_tpm.gz", rows = 1)
+gtex_tpm <- read_part("gtex_RSEM_gene_tpm.gz", rows = generownum)
+tcga_colnames <- read_part("tcga_RSEM_gene_tpm.gz", rows = 1)
+tcga_tpm <- read_part("tcga_RSEM_gene_tpm.gz", rows = generownum)
+
+tpm <- as.numeric(c(gtex_tpm[2:length(gtex_tpm)], 
+                    tcga_tpm[2:length(tcga_tpm)] ))
+names(tpm) <- c(gtex_colnames[2:length(gtex_colnames)], 
+                    tcga_colnames[2:length(tcga_colnames)] )
+
+tcga_gtex$tpm <- tpm[tcga_gtex$sample]
+
+#按组织排序
+#sort by tissue
+tcga_gtex <- arrange(tcga_gtex,tissue)
+write.csv(tcga_gtex[,c(2,4,5)],"easy_input.csv", quote = F)
+```
+
+## 输入数据预处理
+## Input data preprocessing
+
+easy_input.csv：第1列tissue是组织（分组），第2列type2是肿瘤/正常组织（左右分组），第3列tpm是TPM值。
+
+有些组织没有normal，需要识别出来单独画。
+
+easy_input.csv: column 1 tissue is tissue (grouping), column 2 type2 is tumor/normal tissue (left/right grouping), column 3 tpm is TPM value.
+
+Some tissues do not have normal and need to be identified and drawn separately.
+
+```{r}
+tcga_gtex <- read.csv("easy_input.csv", row.names = 1, header = T, as.is = F)
+head(tcga_gtex)
+
+tumorlist <- unique(tcga_gtex[tcga_gtex$type2=="tumor",]$tissue)
+normallist <- unique(tcga_gtex[tcga_gtex$type2=="normal",]$tissue)
+withoutNormal <- setdiff(tumorlist, normallist)
+```
+
+MESO和UVM没有normal
+
+MESO and UVM do not have normal
+
+```{r}
+tcga_gtex$type2 <- factor(tcga_gtex$type2,levels=c("tumor","normal"))
+tcga_gtex_withNormal <- tcga_gtex[!(tcga_gtex$tissue %in% withoutNormal),]
+tcga_gtex_MESO <- tcga_gtex[tcga_gtex$tissue=="MESO",]
+tcga_gtex_UVM <- tcga_gtex[tcga_gtex$tissue=="UVM",]
+```
+
+## 开始画图
+## Start drawing
+
+要用到SplitViolin的图层和函数，保存在GeomSplitViolin.R文件中，位于当前文件夹。
+
+To use the layers and functions of SplitViolin, save them in the GeomSplitViolin.R file, located in the current folder.
+
+```{r, fig.width=20, fig.height=6}
+source("GeomSplitViolin.R") #位于当前文件夹 located in the current folder
+
+p <- ggplot(tcga_gtex_withNormal, aes(x = tissue, y = tpm, fill = type2)) + #x对应肿瘤的类型，y对应表达量，fill填充对应组织的类型 x corresponds to the type of tumor, y corresponds to the amount of expression, and fill corresponds to the type of tissue
+  geom_split_violin(draw_quantiles = c(0.25, 0.5, 0.75), #画4分位线 draw a quartile line
+                    trim = F, #是否修剪小提琴图的密度曲线 whether to trim the density curve of the violin plot
+                    linetype = "solid", #周围线的轮廓 outline of the perimeter line
+                    color = "black", #周围线颜色 color of the perimeter line
+                    size = 0.2,
+                    na.rm = T,
+                    position ="identity")+ #周围线粗细 thickness of the perimeter line
+  ylab(paste0(targetGene, " expression (log2TPM)")) + xlab("") +
+  ylim(-4,9) +
+  scale_fill_manual(values = c("#DF2020", "#DDDF21"))+
+  theme_set(theme_set(theme_classic(base_size=20)))+
+  theme(axis.text.x = element_text(angle = 45, hjust = .5, vjust = .5)) + #x轴label倾斜45度 x-axis label is tilted 45 degrees
+  
+  guides(fill = guide_legend(title = NULL)) + 
+  theme(legend.background = element_blank(), #移除整体边框 remove overall border
+        #图例的左下角置于绘图区域的左下角
+        #the lower left corner of the legend is placed in the lower left corner of the drawing area
+        legend.position=c(0,0),legend.justification = c(0,0))
+
+p + geom_split_violin(data = tcga_gtex_MESO,
+                       mapping = aes(x = tissue, y = tpm, fill = type2),
+                       draw_quantiles = c(0.25, 0.5, 0.75), #画4分位线 draw a quartile line
+                    trim = F, #是否修剪小提琴图的密度曲线 whether to trim the density curve of the violin plot
+                    linetype = "solid", #周围线的轮廓 outline of the perimeter line
+                    color = "black", #周围线颜色 color of the perimeter line
+                    size = 0.2,
+                    na.rm = T,
+                    position ="identity") +
+  geom_split_violin(data = tcga_gtex_UVM,
+                       mapping = aes(x = tissue, y = tpm, fill = type2),
+                       draw_quantiles = c(0.25, 0.5, 0.75), #画4分位线 draw a quartile line
+                    trim = F, #是否修剪小提琴图的密度曲线 whether to trim the density curve of the violin plot
+                    linetype = "solid", #周围线的轮廓 outline of the perimeter line
+                    color = "black", #周围线颜色 color of the perimeter line
+                    size = 0.2,
+                    na.rm = T,
+                    position ="identity") +
+  scale_x_discrete(limits = levels(tcga_gtex$tissue))
+
+ggsave(paste0(targetGene, "expression.pdf"),width = 20, height = 6)
+```
+
+```{r}
+sessionInfo()
+```
+
