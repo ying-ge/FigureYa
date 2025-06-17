@@ -1,0 +1,220 @@
+---
+title: "FigureYa51TMB_update"
+author: "Jingze Gao; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# requirement description
+
+用某个基因的表达量来分组，画出各组的TMB box plot，带散点，计算p value。
+
+Use the expression of a particular gene to group, draw a TMB box plot with scatter points for each group, and calculate the p value.
+
+![](example.png)
+
+出自<https://www.nejm.org/doi/full/10.1056/NEJMoa1406498>
+
+from<https://www.nejm.org/doi/full/10.1056/NEJMoa1406498>
+
+# 应用场景
+# application scenario
+
+借助突变数据TMB，把你的基因跟免疫治疗预后联系起来。
+
+可以用某个基因的表达量高低来分组（或根据其他信息分组），对比不同分组的TMB值。
+
+下一步，还可以用TMB值高低来分组，做生存分析。
+
+With the help of mutation data TMB, link your genes to immunotherapy prognosis.
+
+You can group based on high or low expression of a particular gene (or group based on other information) and compare the TMB values of different groups.
+
+In the next step, it is also possible to do survival analysis by grouping with high or low TMB values.
+
+# 环境设置
+# environment setting
+
+加载R包
+
+Load R package
+
+```{r}
+library(TCGAbiolinks)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+# 用表达量分组
+# Group with expressions
+
+如果你的分组信息已经保存成`easy_input_group.csv`的格式，就可以跳过这步，直接进入“输入文件”。
+
+If your grouping information has been saved as `easy_input_group.csv`, you can skip this step and go directly to the `Input file`.
+
+## 从TCGA下载表达数据
+## Download expression data from TCGA
+
+如果你已经有表达数据，就可以跳过这步，直接进入“根据表达量给sample分组”
+
+If you already have expression data, you can skip this step and go directly to "Group sample based on expression"
+
+```{r, eval=FALSE}
+expquery <- GDCquery(project = "TCGA-LIHC", 
+                data.category = "Transcriptome Profiling",
+                data.type = "Gene Expression Quantification",
+                workflow.type = "STAR - Counts")
+GDCdownload(expquery)
+expquery2 <- GDCprepare(expquery)
+expMatrix <- TCGAanalyze_Preprocessing(expquery2)
+dim(expMatrix)
+expMatrix[1:3,1:4]
+
+#只取肿瘤组织
+#take only tumor tissue
+group_list <- ifelse(substr(colnames(expMatrix),14,14)=='0','tumor','normal')
+expMatrix_tumor <- expMatrix[,group_list=='tumor']
+dim(expMatrix_tumor)
+
+#保存一个基因的表达量，此处选取TP53，对应ID为ENSG00000141510
+#save the expression of a gene, TP53 is selected here, corresponding to the ID of ENSG00000141510
+rownames(expMatrix_tumor) <- sapply(strsplit(rownames(expMatrix_tumor), "\\."), function(x) x[1])
+write.csv(expMatrix_tumor["ENSG00000141510",], "easy_input_expr.csv", quote=F, row.names = T)
+```
+
+## 根据表达量给sample分组
+## Group sample based on expression
+
+easy_input_expr.csv，某个基因在各个sample里的表达量。
+
+第一列是sample ID，与突变数据里的sample ID一致；第二列是基因的表达量。
+
+easy_input_expr.csv, the expression amount of a gene in each sample.
+
+The first column is the sample ID, which corresponds to the sample ID in the mutation data; the second column is the expression amount of the gene.
+
+```{r}
+myGene <- read.csv("easy_input_expr.csv")
+colnames(myGene) <- c("Tumor_Sample_Barcode","Expr") #改列名 modify the column name
+#保留barcode的前三个label
+#keep the first three labels of the barcode
+myGene$Tumor_Sample_Barcode <- str_sub(myGene$Tumor_Sample_Barcode,1, 12)
+head(myGene)
+
+# 用表达量中值分为两组
+# divided into two groups using the median expression
+myGene$Expr_level <- ifelse(myGene$Expr > median(myGene$Expr),"high","low")
+write.csv(myGene[,c(1,3)], "easy_input_group_2.csv", quote = F, row.names = F)
+
+# 或者自己定义cutoff，分为更多组，例如三组
+# or define your own cutoff and divide into more groups, e.g. three groups
+cutoff_low <- 3
+cutoff_high <- 8
+myGene$Expr_level <- cut(myGene$Expr, breaks = c(-Inf, cutoff_low, cutoff_high, Inf), labels = c("low","med","high"))
+write.csv(myGene[,c(1,3)], "easy_input_group_3.csv", quote = F, row.names = F)
+```
+
+# 输入文件
+# Input file
+
+需要TMB和分组文件（两组或更多组）。
+
+mutation-load.txt，TCGA的TMB，来源于2018年的这篇文献：The Immune Landscape of Cancer <https://pubmed.ncbi.nlm.nih.gov/29628290/>，我们直接拿来用就好。
+
+TMB and grouping files (two or more groups) are needed.
+
+mutation-load.txt, TCGA's TMB, is derived from this 2018 paper, The Immune Landscape of Cancer <https://pubmed.ncbi.nlm.nih.gov/29628290/>, which we'll just use directly.
+
+```{r}
+# 加载分组
+# 分两组的情况
+# load grouping
+# divide into two groups
+myGroup <- read.csv("easy_input_group_2.csv")
+myGroup$Expr_level <- factor(myGroup$Expr_level, levels = c("low", "high"))
+
+# 分三组的情况
+# divide into three groups
+#myGroup <- read.csv("easy_input_group_3.csv")
+#myGroup$Expr_level <- factor(myGroup$Expr_level, levels = c("low", "med", "high"))
+head(myGroup)
+
+# 加载TMB
+# load TMB
+myMut <- data.table::fread("mutation-load.txt",data.table = F)
+# 其中Non-silent per Mb是TMB
+# among them, Non-silent per Mb is TMB
+head(myMut)
+
+# 合并
+# merge
+TMB_clinical_mRNA <- myGroup %>%
+  inner_join(myMut,by = c("Tumor_Sample_Barcode" = "Patient_ID")) %>%
+  rename(TMB = 'Non-silent per Mb' ) 
+head(TMB_clinical_mRNA)
+```
+
+# 开始画图
+# Start drawing
+
+用ggplot2画图，用ggpubr算p value。
+
+Use ggplot2 to draw the graph, use ggpubr to calculate the p value.
+
+```{r, fig.width = 3, fig.height = 4}
+mycol <- c("darkgreen", "darkorchid3", "orange") #与分组数量一致 consistent with the number of groups
+p <- ggplot(TMB_clinical_mRNA, aes(x = Expr_level, y = TMB, color = Expr_level)) +
+  geom_boxplot(outlier.color = NA) + #隐去箱线图上的异常点 hide the abnormal points on the box plot
+
+  scale_color_manual(values = mycol) + #自定义配色 custom color scheme
+  
+  stat_compare_means(#paired = T, #whether you want a paired test
+                     #两组对比，用wilcox.test或t.test comparison between two groups using wilcox.test or t.test
+                     method = "wilcox.test", 
+                     
+                     #多组对比，用kruskal.test或anova multiple group comparisons using kruskal.test or anova
+                     #method = "kruskal.test",
+                     label.y = max(TMB_clinical_mRNA$TMB)*1.1) + #label的位置 the position of label
+  
+  theme_bw() + #去除背景色 remove background color
+  theme(panel.grid =element_blank()) + #去除网格线 remove gridlines
+  theme(panel.border = element_blank()) + #去除外层边框 remove outer border
+  theme(axis.line = element_line(colour = "black")) + #沿坐标轴显示直线 display line along coordinate axis
+  xlab("Discovery Set") + 
+  #ylim(0,5) + #设置Y轴范围 set the Y-axis range
+  guides(color=FALSE) #不显示图例 legend is not displayed
+p
+
+# 绘制Wikinson点图
+# draw Wikinson dot plot
+p + geom_dotplot(binaxis = "y", #沿y轴堆积，并沿着x轴分组 stack along the y-axis and group along the x-axis
+               binwidth = 0.5, #最大组距 maximum group distance
+               dotsize = 1, #点的大小 size of the point
+               #如果点太多，两组叠在一起，就需要运行下面这行把它们分开
+               #if there are too many points and the two groups overlap, you need to run the following line to separate them
+               #stackgroups = T, binpositions="all",
+               stackdir = "center")  #数量保持一致的中心堆叠方式 center stacking method with consistent quantity
+ggsave("TMB_dot.pdf")
+
+# 或者散点图
+# or scatter plot
+p + geom_point(aes(group = Expr_level),
+             alpha=.3, #点太多，设为透明色，就能看到叠加效果 too many points, set them to transparent color to visualize the overlay effect
+             size = 2, #点的大小 size of the point
+             position="jitter") #分散 disperse
+ggsave("TMB_point.pdf")
+```
+
+```{r}
+sessionInfo()
+```
