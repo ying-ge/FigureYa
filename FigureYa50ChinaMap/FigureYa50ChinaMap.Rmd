@@ -1,0 +1,303 @@
+---
+title: "FigureYa50ChinaMap"
+author: "Jie Zhang; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+![](easycharts.png)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# requirement description
+
+世界地图上的中国标准地图，省份内填充的颜色展示该省数据。
+
+A standard map of China on the world map, with colors filled within each province to represent the data of that province.
+
+![](example.png)
+
+出自<http://dx.plos.org/10.1371/journal.pntd.0005930>
+
+from<http://dx.plos.org/10.1371/journal.pntd.0005930>
+
+# 应用场景 
+# application scenario
+
+展示某一特征值在各省的分布情况。例如：人口、发病率、GDP等。
+
+Display the distribution of a specific characteristic across provinces. For example: population, incidence rate, GDP, etc.
+
+# 环境设置
+# environment setting
+
+用国内清华的镜像安装包，更快
+
+Use the domestic Tsinghua's mirror installation package, faster
+
+```{r, eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+install.packages("Cairo")
+install.packages('pinyin')
+```
+
+加载R包
+
+load R package
+
+```{r}
+library(pinyin) #汉字转拼音 convert Chinese characters to pinyin
+library(maps)
+library(ggplot2)
+library(scales)
+library(plyr)
+library(Cairo)
+library(maptools)
+library(sf)
+library(dplyr)
+library(stringr)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+# 输入数据
+# Input data
+
+easy_input.csv，要画的各省数据。包含两列：省的名字和数值
+
+easy_input.csv, data of each province to be plotted. It contains two columns: the name and value of the province
+
+```{r}
+mydata <- read.csv("easy_input.csv")
+head(mydata)
+```
+
+# 导入地图数据，并编辑
+# Import map data and edit
+
+bou2_4m文件夹，中国省级地图文件，比例尺为400万分之一。来源于国家基础地理信息中心的网站<http://nfgis.nsdi.gov.cn>，里面的省名是GBK编码的汉字。
+
+字母p结尾的表示多边形数据，用来绘制区域；字母l结尾的文件是线形数据，用来绘制边界。
+
+bou2_4m folder, Chinese provincial map files with scale of 1:4,000,000. Sourced from the website of the National Geomatics Center of China <http://nfgis.nsdi.gov.cn>, the province names in it are GBK-encoded Chinese characters.
+
+Files ending with the letter p represent polygonal data, which are used to draw areas; files ending with the letter l are linear data, which are used to draw boundaries.
+
+```{r}
+world_map <- map_data("world")
+
+#边界线
+#boundary line
+china_map <- st_read("bou2_4m/bou2_4l.shp")
+xs <- china_map %>% 
+  as.data.frame() %>% 
+  mutate(id = row.names(.))
+china_line_data <- china_map %>% 
+  st_as_sf() %>% 
+  mutate(id = row.names(.)) %>% 
+  left_join(xs, by = "id")
+
+#省级区域地图
+#map of provincial areas
+china_map <- st_read("bou2_4m/bou2_4p.shp")  
+xs <- china_map %>% 
+  st_drop_geometry() %>%  
+  mutate(id = row.names(.))
+
+#把省名从GBK转成UTF-8
+#convert province name from GBK to UTF-8
+xs$NAME <- iconv(xs$NAME, from = "GBK", to = "UTF-8")
+#把省名从汉字转成拼音
+#convert province name from Chinese characters to pinyin
+pinyinProv <- data.frame(NAME = unique(xs$NAME), 
+                         province = apply(data.frame(unique(xs$NAME), stringsAsFactors = F),1,
+                                        function(x)(py(x, sep = "", dic = pydic(method = "toneless", dic = "pinyin2")))))
+#删掉sheng、zizhiqu、huizuzizhiqu、weiwuerzizhiqu、zhuangzuzizhiqu、tebiehangzhengqu字样
+#delete the words sheng, zizhiqu, huizuzizhiqu, weiwuerzizhiqu, zhuangzuzizhiqu, tebiehangzhengqu
+pinyinProv$province <- str_replace_all(pinyinProv$province, "sheng","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "shi","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "huizuzizhiqu","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "weiwuerzizhiqu","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "zhuangzuzizhiqu","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "tebiehangzhengqu","")
+pinyinProv$province <- str_replace_all(pinyinProv$province, "zizhiqu","")
+#把陕西跟山西的拼音区分开，陕西的拼音是shannxi
+#differentiate the pinyin of Shaanxi and Shanxi, the pinyin for Shaanxi is shannxi.
+pinyinProv[11,]$province <- "shannxi" 
+
+#把拼音合并进地图文件
+#merge pinyin into a map file
+xss <- left_join(xs, pinyinProv, by = "NAME")
+
+#提取经纬度
+#extract latitude and longitude
+china_map_data <- china_map %>% 
+  mutate(id = row.names(.)) %>% 
+  left_join(xss, by = "id")
+```
+
+# 南海方框内地图的计算
+# Calculation of the map within the South China Sea box
+
+```{r}
+#参数设置
+#parameter setting
+Width<-8
+Height<-9
+
+#方框的位置
+#position of the box
+long_Start<-128 
+lat_Start<-18
+
+#南海方框内要画的经纬度范围
+#the latitude and longitude ranges to be drawn in the South China Sea box
+china_line_data <- st_make_valid(china_line_data)
+china_map_data <- st_make_valid(china_map_data)
+
+suppressWarnings({
+  bbox <- st_bbox(c(xmin = 106.55, xmax = 123.58, ymin = 4.61, ymax = 25.45), 
+                 crs = st_crs(china_line_data))
+  china_map1 <- st_crop(china_line_data, bbox)
+  china_map2 <- st_crop(china_map_data, bbox)
+})
+
+#缩小后的经纬度
+#reduced latitude and longitude
+scale_geometry <- function(geom) {
+  if (is.na(st_dimension(geom))) return(geom)
+  
+  coords <- st_coordinates(geom)
+  scaled_coords <- coords
+  scaled_coords[, "X"] <- (coords[, "X"] - bbox_origin["xmin"]) / x_range * Width + long_Start
+  scaled_coords[, "Y"] <- (coords[, "Y"] - bbox_origin["ymin"]) / y_range * Height + lat_Start
+  
+  geom_type <- st_geometry_type(geom)
+  
+  if (geom_type %in% c("LINESTRING", "MULTILINESTRING")) {
+    if ("L1" %in% colnames(coords)) {  
+      parts <- split(as.data.frame(scaled_coords), list(coords[, "L1"]))
+      lines <- lapply(parts, function(p) as.matrix(p[, c("X", "Y")]))
+      if (length(lines) > 1) st_multilinestring(lines) else st_linestring(lines[[1]])
+    } else {
+      st_linestring(scaled_coords[, c("X", "Y")])
+    }
+  } else if (geom_type %in% c("POLYGON", "MULTIPOLYGON")) {
+    if ("L1" %in% colnames(coords)) {  
+      close_ring <- function(m) {
+        if (!all(m[1, ] == m[nrow(m), ])) rbind(m, m[1, , drop = FALSE]) else m
+      }
+      
+      parts <- split(as.data.frame(scaled_coords), list(coords[, "L2"], coords[, "L1"]))
+      polygons <- lapply(parts, function(p) close_ring(as.matrix(p[, c("X", "Y")])))
+      
+      if (length(polygons) > 1) {
+        st_multipolygon(list(polygons))
+      } else {
+        st_polygon(list(polygons[[1]]))
+      }
+    } else {
+      closed <- if (!all(scaled_coords[1, 1:2] == scaled_coords[nrow(scaled_coords), 1:2])) {
+        rbind(scaled_coords[, 1:2], scaled_coords[1, 1:2])
+      } else {
+        scaled_coords[, 1:2]
+      }
+      st_polygon(list(closed))
+    }
+  } else {
+    warning("未处理的几何类型: ", geom_type)
+    geom
+  }
+}
+
+bbox_origin <- st_bbox(china_map2)
+x_range <- bbox_origin["xmax"] - bbox_origin["xmin"]
+y_range <- bbox_origin["ymax"] - bbox_origin["ymin"]
+
+china_map3 <- china_map1
+st_geometry(china_map3) <- st_sfc(lapply(st_geometry(china_map1), scale_geometry), 
+                                 crs = st_crs(china_map1))
+
+china_map4 <- china_map2
+st_geometry(china_map4) <- st_sfc(lapply(st_geometry(china_map2), scale_geometry), 
+                                 crs = st_crs(china_map2))
+```
+
+# 开始画图
+# Start drawing
+
+```{r}
+#地图跟各省数据value合并
+#merge the map with the value data of each province
+china_data <- merge(china_map_data, mydata, all = TRUE)
+china_map4 <- merge(china_map4, mydata, all = TRUE)
+
+#保存到pdf文件
+#save to PDF file
+CairoPDF(file="China_map",width=6.14*2,height=3.22*2)
+p <- ggplot() +
+  #先画世界地图作为背景，后面画的就是往它上面叠加
+  #first, draw the world map as the background, and then overlay the subsequent drawings on top of it
+  geom_polygon(data=world_map,
+               aes(x=long,y=lat,group=group),
+               colour="grey20", #边界线深灰色 boundary line dark gray
+               fill="#EAEAEA", #浅灰色填充 light gray filling
+               size=.1)+
+  
+  #边界线黑色
+  #boundary line black
+  geom_sf(data = china_line_data, 
+          color = "black", linewidth = 0.15) +
+  
+  #自定义填充色
+  #custom fill colors
+  scale_fill_gradient(low = "white", high = "#92150C", #渐变色 gradient color
+                      na.value = "#FEFFE8") + #没有值的省用黄色填充 provisions with no value are filled in yellow
+  
+  #省份区域颜色填充
+  #province area color fill
+  geom_sf(data = china_data, 
+          aes(fill = Value),  #或as.factor(Value)设置单个的颜色 or set a single color using as.factor(Value)
+          color = "grey10", linewidth = 0.1) +
+  
+  #南海边框
+  #South China Sea border
+  geom_rect(aes(xmin = long_Start, xmax = long_Start + Width, 
+                ymin = lat_Start, ymax = lat_Start + Height),
+            fill = NA, color = "black", linewidth = 0.15) +
+  
+  #南海方框内的省份颜色填充
+  #color fill of provinces in the South China Sea box
+  geom_sf(data = china_map4, 
+          aes(fill = Value), 
+          color = "grey10", linewidth = 0.05) +
+  
+  #南海方框内的边界线
+  #boundary lines in the South China Sea box
+  geom_sf(data = china_map3, 
+          color = "black", linewidth = 0.05) +
+  
+  coord_sf() + 
+  theme_void() + #不画坐标系 do not draw coordinate system
+  theme(plot.background = element_rect(fill = "lightskyblue")) #海水蓝色 seawater blue
+        
+p
+dev.off()
+```
+
+# 后期处理
+# Post-processing
+
+输出的pdf文件是矢量图，可以在Illustrator等软件里打开，截取想要的区域即可。例如：
+
+The output pdf file is a vector map, you can open in Illustrator and other software, intercept the desired area. For example:
+
+![](China_map.png)
+
+```{r}
+sessionInfo()
+```
