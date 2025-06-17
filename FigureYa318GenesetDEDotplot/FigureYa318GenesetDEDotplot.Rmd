@@ -1,0 +1,294 @@
+---
+title: "FigureYa318GenesetDEDotplot"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+代谢分析最后的f图，他是怎么算70多条代谢通路在单细胞里面跟其他基因集相关性的。
+
+The final figure f in the metabolic analysis, how does it calculate the correlation between over 70 metabolic pathways and other gene sets in single cells.
+
+![](example.png)
+
+出自：<https://bmcbiol.biomedcentral.com/articles/10.1186/s12915-023-01540-2>
+
+图1 利用单细胞RNA测序解析动脉粥样硬化的免疫图谱
+(f) 点图显示AC和PA组织中全局细胞类型间差异富集的通路
+
+Source: <https://bmcbiol.biomedcentral.com/articles/10.1186/s12915-023-01540-2>
+
+Fig. 1 Dissection of the immune landscape in atherosclerosis with scRNA-seq.
+(f) Dot plots showing differentially enriched pathways in the global cell type between AC and PA tissues
+
+# 应用场景
+# Application Scenario
+
+根据单细胞数据，计算不同细胞类型中两组间通路活性得分，并绘制差异分析点图(Fig.1 f)。点的大小表示显著性（padj或FDR等），点的颜色表示logFC。
+
+Figure 1e，细胞比例分布特异度（Ro/e）折线图，可参考FigureYa317RoeDot <https://k.youshop10.com/Qn2Wb5MU>。
+
+Based on single-cell data, pathway activity scores between the two groups were calculated across different cell types, and differential analysis dot plots were generated (Fig. 1f). Dot size represents significance (e.g., padj or FDR), while dot color indicates logFC.
+
+Figure 1e displays the cell proportion distribution specificity (Ro/e) line graph, which can be referenced to FigureYa317RoeDot <https://k.youshop10.com/Qn2Wb5MU>.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("BiocManager")
+install.packages("SeuratObject")
+BiocManager::install("GEOquery")
+BiocManager::install("AUCell")
+BiocManager::install("clusterProfiler")
+BiocManager::install("limma")
+BiocManager::install("GSVA")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(Seurat)
+library(magrittr)
+library(GEOquery)
+library(plyr)
+library(openxlsx)
+library(GSVA)
+library(AUCell)
+library(clusterProfiler)
+library(limma)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+Seurat对象：这步跟FigureYa317RoeDot相同。包含样本来源（Group）和细胞类型（Celltypes）信息。从GEO下载输入数据，<https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159677>，下载Supplementary file表格里的`GSE159677_RAW.tar`，和Download family里的`Series Matrix File(s)`，存放在InputData文件夹里。也可以从语雀下载<https://www.yuque.com/figureya/figureyaplus/easyinput>
+
+Seurat object: This step is the same as FigureYa317RoeDot. It contains sample source (Group) and cell type (Celltypes) information. Download input data from GEO, <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159677>, download `GSE159677_RAW.tar` from the Supplementary file table, and `Series Matrix File(s)` from Download family, and store them in the InputData folder. You can also download from Yuque<https://www.yuque.com/figureya/figureyaplus/easyinput>.
+
+![](InputData.png)
+
+h.all.v7.5.1.symbols.gmt，基因集文件，存放基因与通路的关联关系
+
+GenesetInfo.txt，通路信息文件，标识通路及其所属分类
+
+h.all.v7.5.1.symbols.gmt - Gene set file containing gene-pathway associations
+
+GenesetInfo.txt - Pathway information file identifying pathways and their respective categories
+
+```{r eval=FALSE}
+# 单细胞数据的准备
+# 目标：生成一个注释好的Seurat对象，以备作图需求
+# Seurat对象应包含以下信息:
+# 样本分组（group）和细胞类型（Celltypes）
+# Preparation of Single-Cell Data  
+# Objective: Generate an annotated Seurat object for plotting purposes  
+# The Seurat object should contain the following information: 
+# Sample grouping (group) and Cell types (Celltypes)
+
+# 设置存放输入数据的路径
+# Set the path for input data storage
+data.path <- file.path("InputData") 
+
+# 读取样本信息
+# Read sample information
+sample.info <- getGEO(filename = file.path(data.path,"GSE159677_series_matrix.txt.gz"))
+sample.info <- as.data.frame(sample.info)
+sample.info$title <- gsub(" scRNA-seq", "", sample.info$title)
+sample.info <- data.frame(
+  "geo" = sample.info$geo_accession,
+  "patient" = gsub("(.+)\ (.+)\ (.+)", "\\1\\2", sample.info$title),
+  "group" = gsub("(.+)\ (.+)\ (.+)", "\\3", sample.info$title)
+)
+
+# 批量读取表达矩阵
+# Batch read expression matrices
+samples <- list.dirs("InputData", full.names = T)[-1]
+mtx.list <- lapply(samples, function(sample){
+  mtx = Read10X(data.dir = sample)
+  colnames(mtx) = paste0(substr(basename(sample), 1, 10), colnames(mtx))
+  return(mtx)
+})
+mtx <- do.call(cbind, mtx.list)
+
+# 生成Seurat对象
+# Create Seurat object
+seu <- CreateSeuratObject(mtx, min.cells = 3, min.features = 200)
+seu$Sample <- substr(colnames(seu), 1, 10)
+seu$Patient <- mapvalues(x = seu$Sample,
+                         from = sample.info$geo, to = sample.info$patient)
+seu$Group <- mapvalues(x = seu$Sample,
+                       from = sample.info$geo, to = sample.info$group)
+seu <- FindVariableFeatures(seu) %>% NormalizeData() %>% ScaleData()
+seu <- RunPCA(seu)
+seu <- RunUMAP(seu, dims = 1:20)
+seu <- FindNeighbors(seu, dims = 1:20) %>% FindClusters(resolution = 0.4)
+DimPlot(seu, group.by = "seurat_clusters", label = T)
+
+# 此处使用机器注释，实际情况中应使用手动注释
+# Automated annotation is used here (manual annotation recommended in practice)
+marker <- read.xlsx("marker.xlsx")
+marker <- split(marker$GeneSymbol, marker$Celltype)
+param <- GSVA::gsvaParam(exprData = AverageExpression(seu)[[1]],  
+                         geneSets = marker)
+marker.score <- GSVA::gsva(param)
+anno <- data.frame(
+  "cluster" = colnames(marker.score),
+  "celltype" = rownames(marker.score)[apply(marker.score, 2, which.max)]
+)
+seu$Celltypes <- mapvalues(x = seu$seurat_clusters,
+                           from = anno$cluster, to = anno$celltype)
+
+# 保存seu对象
+# Save Seurat object  
+saveRDS(seu, "seu.rds") 
+```
+
+# 不同细胞类型中，两组间通路活性得分的差异分析
+# Differential analysis of pathway activity scores between two groups across different cell types
+
+```{r}
+# 读取Seurat对象
+# Read Seurat object
+seu <- readRDS("seu.rds")
+
+# 读取通路信息，计算各细胞类型的通路得分
+# 设置存放输入数据的路径
+# Read pathway information and calculate pathway scores for each cell type
+# Set path for input data storage
+data.path <- file.path("InputData") 
+geneset <- read.gmt("h.all.v7.5.1.symbols.gmt")
+geneset <- split(geneset$gene, geneset$term)
+genesetInfo <- read.delim("GenesetInfo.txt", sep = ",")
+genesetInfo <- subset(genesetInfo, Classification != "")
+levels = c("Immune", "Metabolism", "Signaling", "Proliferation")
+genesetInfo$Classification <- factor(genesetInfo$Classification, levels)
+genesetInfo <- arrange(genesetInfo, genesetInfo$Classification, genesetInfo$geneset)
+genesetInfo$geneset <- factor(genesetInfo$geneset, levels = genesetInfo$geneset)
+counts_matrix <- LayerData(seu, assay = "RNA", layer = "counts")
+score <- AUCell_run(counts_matrix, geneset)
+score <- score@assays@data$AUC
+
+# 在不同细胞类型中，对两组进行差异分析
+# Perform differential analysis between two groups across cell types
+compare="AC-PA" 
+adjust.method = "bonferroni" 
+DP.list <- lapply(levels(seu$Celltypes), function(celltype){
+  group = setNames(object = seu$Group[seu$Celltypes == celltype],
+                   nm = colnames(seu)[seu$Celltypes == celltype])
+  design = model.matrix(~ 0 + factor(group))
+  colnames(design) = levels(factor(group))
+  rownames(design) = names(group)
+  
+  contrast.matrix = makeContrasts(compare, levels = design) # should be Test-Control
+  fit = lmFit(score[, names(group)], design)
+  fit2 = contrasts.fit(fit, contrast.matrix)
+  fit2 = eBayes(fit2) 
+  DPs = topTable(fit2, coef=1, n=Inf, adjust.method = adjust.method)
+  DPs$Celltypes = celltype
+  DPs$Pathway = rownames(DPs)
+  return(DPs)
+})
+DPs <- do.call(rbind, DP.list)
+
+# 输出差异分析表格
+# Output differential analysis results
+write.table(DPs, file = "output_hallmark.txt",
+            sep = "\t", row.names = F, col.names = T, quote = F)
+```
+
+# 开始画图 - Fig.1 f
+# Start plotting - Fig.1 f
+
+```{r fig.width=12, fig.height=4}
+# 准备画图数据
+# Prepare plotting data
+DPs <- read.table("output_hallmark.txt", header = T)
+plot.data <- DPs
+plot.data <- subset(plot.data, Pathway %in% genesetInfo$geneset)
+plot.data$Celltypes <- factor(plot.data$Celltypes)
+plot.data$Pathway <- factor(plot.data$Pathway, levels = genesetInfo$geneset) 
+plot.data$FDR<- cut(plot.data$adj.P.Val, breaks = c(0, 1e-125, 1e-75, 1e-25, 1),
+                    include.lowest = T)
+plot.data$FDR <- factor(as.character(plot.data$FDR),
+                        levels = rev(levels(plot.data$FDR)))
+levels(plot.data$Pathway) <- tolower(gsub("HALLMARK_", "", levels(plot.data$Pathway)))
+
+# 绘图
+# Plotting
+color = c("#4682B4", "#FFFFFF", "#CD2626") 
+class.color = c("Immune" = "#D58986", "Metabolism" = "#80554C",
+                "Signaling" = "#71AC7A", "Proliferation" = "#E8D4B4") 
+p1 <- ggplot(plot.data, aes(x = Pathway, y = Celltypes, color = logFC, size = FDR)) +
+  geom_point() +
+  scale_color_gradient2(low = color[1], mid = color[2], high = color[3]) +
+  geom_hline(yintercept = seq(min(as.numeric(plot.data$Celltypes))-0.5,
+                              max(as.numeric(plot.data$Celltypes))+0.5),
+             color = "grey80") +
+  geom_vline(xintercept = seq(min(as.numeric(plot.data$Pathway))-0.5,
+                              max(as.numeric(plot.data$Pathway))+0.5),
+             color = "grey80") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.line = element_blank())
+
+p2 <- ggplot(genesetInfo, aes(x = geneset, y = 1, fill = Classification)) +
+  geom_tile() +
+  theme_classic() +
+  scale_fill_manual(values = class.color) +
+  theme(axis.text = element_blank(), axis.title = element_blank(),
+        axis.ticks = element_blank(), axis.line = element_blank())
+
+# 拼接图像
+# Combine plots
+plot_grid(p1, p2, ncol = 1, align = 'v', rel_heights = c(10, 1)) 
+
+ggsave("hallmark.pdf", width = 12, height = 4)
+```
+
+# 后期处理
+# Post-processing
+
+输出的pdf文件是矢量图文件，可以用Illustrator等矢量图编辑器打开，调整图形或文字的位置。
+
+The output PDF file is a vector graphic that can be opened with vector editors like Illustrator for adjusting the positions of graphic elements or text.
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
