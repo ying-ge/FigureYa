@@ -1,0 +1,322 @@
+---
+title: "FigureYa53 PPImodule"
+author: "Yangzhige He; Ying Ge, Yijing Chen"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 需求描述
+## requirement description
+
+通过已知PPI数据库找到共表达蛋白中的module，输出到文件，用于下一步cytoscape展示。
+
+Find the module in co-expressed proteins through the known PPI database and output it to a file for the next step of cytoscape presentation.
+
+![demo](FigureYa53PPImodule-0527更新.assets/demo.png)
+
+出自<https://www.sciencedirect.com/science/article/pii/S1074761317300729?via%3Dihub>
+
+from<https://www.sciencedirect.com/science/article/pii/S1074761317300729?via%3Dihub>
+
+## 应用场景
+## application scenario
+
+把自己的基因列表跟蛋白相互作用网络联系起来。
+
+例如RNA-seq获得的差异表达基因，看他们在蛋白相互作用网络中，哪些基因处于同一module。
+
+Link your gene list to the protein interaction network.
+
+For example, differential expression genes obtained from RNA-seq, see which genes are in the same module within the protein interaction network.  
+
+## 环境设置
+## environment setting
+
+安装需要的包
+
+Install the required packages
+
+```r
+#使用国内镜像安装包
+#use the domestic mirror installation package
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+install.packages("dynamicTreeCut")
+install.packages("openxlsx")
+install.packages("stringr")
+install.packages("Matrix")
+install.packages("WGCNA")
+```
+
+加载需要用到的包
+
+Load the required packages
+
+```{r}
+library(dynamicTreeCut)
+library(openxlsx)
+library(stringr)
+library(Matrix)
+library(WGCNA)
+
+Sys.setenv(LANGUAGE = "en") #显示英文报错信息 display English error messages
+options(stringsAsFactors = FALSE) #禁止chr转成factor prohibit the conversion of chr to factor
+```
+
+## 输入文件
+## Input file
+
+需要3个文件：
+
+- 共表达基因列表，此处用paper附件里的mm2.xlsx
+- Uniprot ID转换文件：<ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping_selected.tab.gz>
+- 从STRING数据库下载PPI数据<https://stringdb-static.org/download/protein.actions.v10.5/10090.protein.actions.v10.5.txt.gz>。三个红框表示：数据库版本号，物种搜索框，相互作用数据（包含相互作用类型，如物理相互作用)。注意版本号，以及物种搜索框内为‘Mus musculus’，下载第三个框内文件。
+
+Three files are required:
+
+- Co-expressed gene list, using mm2.xlsx from the paper attachment here.
+- Uniprot ID conversion file: <ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping_selected.tab.gz>
+- Download PPI data from the STRING database<https://stringdb-static.org/download/protein.actions.v10.5/10090.protein.actions.v10.5.txt.gz>. The three red boxes indicate: database version number, species search box, interaction data (including interaction types, such as physical interactions). Note the version number, and the species search box should contain 'Mus musculus', download the file in the third box.
+
+![STRING](FigureYa53PPImodule-0527更新.assets/STRING.png)
+
+## ！关于输入文件的更新
+## ! Update of the input file
+
+需要3个文件：
+
+- ！共表达基因列表，此处用paper附件里的**mmc2.xlsx， Data S1. Whole Proteome and Phosphoproteome Analyses of WT and Rptor-Deficient T Cells (1st experiment)**.  https://ars.els-cdn.com/content/image/1-s2.0-S1074761317300729-mmc2.xlsx，下载之后重命名为**mmc2.xlsx**
+
+- ！Uniprot ID转换文件：**链接更新为：https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping_selected.tab.gz   把ftp改为https。**     《 **对应的人的为https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping_selected.tab.gz** 》   《人和小鼠对应的版本号：HUMAN_9606， **MOUSE_10090**》  MOUSE_10090_idmapping_selected.tab.gz下载之后解压。
+
+- **！从STRING数据库下载PPI数据：（此处更新较大！！）**
+
+  在https://string-db.org/cgi/download网站看左上角版本号：**version 11.0**，输人或者小鼠，左下角没有找到小丫代码里面的文件。（如下图示：）
+
+Three files are required:
+
+- ! Co-expressed gene list, use **mmc2.xlsx in the paper attachment, Data S1. Whole Proteome and Phosphoproteome Analyses of WT and Rptor-Deficient T Cells (1st experiment)**.  https://ars.els-cdn.com/content/image/1-s2.0-S1074761317300729-mmc2.xlsx, download and rename to **mmc2.xlsx**.
+
+- ！Uniprot ID conversion file: **Link updated to https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping_selected.tab.gz. change ftp to https.** 《**Correspond to the human https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping_selected.tab.gz** 》  《Version number corresponding to humans and mice: HUMAN_9606, **MOUSE_10090**》 MOUSE_10090_idmapping_selected.tab.gz Unzip after downloading.
+
+- **! Download PPI data from STRING database: (larger update here!!) **
+
+  Look at the version number in the upper left corner of https://string-db.org/cgi/download website: **version 11.0**, type in human or mouse, and the file in the Xiaoya code is not found in the lower left corner. (as shown below:)
+
+  ![STRINGv11-mm](FigureYa53PPImodule-0527更新.assets/STRINGv11-mm.png)
+
+![STRINGv11-hg](FigureYa53PPImodule-0527更新.assets/STRINGv11-hg.png)
+
+在https://stringdb-static.org/download/网站找到对应的**protein.actions.v11.0/** 路径，在此路径下找到 HUMAN_9606和**MOUSE_10090**分别对应的文件9606.protein.actions.v11.0.txt.gz https://stringdb-static.org/download/protein.actions.v11.0/9606.protein.actions.v11.0.txt.gz、**10090.protein.actions.v11.0.txt.gz https://stringdb-static.org/download/protein.actions.v11.0/10090.protein.actions.v11.0.txt.gz**
+
+10090.protein.actions.v11.0.txt.gz下载之后解压，10090.protein.actions.v11.0.txt文件有318MB。
+
+Find the corresponding **protein.actions.v11.0/** path in https://stringdb-static.org/download/ website, under this path, find the corresponding file 9606.protein.actions.v11.0.txt.gz https://stringdb-static.org/download/protein.actions.v11.0/9606.protein.actions.v11.0.txt.gz, **10090.protein.actions.v11.0.txt.gz https://stringdb-static.org/download/protein.actions.v11.0/10090.protein.actions.v11.0.txt.gz** for HUMAN_9606 and **MOUSE_10090** respectively.
+
+10090.protein.actions.v11.0.txt.gz After downloading and unzipping the file, 10090.protein.actions.v11.0.txt has 318MB.
+
+### 从paper附件获得WPC3基因及蛋白ID
+### Obtain WPC3 gene and protein ID from the paper attachment
+
+```{r convert genename to ENSEMBLPROT}
+wpc <- read.xlsx("mmc2.xlsx",cols=2:4,startRow = 3) #读入文件第一个sheet中的第2:4列，从第3行开始 read column 2:4 in the first sheet of the file, starting from the third line
+wpc3 <- wpc[wpc$WPC==3&!is.na(wpc$WPC),]
+
+uniprot_wpc3 <- str_split(wpc3$Protein.Accession,"[|]",3,simplify = T)[,2]
+uniprot_wpc3 <- str_split(uniprot_wpc3,"[-]",2,simplify = T)[,1]
+wpc3$uniprot <- uniprot_wpc3
+```
+
+### 根据Uniprot ID提取ENSEMBLPROT ID
+### Extract ENSEMBLPROT ID according to Uniprot ID
+
+```{r}
+idmapping<-read.table("MOUSE_10090_idmapping_selected.tab",header = F,as.is=T,sep="\t")
+rownames(idmapping)<-idmapping$V1
+ids_wpc3 <- idmapping[intersect(uniprot_wpc3,rownames(idmapping)),][,c(1,21)]
+dim(ids_wpc3)#由于uniprot版本问题会丢失1456-1415=41个蛋白 1456-1415=41 proteins will be lost due to the problem of uniprot version
+prots <- str_split(ids_wpc3$V21,"; ")
+names(prots)<- rownames(ids_wpc3)
+prots <- prots[prots!=""]
+prots_tmp <- unlist(lapply(seq_along(prots), function(x) paste(names(prots)[x], prots[[x]],sep=";")))
+prots_mat <- data.frame(str_split(prots_tmp,"[;]",2,simplify = T),stringsAsFactors = F)
+colnames(prots_mat) <- c("uniprot","ensemblprot")
+head(prots_mat)
+gene_ensemblprot <- merge(wpc3,prots_mat,by="uniprot")
+gene2ensemblprot <- gene_ensemblprot[,c(1,3,ncol(gene_ensemblprot))]
+head(gene2ensemblprot)#后面会用到gene和ensemblprot id的对应关系 the correspondence between gene and ensemblprot id will be used later
+ensemblprot_wpc3 <- unique(prots_mat$ensemblprot)
+```
+
+### 从STRING数据库提取WPC3蛋白的PPI
+### Extract PPI of WPC3 protein from STRING database
+
+从STRING数据库提取WPC3蛋白的PPI，把蛋白名转成基因名
+
+Extract PPI of WPC3 protein from STRING database, convert protein name to gene name
+
+# STRING数据文件10090.protein.actions.v10.5.txt有580M，我这里8G内存，读取它需要大概30s
+# STRING data file 10090.protein.actions.v10.5.txt is 580M, I have 8G RAM here, it takes about 30s to read it
+
+**！更新后的STRING数据文件10090.protein.actions.v11.0.txt文件有318MB。**
+
+**! The updated STRING data file 10090.protein.actions.v11.0.txt file has 318MB.**
+
+```{r}
+#ppi <- read.table("10090.protein.actions.v10.5.txt",header=T,sep = "\t")
+ppi <- read.table("10090.protein.actions.v11.0.txt",header=T,sep = "\t")
+head(ppi)
+ppi$item_id_a <- str_replace(ppi$item_id_a,"10090.","")
+ppi$item_id_b <- str_replace(ppi$item_id_b,"10090.","")
+ensemblprot_wpc3 <- sub("\\..*", "", ensemblprot_wpc3)
+ppi_wpc3 <- ppi[(ppi$item_id_a %in% ensemblprot_wpc3)&(ppi$item_id_b %in% ensemblprot_wpc3),]
+ppi_wpc3 <- ppi_wpc3[!duplicated(paste0(ppi_wpc3$item_id_a,ppi_wpc3$item_id_b)),]#去掉重复行 remove duplicate rows
+
+colnames(ppi_wpc3)[1]<-"ensemblprot"
+gene2ensemblprot$ensemblprot <- sub("\\..*", "", gene2ensemblprot$ensemblprot)
+ppi_gene1st <- merge(ppi_wpc3,gene2ensemblprot,by="ensemblprot")
+colnames(gene2ensemblprot)[3] <- "item_id_b"
+ppi_gene2nd <- merge(ppi_gene1st,gene2ensemblprot,by="item_id_b")
+ppi_gene2nd <- ppi_gene2nd[!duplicated(paste0(ppi_gene2nd$Gene.Names.x,ppi_gene2nd$Gene.Names.y)),]
+ppi_gene2nd <- na.omit(ppi_gene2nd)  #后面稀疏矩阵 NA's in (i,j) are not allowed the back sparse matrices NA's in (i,j) are not allowed
+head(ppi_gene2nd)
+genes <- sort(unique(union(ppi_gene2nd$Gene.Names.x,ppi_gene2nd$Gene.Names.y)))
+#保存到文件
+#save to the file
+write.csv(data.frame(genes),file="ppi_gene.csv",row.names = F,quote = F)
+```
+
+以对称矩阵的形式表示网络的边，0表示两点之间无连边，1表示有边
+
+The edge of the network is represented in the form of a symmetric matrix. 0 indicates that there is no connected edge between two points, and 1 indicates that there are edges
+
+```{r}
+pos <- seq_along(genes)
+names(pos) <- genes
+ppi_gene2nd$posx <- pos[ppi_gene2nd$Gene.Names.x]
+ppi_gene2nd$posy <- pos[ppi_gene2nd$Gene.Names.y]
+
+#构建稀疏矩阵
+#construct the sparse matrix
+ppi_mat <- sparseMatrix(ppi_gene2nd$posx, ppi_gene2nd$posy, x = 1, dims = c(length(genes), length(genes)))
+#保存到文件
+#save to the file
+write.csv(as.matrix(ppi_mat),file="ppi_mat.csv",row.names = F,quote = F)
+```
+
+这时可以中场休息一下，下面继续
+
+At this point you can take an intermission and continue below
+
+```{r}
+NodeNames <- read.csv("ppi_gene.csv", header=T)
+NodeNames <- as.vector(NodeNames[,1])
+head(NodeNames)
+
+ADJ <- read.csv("ppi_mat.csv", header=T)
+ADJ <- as.matrix(ADJ)
+rownames(ADJ) <- NodeNames
+colnames(ADJ) <- NodeNames
+ADJ[1:3,1:3]
+```
+
+## 计算TOM
+## Calculate TOM
+
+用到函数TOMdist1，保存在TOMdist1.R文件中，位于当前文件夹。
+
+来自：<https://horvath.genetics.ucla.edu/html/GeneralFramework/NetworkFunctions.txt>
+
+Use the function TOMdist1 and save in the file TOMdist1.R, located in the current folder.
+
+from: <https://horvath.genetics.ucla.edu/html/GeneralFramework/NetworkFunctions.txt>
+
+```{r}
+source("TOMdist1.R") #保存在当前文件夹 save in current folder
+
+# 我们使用TOM矩阵作为邻接矩阵的平滑版本。
+# We used the TOM matrix as a smoothed-out version of the adjacency matrix.
+dissTOM <- TOMdist1(as.matrix(ADJ))
+dissTOM[1:3, 1:3]
+```
+
+## 通过cut tree找module
+## Find module through cut tree
+
+用R包dynamicTreeCut实现。根据文章Supplemental Information描述：
+
+现在，我们用TOM矩阵进行分层聚类。聚类树的分支将用来定义基因模块。
+
+Implemented with R package dynamicTreeCut. According to the description of the article Supplemental Information:
+
+Now we carry out hierarchical clustering with the TOM matrix. Branches of the resulting clustering tree will be used to define gene modules.
+
+```{r}
+library(dynamicTreeCut)
+
+#基于TOM(topological overlap matrix)对基因进行层次聚类
+#可以通过设置method参数，使用不同方法进行层次聚类，如median,complete, centroid等
+#hierarchical clustering of genes based on TOM (topological overlap matrix)
+#by setting method parameters, you can use different methods for hierarchical clustering, such as median, complete, centroid, etc.
+hierTOM <- hclust(as.dist(dissTOM), method="average")
+str(hierTOM)
+
+#使用hybrid dynamic tree-cutting方法，将网络划分成模块
+#可以通过设置minClusterSize来调整模块的最小大小
+#minClusterSize的默认设置是20，因为通常太小的模块没有意义
+#由于文章中的最小模块是2，所以在此我们设置为2
+#use the hybrid dynamic tree-cutting method to divide the network into modules
+#the minimum size of a module can be adjusted by setting minClusterSize
+#the default setting for minClusterSize is 20, as it usually doesn't make sense to have a module that is too small
+#since the smallest module in the article is 2, we set it to 2 here
+mods <- cutreeDynamic(hierTOM, cutHeight = NULL, minClusterSize = 2,method = "hybrid", distM = dissTOM)
+table(mods)
+
+# 将每个模块包含什么基因输出来，result_module.csv
+# output what genes each module contains, result_module.csv
+list2<-c()
+for (i in names(table(mods))){
+    a <- paste(NodeNames[which(mods==i)], sep="", collapse=',')
+    list2 <- c(list2,a)
+}
+list1 <- paste("Module_",names(table(mods)), sep="")
+out_df <- data.frame(list1,list2)
+write.csv(out_df,'result_module.csv',row.names=FALSE)
+
+# 转成cytoscape，为fig2.F和fig2.G做准备
+# convert to cytoscape in preparation for for fig2.F and fig2.G
+library(WGCNA)
+#输出整个子网络的边和节点情况
+#output the edges and nodes of the entire subnetwork
+exportNetworkToCytoscape(ADJ,
+edgeFile = paste('./result_filtered_PPI_network_edge.txt'),
+nodeFile = paste('./result_filtered_PPI_network_node.txt'),
+weighted = TRUE,
+threshold = 0.5,
+nodeNames = NodeNames,
+altNodeNames = NULL,
+nodeAttr = mods,
+includeColNames = TRUE)
+```
+
+这一步生成的两个文件，可以作为cytoscape的输入：
+
+- result_filtered_PPI_network_edge.txt
+- result_filtered_PPI_network_node.txt
+
+This step generates two files that can be used as input for cytoscape:
+
+- result_filtered_PPI_network_edge.txt
+- result_filtered_PPI_network_node.txt
+
+## 参考文献
+## Reference
+
+Dong J, Horvath S (2007) Understanding Network Concepts in Modules, BMC Systems Biology 2007, 1:24 PMID: 17547772 PMCID: PMC3238286
+
+```{r}
+sessionInfo()
+```
