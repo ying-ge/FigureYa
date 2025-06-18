@@ -52,8 +52,20 @@ for (collection in collections){
                  "--tfs", collection,
                  "--pvalue", P_threshold,
                  "--seed", i), ignore.stdout = T, ignore.stderr = T)
+    
     filename <- list.files(file.path(out.path, name), "^bootstrapNetwork")
     filename <- filename[!grepl("seed", filename)]
+    
+    if (length(filename) == 0) {
+      warning("No bootstrapNetwork file found in ", file.path(out.path, name))
+      next
+    }
+    
+    if (length(filename) > 1) {
+      warning("Multiple bootstrapNetwork files found, using the first one.")
+      filename <- filename[1]
+    }
+    
     file.rename(from = file.path(out.path, name, filename),
                 to = file.path(out.path, name, paste0("bootstrapNetwork_seed", i, ".txt")))
   }
