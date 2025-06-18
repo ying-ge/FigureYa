@@ -1,0 +1,401 @@
+---
+title: "FigureYa280TMEofSTS"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date`  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+软组织肉瘤（STSs）
+
+Soft-tissue sarcomas (STSs) 
+
+![](example.png)
+
+出自：<https://www.nature.com/articles/s41586-019-1906-8>
+
+图1 | SICs表现出显著不同的肿瘤微环境（TME）。本图基于TCGA SARC队列（n = 213）。a. 按SIC和组织学类型划分的TCGA SARC队列构成。b. 通过MCP-counter Z值定义的各SIC组TME组成。NK细胞指自然杀伤细胞。c. 按SIC分组的免疫TME功能相关基因标志物表达。d. 按SIC分组的免疫检查点相关基因表达。校正P值通过双侧Kruskal-Wallis检验的Benjamini-Hochberg校正获得。
+
+Source: <https://www.nature.com/articles/s41586-019-1906-8>
+
+Fig. 1 | The SICs exhibit strongly different TMEs. This figure refers to the TCGA SARC cohort (n = 213). a, Composition of the TCGA SARC cohort by SIC, and histology. b, Composition of the TME by SIC as defined by the MCP-counter Z- scores. NK cells, natural killer cells. c, Expression of gene signatures related to the functional orientation of the immune TME by SIC. d, Expression of genes related to immune checkpoints by SIC. Adjusted P values are obtained from Benjamini–Hochberg correction of two-sided Kruskal–Wallis tests P values.
+
+# 应用场景
+# Application scenarios
+
+用MCPcounter计算免疫富集得分，根据MCPcounter结果进行分型。
+
+我们曾众筹过FigureYa56immune_inflitration，也是用TCGA的表达数据计算免疫浸润，并画热图。我们这次画的图信息更丰富。
+
+The immune enrichment scores were calculated using MCP-counter, and subtyping was performed based on the MCP-counter results.
+
+We previously conducted a crowdfunding project (FigureYa56immune_infiltration), which also used TCGA expression data to compute immune infiltration and generate heatmaps. However, the current visualization provides more comprehensive analytical dimensions.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages("devtools")
+library(devtools)
+install_github("ebecht/MCPcounter",ref="master", subdir="Source")
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(MCPcounter)
+library(GSVA)
+library(ComplexHeatmap)
+library(ClassDiscovery)
+library(gplots)
+library(RColorBrewer)
+
+# 自定义函数
+# Custom Function
+standarize.fun <- function(indata=NULL, halfwidth=NULL, centerFlag=T, scaleFlag=T) {  
+  outdata=t(scale(t(indata), center=centerFlag, scale=scaleFlag))
+  if (!is.null(halfwidth)) {
+    outdata[outdata>halfwidth]=halfwidth
+    outdata[outdata<(-halfwidth)]= -halfwidth
+  }
+  return(outdata)
+}
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+从XENA下载数据：
+
+TCGA-SARC.star_fpkm.tsv.gz，表达谱数据FPKM，已经过`log2(fpkm+1)`转换，下载地址：<https://xenabrowser.net/datapages/?dataset=TCGA-SARC.star_fpkm.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+gencode.v36.annotation.gtf.gene.probemap，ID/Gene Mapping，下载地址同上。
+
+TCGA-SARC.clinical.tsv.gz，临床信息，下载地址：<https://xenabrowser.net/datapages/?dataset=TCGA-SARC.clinical.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+Data downloaded from XENA:
+
+TCGA-SARC.star_fpkm.tsv.gz, expression profile data FPKM, already transformed by `log2(fpkm+1)`, download link: <https://xenabrowser.net/datapages/?dataset=TCGA-SARC.star_fpkm.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+gencode.v36.annotation.gtf.gene.probemap, ID/Gene Mapping, download link same as above.
+
+TCGA-SARC.clinical.tsv.gz, clinical information, download link: <https://xenabrowser.net/datapages/?dataset=TCGA-SARC.clinical.tsv&host=https%3A%2F%2Fgdc.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443>
+
+```{r}
+# 读取XENA下载的FPKM表达谱数据
+# Read FPKM expression profile data downloaded from XENA
+fpkm <- read.table("TCGA-SARC.star_fpkm.tsv.gz", row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+Ginfo <- read.table("gencode.v36.annotation.gtf.gene.probemap", row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 获取表达数据和基因注释之间的共有基因
+# Get common genes between expression data and gene annotation
+comgene <- intersect(rownames(fpkm), rownames(Ginfo))
+fpkm <- fpkm[comgene,]
+Ginfo <- Ginfo[comgene,]
+
+# 添加基因符号并按中位数表达量聚合
+# Add gene symbols and aggregate by median expression
+fpkm$gene <- Ginfo[rownames(fpkm),"gene"]
+fpkm <- as.data.frame(apply(fpkm[,setdiff(colnames(fpkm), "gene")], 2, function(x) tapply(x, INDEX=factor(fpkm$gene), FUN=median, na.rm=TRUE)))
+
+# 根据原文设置感兴趣签名
+#Define signatures of interest as per the original text
+immunosuppression.signature <- c("CXCL12","TGFB1","TGFB3","LGALS1")
+t.cell.activation.signature <- c("CXCL9","CXCL10","CXCL16","IFNG","IL15")
+t.cell.survival.signature <- c("CD70","CD27")
+regulatory.t.cell.signature <- c("FOXP3","TNFRSF18")
+mhc.signature <- c("HLA-A","HLA-B","HLA-E","HLA-F","HLA-G","B2M")
+myeloid.signature <- "CCL2"
+tls.signature <- "CXCL13"
+
+# 免疫检查点靶点基因（分别为PD1, PDL1, PDL2, CTLA4, TIM3和LAG3）
+# Immune checkpoint target genes (PD1, PDL1, PDL2, CTLA4, TIM3 and LAG3)
+ici.gene <- c("PDCD1","CD274","PDCD1LG2","CTLA4","HAVCR2","LAG3")
+
+# 检查这些签名基因是否可以被匹配
+# Check if these signature genes can be matched
+is.element(immunosuppression.signature, rownames(fpkm))
+is.element(t.cell.activation.signature, rownames(fpkm))
+is.element(t.cell.survival.signature, rownames(fpkm))
+is.element(regulatory.t.cell.signature, rownames(fpkm))
+is.element(mhc.signature, rownames(fpkm))
+is.element(myeloid.signature, rownames(fpkm))
+is.element(tls.signature, rownames(fpkm))
+is.element(ici.gene, rownames(fpkm))
+
+# 加载临床信息并获取共有的样本
+# Load clinical information and get common samples
+sinfo <- read.delim(file = "TCGA-SARC.clinical.tsv.gz", sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+comsam <- intersect(rownames(sinfo), colnames(fpkm))
+sinfo <- sinfo[comsam,]
+fpkm <- fpkm[,comsam]
+```
+
+# 计算免疫富集得分，聚类分析
+# Calculate immune enrichment scores and perform cluster analysis
+
+```{r}
+# 计算免疫富集得分
+# 这里读取的genes.txt和probesets.txt出自MCPcounter包，这样操作速度更快
+# Calculate immune enrichment scores and perform cluster analysis
+# The genes.txt and probesets.txt here are from the MCPcounter package for faster processing
+mcp <- MCPcounter.estimate(fpkm,
+                           featuresType = "HUGO_symbols",
+                           genes = read.table("genes.txt",sep = "\t",stringsAsFactors = F,header = T,colClasses = "character",check.names = F),
+                           probesets = read.table("probesets.txt",sep = "\t",stringsAsFactors = F,header = F,colClasses = "character",check.names = F))
+mcp <- mcp[-10, ] # 根据原文移除纤维化，剩下9种细胞
+
+# 对MCPcounter得分进行聚类分析
+# Cluster analysis of MCPcounter scores
+indata <- t(scale(t(mcp)))
+hcs <- hclust(distanceMatrix(as.matrix(indata), "euclidean"), "ward.D") # 原文提到使用欧式距离以及ward's聚类方式
+group <- cutree(hcs, k = 5) # 原文分为5类
+group <- paste0("C", group); names(group) <- colnames(mcp)
+
+# 先简单绘图看一下趋势
+# First make a simple plot to observe the trend
+indata <- mcp
+plotdata <- standarize.fun(indata, halfwidth = 2)
+
+# 设置颜色
+# Set colors
+sic.col <- c("#2B7AB5", "#ABD9E8", "#339E2B", "#FDAE61", "#D71719")
+hit.col <- c("#FFFF99", "#BDAED4", "#7DC77D", "#FFD700", "#87CEEB", "#FFA07A")
+
+hm <- pheatmap(plotdata,
+         border_color = NA,
+         color = bluered(64),
+         show_rownames = T,
+         show_colnames = F,
+         cutree_cols = 5,
+         cluster_rows = F,
+         cluster_cols = hcs,
+         name = "MCPcounter",
+         cellheight = 12,
+         cellwidth = 300/ncol(plotdata),
+         annotation_col = data.frame(row.names = colnames(plotdata),
+                                     SIC = group[colnames(plotdata)]),
+         annotation_colors = list(SIC = c("C1" = sic.col[1], 
+                                          "C2" = sic.col[2],
+                                          "C3" = sic.col[3],
+                                          "C4" = sic.col[4],
+                                          "C5" = sic.col[5])))
+pdf(file = "heatmap for refer.pdf", width = 8,height = 4)
+draw(hm)
+invisible(dev.off())
+
+# 根据此热图对样本进行修正和排序，并将组别映射到新的字母顺序
+# Correct and sort samples based on this heatmap, and map groups to new alphabetical order
+sic <- sapply(group,function(x) {
+  switch(x, 
+         "C1" = "B", 
+         "C2" = "A",
+         "C3" = "C",
+         "C4" = "D",
+         "C5" = "E")})
+
+# 计算其他签名
+# Calculate other signatures
+geoMean <- function(x) {exp(mean(log(x)))} 
+immunosuppression.geoMean <- apply(fpkm[immunosuppression.signature,], 2, geoMean)
+t.cell.activation.geoMean <- apply(fpkm[t.cell.activation.signature,], 2, geoMean)
+t.cell.survival.geoMean <- apply(fpkm[t.cell.survival.signature,], 2, geoMean)
+regulatory.t.cell.geoMean <- apply(fpkm[regulatory.t.cell.signature,], 2, geoMean)
+mhc.geoMean <- apply(fpkm[mhc.signature,], 2, geoMean)
+myeloid.geoMean <- apply(fpkm[myeloid.signature,], 2, geoMean)
+tls.geoMean <- apply(fpkm[tls.signature,], 2, geoMean)
+
+# 将签名得分合并
+# Combine signature scores
+tme.dat <- data.frame("Immunosuppression" = immunosuppression.geoMean,
+                      "T cell activation" = t.cell.activation.geoMean,
+                      "T cell survival" = t.cell.survival.geoMean,
+                      "Regulatory T cell" = regulatory.t.cell.geoMean,
+                      "Class I MHC" = mhc.geoMean,
+                      "Myeloid cells chemotactism" = myeloid.geoMean,
+                      "TLSs" = tls.geoMean)
+
+# 组间比较并计算p值
+# Inter-group comparison and p-value calculation
+outTab <- NULL
+indata <- as.data.frame(t(rbind.data.frame(mcp, t(tme.dat), fpkm[ici.gene,])))
+indata$SIC <- sic[rownames(indata)]
+for (i in setdiff(colnames(indata), "SIC")) {
+  kt <- kruskal.test(as.numeric(indata[,i]) ~ indata$SIC)
+  outTab <- rbind.data.frame(outTab,
+                             data.frame(feature = i,
+                                        p = kt$p.value,
+                                        stringsAsFactors = F),
+                             stringsAsFactors = F)
+}
+
+# 矫正p值
+# Adjusted p-values
+outTab$fdr <- p.adjust(outTab$p, method = "fdr") 
+
+# 将FDR改为科学计数法
+# Convert FDR to scientific notation
+outTab$txt <- formatC(outTab$fdr, digits = 2, format = "e") 
+
+# 修改文本
+# Modify text
+outTab$txt <- gsub("e"," × 10", outTab$txt) 
+
+rownames(outTab) <- outTab$feature
+write.table(outTab, file = "kruskal waills test among different sic groups.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+# 开始画图
+# Plotting
+
+```{r}
+# 创建列注释和对应颜色
+# Create column annotations and corresponding colors
+annCol <- data.frame(row.names = comsam,
+                     Disease = sinfo$disease_type, 
+                     SIC = sic,
+                     stringsAsFactors = F) 
+
+# 简化疾病类型名称
+# Simplify disease type names
+annCol$Disease <- sapply(annCol$Disease,function(x) {
+  switch(x, 
+         "Myomatous Neoplasms" = "MN",
+         "Nerve Sheath Tumors" = "NST",
+         "Lipomatous Neoplasms" = "LN",
+         "Fibromatous Neoplasms" = "FN",
+         "Soft Tissue Tumors and Sarcomas, NOS" = "STT or STS",
+         "Synovial-like Neoplasms" = "SLN")})
+
+
+# 设置Disease的因子水平
+# Set factor levels for Disease
+annCol$Disease <- factor(annCol$Disease, levels = c("MN", "NST", "LN", "FN", "SLN", "STT or STS"))
+
+# 按SIC和Disease排序
+# Order by SIC and Disease
+annCol <- annCol[order(annCol$SIC, annCol$Disease),,drop = F]
+
+# 定义注释的颜色方案
+# Define color schemes for annotations
+annColors <- list()
+
+# SIC颜色映射
+# SIC color mapping
+annColors[["SIC"]] <- c("A" = sic.col[1], 
+                        "B" = sic.col[2],
+                        "C" = sic.col[3],
+                        "D" = sic.col[4],
+                        "E" = sic.col[5])
+
+# Disease颜色映射
+# Disease color mapping
+annColors[["Disease"]] <- c("MN" = hit.col[1],
+                              "NST" = hit.col[2],
+                              "LN" = hit.col[3],
+                              "FN" = hit.col[4],
+                              "SLN" = hit.col[5],
+                              "STT or STS" = hit.col[6])
+
+# 重新绘图
+# Re-draw heatmaps
+
+## MCPcounter部分
+## MCPcounter section
+indata <- mcp
+plotdata <- standarize.fun(indata, halfwidth = 2)
+
+# 将签名和矫正p值的文本合并
+# Append adjusted p-values to row names
+rownames(plotdata) <- paste(rownames(plotdata), outTab[rownames(plotdata), "txt"], sep = " ") 
+
+hm1 <- pheatmap(plotdata[,rownames(annCol)],
+               border_color = NA, 
+               color = bluered(64),
+               show_rownames = T, 
+               show_colnames = F, 
+               cluster_rows = F, 
+               cluster_cols = F, 
+               name = "Gene/metagene\nZ-score", 
+               cellheight = 12, 
+               cellwidth = 300/ncol(plotdata), 
+               gaps_col = cumsum(table(annCol$SIC)), 
+               annotation_col = annCol, 
+               annotation_colors = annColors) 
+
+## 其他免疫签名部分
+## Other immune signatures section
+plotdata <- standarize.fun(t(tme.dat), halfwidth = 2)
+rownames(plotdata) <- paste(rownames(plotdata), outTab[rownames(plotdata), "txt"], sep = " ")
+hm2 <- pheatmap(plotdata[,rownames(annCol)],
+                border_color = NA,
+                color = bluered(64),
+                show_rownames = T,
+                show_colnames = F,
+                cluster_rows = F,
+                cluster_cols = F,
+                name = "Gene/metagene\nZ-score",
+                cellheight = 12,
+                cellwidth = 300/ncol(plotdata),
+                gaps_col = cumsum(table(annCol$SIC)))
+
+## 免疫检查点表达部分
+## Immune checkpoint expression section
+plotdata <- standarize.fun(fpkm[ici.gene,], halfwidth = 2)
+rownames(plotdata) <- paste(rownames(plotdata), outTab[rownames(plotdata), "txt"], sep = " ")
+hm3 <- pheatmap(plotdata[,rownames(annCol)],
+                border_color = NA,
+                color = bluered(64),
+                show_rownames = T,
+                show_colnames = F,
+                cluster_rows = F,
+                cluster_cols = F,
+                name = "Gene/metagene\nZ-score",
+                cellheight = 12,
+                cellwidth = 300/ncol(plotdata),
+                gaps_col = cumsum(table(annCol$SIC)))
+
+# 保存合并的热图到PDF
+# Save combined heatmaps to PDF
+pdf(file = "TMEheatmap.pdf", width = 10,height = 6)
+draw(hm1 %v% hm2 %v% hm3, 
+     heatmap_legend_side = "left", 
+     annotation_legend_side = "left") 
+invisible(dev.off())
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
