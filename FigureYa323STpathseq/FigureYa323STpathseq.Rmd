@@ -1,0 +1,158 @@
+---
+title: "FigureYa323STpathseq"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+通过[pathseq](https://gatk.broadinstitute.org/hc/en-us/articles/360035889911)分析得到空间转录组的微生物UMI，画出FIG 1。
+
+Obtain microbial UMIs from spatial transcriptomics data through [pathseq](https://gatk.broadinstitute.org/hc/en-us/articles/360035889911) and visualize them in FIG 1.
+
+![](example.png)
+
+出自：<https://www.nature.com/articles/s41586-022-05435-0>
+
+图1：评估肿瘤组织内细菌的空间分布。
+a，人OSCC和CRC样本的10x Visium捕获切片中，肿瘤组织的苏木精-伊红（H&E）染色（左）、总细菌读数的空间分布（中）和总UMI转录本的空间分布（右）。
+b，OSCC和CRC肿瘤的10x Visium RNA测序数据中检测到的前10个优势细菌属的饼图。
+c，RNAscope-FISH成像显示在10x Visium切片后的连续切片中细菌在肿瘤组织中的分布。红色为具核梭杆菌（F. nucleatum）探针，青色为广谱细菌探针。比例尺：1 mm。
+d，在10x Visium OSCC样本数据中检测到的微小单胞菌、嗜胨菌（Peptoniphilus）和梭杆菌（Fusobacterium）UMI的空间分布。
+e，在10x Visium CRC样本数据中检测到的梭杆菌（Fusobacterium）、拟杆菌（Bacteroides）和纤毛菌（Leptotrichia）UMI的空间分布。
+
+Source: <https://www.nature.com/articles/s41586-022-05435-0>
+
+Fig. 1: Assessing the spatial distribution of intratumoral bacteria throughout the tumour tissue.
+a, Haematoxylin and eosin (H&E) staining (left), spatial distribution of total bacterial reads (centre) and total UMI transcripts (right) throughout the tumour tissue in the 10x Visium capture slides from human OSCC and CRC specimens. 
+b, Pie chart of the top 10 most dominant bacterial genera detected in the 10x Visium RNA-sequencing data from the OSCC and CRC tumours. 
+c, RNAscope-FISH imaging showing the distribution of bacteria across the tumour tissue in a sequential slide following the 10x Visium section. The F.nucleatum probe is red and the eubacterial probe is cyan. Scale bars, 1 mm. 
+d, Spatial distribution of Parvimonas, Peptoniphilus and Fusobacterium UMIs detected in the 10x Visium OSCC specimen data. 
+e, Spatial distribution of Fusobacterium, Bacteroides and Leptotrichia UMIs detected in the 10x Visium CRC specimen data.
+
+# 应用场景
+# Application scenarios
+
+分析空间转录组测序文件中的微生物组信息。
+
+本流程仅在样本支持的情况下能够提取微生物组信息，绝大部分的公开数据集是不能满足该条件的。
+
+关于如何才能生成符合条件的样本数据，请参看原文献的protocol或咨询测序方。
+
+Analyzing microbiome information from spatial transcriptomics sequencing files.
+
+This pipeline can only extract microbiome data if the samples meet specific requirements. Most publicly available datasets do not satisfy these conditions.
+
+For guidance on generating compatible sample data, please refer to the original protocol in the cited literature or consult the sequencing provider.
+
+# 环境设置
+# Environment Setup
+
+**注意：**该流程对内存和存储要求很高，内存应当在200G以上，可支配存储应在300G以上（150G参考基因组+每个样本30G~100G数据量）
+
+在Codes/S2.pathseq.sh中修改gatk变量，以保证能够正常调用gatk软件
+
+gatk变量可定义为"gatk"或"java -Xmx100G -jar path/to/gatk.jar"
+
+**Note: **This process has high memory and storage requirements. The memory should be at least 200G, and available storage should exceed 300G (150G reference genome + 30G~100G data per sample).
+
+Modify the gatk variable in Codes/S2.pathseq.sh to ensure proper calling of the gatk software.
+
+The gatk variable can be defined as either "gatk" or "java -Xmx100G -jar path/to/gatk.jar".
+
+# 输入文件
+# Input Files
+
+需要空间转录组样本测序数据和参考信息。
+
+**1. **空间转录组样本的数据信息（包括FASTQ，tiff）
+
+下载地址：<https://github.com/FredHutch/Galeano-Nino-Bullman-Intratumoral-Microbiota_2022>
+
+在InputData下按样本放置输入文件，以样本CRC_16为例，相关文件放在InputData/CRC_16路径下，即
+
+- InputData/CRC_16/CRC_16_*.fastq.gz
+- InputData/CRC_16/CRC_16.tiff
+- InputData/CRC_16/V10S15-020.gpr
+
+在InputData/sample_sheet.csv文件中写入样本信息，包括sample、slide、area。
+
+**2. **参考信息：spaceranger参考基因组和pathseq参考组
+
+切换到Reference目录下，运行BuildReference.sh脚本，脚本会自动下载所需参考组，并解压到既定位置。
+
+Spatial transcriptomics sample sequencing data and reference information are required.
+
+**1. **Data information for spatial transcriptomics samples (including FASTQ and TIFF files)
+
+Download address: <https://github.com/FredHutch/Galeano-Nino-Bullman-Intratumoral-Microbiota_2022>
+
+Input files should be placed under the InputData directory according to the sample names. Taking sample CRC_16 as an example, the relevant files are stored in the InputData/CRC_16 path, including:
+
+- InputData/CRC_16/CRC_16_*.fastq.gz
+- InputData/CRC_16/CRC_16.tiff
+- InputData/CRC_16/V10S15-020.gpr
+
+Sample information (including sample, slide, and area) should be recorded in the InputData/sample_sheet.csv file.
+
+**2. **Reference information: spaceranger reference genome and pathseq reference database
+
+Switch to the Reference directory and run the BuildReference.sh script. The script will automatically download the required reference datasets and extract them to the designated locations.
+
+# 分析过程
+# Analysis Process
+
+运行STpathseq.sh脚本，【在主目录下运行STpathseq.sh】
+
+或根据STpathseq.sh的用法分步运行Codes/S1.spaceranger.sh、Codes/S2.pathseq.sh和Codes/S3.postprocess.sh
+
+关于Codes文件夹下S1~S3.sh脚本的功能和用法介绍 【在主目录下bash *.sh】
+
+- S1.spaceranger.sh	参数sample（样本名称），slide，area，slide和area需询问测序方
+- S2.pathseq.sh 参数sample（样本名称）
+- S3.postprocess.sh	参数sample（样本名称）
+
+Run the STpathseq.sh script [run STpathseq.sh in the main directory]
+
+Or follow the steps in STpathseq.sh to run Codes/S1.spaceranger.sh, Codes/S2.pathseq.sh, and Codes/S3.postprocess.sh separately
+
+Description of the functions and usage of the S1~S3.sh scripts in the Codes folder [run bash *.sh in the main directory]
+
+- S1.spaceranger.sh Parameters: sample (sample name), slide, area (slide and area need to be confirmed with the sequencing provider)
+- S2.pathseq.sh Parameter: sample (sample name)
+- S3.postprocess.sh Parameter: sample (sample name)
+
+# 输出文件
+# Output Files
+
+Seurat对象【Results/*/outs/ST.seu.rds】，文件较大，从百度网盘下载<https://pan.baidu.com/s/1BnnoAelzwYhIWjxpKcXWHg?pwd=frhw>，下载后保存到`STpathseq/Results/CRC_16/outs/`文件夹下
+
+Seurat object 【Results/*/outs/ST.seu.rds】, large file size, download from Baidu Netdisk <https://pan.baidu.com/s/1BnnoAelzwYhIWjxpKcXWHg?pwd=frhw>, after downloading save to `STpathseq/Results/CRC_16/outs/` folder
+
+
+微生物组RNA总量空间分布图【Results/*/outs/*TotalMicrobe.pdf】
+
+Spatial distribution map of total microbial RNA【Results/*/outs/*TotalMicrobe.pdf】
+
+![](STpathseq/Results/CRC_16/outs/CRC_16.TotalMicrobe.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
