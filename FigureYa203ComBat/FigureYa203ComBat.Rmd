@@ -1,0 +1,358 @@
+---
+title: "FigureYa203ComBat"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Demand description
+
+想众筹这篇文章里的数据处理方法，TCGA的RNA-seq数据和不同平台的microarray数据合并及标准化，希望能够得到相对统一的处理方式。
+
+We would like to crowdfund the data processing methods described in this article, specifically the merging and normalization of TCGA RNA-seq data and microarray data from different platforms, hoping to achieve a relatively unified processing approach.
+
+![](example.png)
+
+跟FigureYa201ClusterCorrelation出自同一篇文章，出自：<https://www.cell.com/molecular-therapy-family/nucleic-acids/fulltext/S2162-2531(20)30259-6>
+
+This is from the same article as FigureYa201ClusterCorrelation, originally published in: <https://www.cell.com/molecular-therapy-family/nucleic-acids/fulltext/S2162-2531(20)30259-6>
+
+# 应用场景
+# Application scenarios
+
+不同平台的表达谱去除批次效应，绘制PCA图查看效果。
+
+这里采用的是R包sva中的ComBat。
+
+另外，还有一些文章采用非经典的去除批次效应的方式，例如FigureYa117multilinearDE。
+
+Remove batch effects from expression profiles across different platforms and visualize the results using PCA plots.  
+
+Here, the ComBat method from the sva R package was used.  
+
+Additionally, some studies employ non-classical batch effect removal approaches, such as FigureYa117multilinearDE.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(TCGAbiolinks)
+library(sva)
+library(cluster)
+library(oompaBase)
+library(SummarizedExperiment) 
+library(edgeR)     
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+自定义函数
+
+Custom Function
+
+```{r}
+# 加载绘制PCA图的自定义函数
+# Load custom function for PCA plotting
+source("batchPCA.R")
+
+# 计数转TPM函数
+# Count to TPM conversion function
+countToTpm <- function(counts, geneLength) {
+  
+  # 将输入转换为矩阵格式
+  # Convert input to matrix format
+  counts <- as.matrix(counts)
+  
+  # 验证输入维度
+  # Validate input dimensions
+  stopifnot(nrow(counts) == length(geneLength))
+  
+  # 处理零长度基因（避免除以零）
+  # Handle zero-length genes (avoid division by zero)
+  geneLength[geneLength == 0] <- 1
+  
+  # TPM转换公式
+  # TPM conversion formula
+  rpk <- counts / (geneLength/1000)
+  scalingFactor <- colSums(rpk) / 1e6
+  tpm <- sweep(rpk, 2, scalingFactor, "/")
+  
+  return(tpm)
+}
+```
+
+# 输入文件
+# Input Files
+
+这里以一种TCGA肿瘤和两套GEO芯片数据为例，处理更多数据集的方式也是一样的。
+
+如果你的表达矩阵已处理成easy_input_TCGA.csv和easy_input_GSE\*.csv的格式，就可以跳过这步，直接进入“检查数据的量级”。
+
+三个待合并的数据集（表达矩阵）较大，已上传微云<https://share.weiyun.com/9HCHPNBi>
+
+Here, we use one TCGA tumor dataset and two GEO microarray datasets as examples, but the same approach applies to processing more datasets.
+
+If your expression matrices have already been formatted as easy_input_TCGA.csv and easy_input_GSE\*.csv, you can skip this step and proceed directly to "Checking Data Magnitude.
+
+The three expression matrices to be merged are large and have been uploaded to Weiyun<https://share.weiyun.com/9HCHPNBi>
+
+## TCGA数据下载及预处理
+## Downloading and Preprocessing TCGA Data
+
+```{r eval=FALSE}
+# --- TCGA数据下载及预处理 ---
+# --- TCGA Data Download and Preprocessing ---
+
+# 查询TCGA头颈鳞癌RNA-seq数据(STAR比对原始计数)
+# Query TCGA HNSC RNA-seq data (STAR-aligned raw counts)
+expquery <- GDCquery(project = "TCGA-HNSC",
+                     data.category = "Transcriptome Profiling",
+                     data.type = "Gene Expression Quantification",
+                     workflow.type = "STAR - Counts")
+
+
+# 下载查询到的数据到本地"GDCdata"文件夹
+# Download the queried data to local "GDCdata" folder
+GDCdownload(expquery, directory = "GDCdata")
+
+# 准备数据并加载为SummarizedExperiment对象
+# Prepare and load the data into R as SummarizedExperiment object
+expdata <- GDCprepare(expquery, directory = "GDCdata")
+
+# 获取计数矩阵和基因信息
+# Get count matrix and gene information
+countMatrix <- assay(expdata, "unstranded")  
+geneLengths <- rowData(expdata)$gene_length
+
+# 筛选肿瘤样本（01表示肿瘤）
+# Filter tumor samples (01 indicates tumor)
+tumorSamples <- colnames(countMatrix)[substr(colnames(countMatrix), 14, 15) == "01"]
+countMatrix <- countMatrix[, tumorSamples]
+
+# --- 数据转换和过滤 ---
+# --- Data Transformation and Filtering ---
+
+# 1. 转换为TPM
+# 1. Convert to TPM
+tpmMatrix <- countToTpm(countMatrix, geneLengths)
+tpms <- as.data.frame(round(tpmMatrix, 2))
+
+# 2. 过滤低表达基因（基于原始计数）
+# 2. Filter low-expressed genes (based on raw counts)
+keep <- filterByExpr(countMatrix, min.count = 10, min.prop = 0.25)
+tpms <- tpms[keep, ]
+
+# 3. 基因注释（假设已有overlapTable27.txt文件）
+# 3. Gene annotation (assuming overlapTable27.txt exists)
+Ginfo <- read.table("overlapTable27.txt", sep = "\t", row.names = 1, 
+                    header = TRUE, check.names = FALSE)
+
+# 匹配基因并取均值
+# Match genes and take average expression
+rownames(Ginfo) <- Ginfo$gene_id
+commonGenes <- intersect(rownames(tpms), rownames(Ginfo))
+tpms <- tpms[commonGenes, ]
+Ginfo <- Ginfo[commonGenes, ]
+
+# 按基因符号聚合(取表达均值)
+# Aggregate by gene symbol (average expression)
+tpms$Gene <- Ginfo$genename
+tpms.hugo <- aggregate(. ~ Gene, data = tpms, FUN = mean, na.rm = TRUE)
+rownames(tpms.hugo) <- tpms.hugo$Gene
+tpms.hugo$Gene <- NULL
+
+# 保存处理后的数据
+# Save processed data
+write.csv(tpms.hugo, "easy_input_TCGA.csv", quote = FALSE)
+```
+
+## GEO芯片数据下载及预处理
+## Downloading and Preprocessing GEO Microarray Data
+
+这里用sangerbox下载GEO表达谱数据及预处理，方法见`GEO_sangerbox.docx`文件。生成`gse41613.expr.txt`以及`gse65858.expr.txt`后进行如下处理。
+
+（还可以用`FigureYa59Plus_GEO2DEG`<https://www.yuque.com/figureya/figureyaplus/figureya59p>下载GEO芯片数据并预处理，获得表达矩阵easy_input_expr.csv文件）
+
+Here, we use SangerBox to download and preprocess GEO expression data, as detailed in the `GEO_sangerbox.docx` file. After generating `gse41613.expr.txt` and `gse65858.expr.txt`, proceed with the following steps.
+
+(Alternatively, you can use `FigureYa59Plus_GEO2DEG`<https://www.yuque.com/figureya/figureyaplus/figureya59p> to download and preprocess GEO microarray data, obtaining the expression matrix file easy_input_expr.csv)
+
+```{r eval=FALSE}
+# GSE41613数据集处理
+# GSE41613 Dataset Processing
+gse41613.expr <- read.delim("gse41613.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# Inspect the format - notice multiple gene mappings separated by "///" (Important: Check in Excel but NEVER save modifications)
+# 检查数据格式 - 注意行名中存在"///"分隔的多基因匹配（重要提示：可在Excel中检查但不要保存任何修改）
+gse41613.expr[1:3,1:3] 
+
+# 提取///符号前的首要基因名
+# Extract primary gene symbol (before "///") 
+gse41613.expr$Gene <- sapply(strsplit(rownames(gse41613.expr)," /// ",fixed = T),"[",1)
+
+# 按基因名聚合多探针（取均值）
+# Aggregate multiple probes by gene symbol (take mean)
+gse41613.expr <- apply(gse41613.expr[,setdiff(colnames(gse41613.expr), "Gene")], 2, function(x) tapply(x, INDEX=factor(gse41613.expr$Gene), FUN=mean, na.rm=TRUE))
+
+# 格式化并保存
+# Format and save
+gse41613.expr <- as.data.frame(round(gse41613.expr,2))
+write.csv(gse41613.expr, "easy_input_GSE41613.csv", quote = F)
+
+# GSE65858数据集处理
+# GSE65858 Dataset Processing
+gse65858.expr <- read.delim("gse65858.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 检查显示基因名规范无需处理
+# Inspection shows clean gene symbols - no need for processing
+gse65858.expr[1:3,1:3] 
+
+gse65858.expr <- as.data.frame(round(gse65858.expr,2))
+write.csv(gse65858.expr, "easy_input_GSE65858.csv", quote = F)
+```
+
+# 检查两类数据的量级
+# Checking Data Magnitude
+
+通过取对数，让两类数据的数量级达到同一范围。
+
+By taking the logarithm, we adjust the two types of data to the same magnitude range.
+
+```{r}
+# TCGA RNA-seq数据处理
+# TCGA RNA-seq Data Processing
+tpms.hugo <- read.csv("easy_input_TCGA.csv", row.names = 1)
+tpms.hugo[1:3, 1:3]
+range(tpms.hugo) 
+
+# 对数转换(加1伪计数避免负无穷)
+# Log2 transformation (pseudocount +1 to avoid -Inf) / 
+tcga.expr <- log2(tpms.hugo + 1)
+range(tcga.expr) 
+
+# GEO芯片数据加载
+# GEO Microarray Data Loading
+gse41613.expr <- read.csv("easy_input_GSE41613.csv", row.names = 1)
+gse65858.expr <- read.csv("easy_input_GSE65858.csv", row.names = 1)
+
+# 检查芯片数据范围
+# Check microarray value ranges
+range(gse41613.expr) 
+range(gse65858.expr) 
+```
+
+# 合并数据集、检查批次效应
+# Merging Datasets and Checking Batch Effects
+
+```{r}
+# 设置颜色方案
+# Set color palette
+blue <- "#2874C5"
+yellow <- "#EABF00"
+green <- "#008B8A"
+
+# 提取在三套数据中都出现的基因
+# Extract common genes across all datasets
+comgene <- intersect(intersect(rownames(tcga.expr), rownames(gse41613.expr)), rownames(gse65858.expr))
+
+# 合并表达矩阵
+# Merge expression matrices
+combined.expr <- cbind.data.frame(tcga.expr[comgene,],
+                                  gse41613.expr[comgene,],
+                                  gse65858.expr[comgene,])
+
+# 绘制PCA散点图，检查批次效应
+# Plot PCA to check batch effects
+batchPCA(indata = t(scale(t(combined.expr))),
+         batch = rep(c("TCGA","GSE41613","GSE65858"), times = c(ncol(tcga.expr),ncol(gse41613.expr),ncol(gse65858.expr))),
+         fig.dir = ".",
+         PCA.fig.title = "Raw PCA for combined expression profile",
+         cols = c(blue, yellow, green),
+         showID = F,
+         cex = 0.7,
+         showLegend = T) 
+# 数据集明显分离表明强批次效应
+# Clear separation by dataset indicates strong batch effects
+
+# 检查合并后数据范围
+# Check combined data range 
+range(combined.expr)
+```
+
+![](Raw PCA for combined expression profile.pdf)
+
+# ComBat去除批次效应
+# Batch Effect Correction using ComBat
+
+```{r}
+# 使用ComBat去除批次效应
+# Batch Effect Correction using ComBat
+batch <- data.frame(batch = rep(c("TCGA","GSE41613","GSE65858"), times = c(ncol(tcga.expr),ncol(gse41613.expr),ncol(gse65858.expr))))
+modcombat = model.matrix(~1, data = batch)
+combined.expr.combat <- as.data.frame(ComBat(dat=as.matrix(combined.expr), batch=batch$batch, mod=modcombat))
+
+# 保存部分数据用于演示
+# Save subset for demonstration
+write.csv(combined.expr.combat[1:3,], "output_combined_expr.csv", quote = F)
+# 实际使用时请运行:
+# For actual use: 
+#write.csv(combined.expr.combat, "output_combined_expr.csv", quote = F)
+
+# 校正后PCA分析
+# Post-Correction PCA
+batchPCA(indata = t(scale(t(combined.expr.combat))),
+         batch = rep(c("TCGA","GSE41613","GSE65858"), times = c(ncol(tcga.expr),ncol(gse41613.expr),ncol(gse65858.expr))),
+         fig.dir = ".",
+         PCA.fig.title = "Combat PCA for combined expression profile",
+         cols = c(blue, yellow, green),
+         showID = F,
+         cex = 0.7,
+         showLegend = T) 
+# 数据集重叠显示批次效应消除
+# Datasets now overlap, indicating successful batch correction 
+
+# 验证数值范围
+# Verify value ranges
+range(combined.expr.combat)
+```
+
+![](Combat PCA for combined expression profile.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
