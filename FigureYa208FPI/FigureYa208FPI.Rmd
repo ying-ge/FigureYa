@@ -1,0 +1,487 @@
+---
+title: "FigureYa208FPI"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+想众筹铁死亡指数（FPI）的计算方法，根据基因表达，算出ssGSEA富集分数，再计算FPI，并用GSE121689数据集验证。
+
+I want to crowdfund the calculation method of the Ferroptosis Potential Index (FPI), which involves calculating ssGSEA enrichment scores based on gene expression, then deriving the FPI, and validating it using the GSE121689 dataset.
+
+![](example.png)
+
+图2. FPI与癌症组织学类型和分子亚型的关系。
+(A) 不同癌症类型中肿瘤组织与正常组织间FPI的差异比较。
+
+Figure 2. The Relations between FPI and Histological Types and Molecular Subtypes among Cancers.
+(A) The different FPIs between tumor and normal tissues among cancers.
+
+![](method1.png)
+
+![](method2.png)
+
+出自：<https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+Source: <https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+# 应用场景
+# Application Scenario
+
+例文通过查文献收集基因，用GSVA计算正负两个基因集的富集分数，然后计算FPI。
+
+可批量计算多组（TCGA pancancer RNA-seq）、也可以单独计算一个数据集（GEO表达谱数据）。
+
+另外，不仅可以计算铁死亡指数FPI，还可以按照这个方法，替换为自己收集的某一功能相关的基因集，自己自定义一个某某指数。
+
+The example demonstrates collecting genes from literature, calculating enrichment scores for both positive and negative gene sets using GSVA, and then deriving the FPI.
+
+This method can be applied to batch-process multiple datasets (e.g., TCGA pan-cancer RNA-seq) or analyze a single dataset (e.g., GEO expression profile data).
+
+Additionally, it is not limited to calculating the Ferroptosis Potential Index (FPI). By replacing the gene sets with custom collections related to a specific function, users can define their own "XX Index" following the same approach.
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+# 加载包
+# Loading packages=
+
+```{r}
+library(data.table)
+library(GSVA)
+library(ggplot2)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+# Input Files
+
+大文件已上传到微云：<https://share.weiyun.com/c8GQyxR4>
+
+Large files have been uploaded to Weiyun: <https://share.weiyun.com/c8GQyxR4>
+
+## 下载TCGA pan-cancer数据
+## Download TCGA Pan-Cancer Data
+
+GSVA的输入数据可以是microarray data，也可以是RNA-seq count、CPM、RPKM、TPM。
+
+原文：We calculate now GSVA enrichment scores for these gene sets using first the microarray data and then the **RNA-seq integer count** data. Note that the only requirement to do the latter is to set the argument **kcdf="Poisson"** which is "Gaussian" by default. Note, however, that if our RNA-seq derived expression levels would be **continous, such as log-CPMs, log-RPKMs or log-TPMs**, the the default value of the **kcdf argument should remain unchanged**.
+
+出自：<https://www.bioconductor.org/packages/release/bioc/vignettes/GSVA/inst/doc/GSVA.pdf>
+
+- 表达矩阵和Gene mapping：
+  - 这里跟FigureYa55panCancer_violin保持一致，从[XENA](https://xenabrowser.net/datapages/)下载UCSC Toil RNA-seq Recompute TPM：[TCGA Pan-Cancer (PANCAN) (41 datasets)
+](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)里的[TOIL RSEM tpm (n=10,535) UCSC Toil RNA-seq Recompute](https://toil.xenahubs.net/download/tcga_rsem_isoform_tpm.gz)，[Gene Mapping](https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.transcript.probemap)
+  - 或者下载GDC pipeline的FPKM-UQ：[GDC Pan-Cancer (PANCAN) (17 datasets)](https://xenabrowser.net/datapages/?cohort=GDC%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443) 里的[HTSeq - FPKM-UQ (n=11,768) GDC Hub](https://gdc.xenahubs.net/download/GDC-PANCAN.htseq_fpkm-uq.tsv.gz)，[Gene Mapping](https://gdc.xenahubs.net/download/gencode.v22.annotation.gene.probeMap)
+
+- TCGA_phenotype_denseDataOnlyDownload.tsv，样本注释。[TCGA Pan-Cancer (PANCAN) (41 datasets) phenotype](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)里的[sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub](https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz)，只有癌症全称，没有缩写。
+
+- samplepair.txt，癌症缩写跟全称的对应关系
+
+GSVA input data can be microarray data or RNA-seq counts, CPM, RPKM, TPM.
+
+Original text: We calculate now GSVA enrichment scores for these gene sets using first the microarray data and then the **RNA-seq integer count** data. Note that the only requirement to do the latter is to set the argument **kcdf="Poisson"** which is "Gaussian" by default. Note, however, that if our RNA-seq derived expression levels would be **continuous, such as log-CPMs, log-RPKMs or log-TPMs**, then the default value of the **kcdf argument should remain unchanged**.
+
+Source: <https://www.bioconductor.org/packages/release/bioc/vignettes/GSVA/inst/doc/GSVA.pdf>
+
+- Expression matrix and Gene mapping:
+  - To maintain consistency with FigureYa55panCancer_violin, download UCSC Toil RNA-seq Recompute TPM from [XENA](https://xenabrowser.net/datapages/): [TCGA Pan-Cancer (PANCAN) (41 datasets)
+](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)-[TOIL RSEM tpm (n=10,535) UCSC Toil RNA-seq Recompute](https://toil.xenahubs.net/download/tcga_rsem_isoform_tpm.gz)，[Gene Mapping](https://toil.xenahubs.net/download/probeMap/gencode.v23.annotation.transcript.probemap)
+  - Or download GDC pipeline FPKM-UQ: [GDC Pan-Cancer (PANCAN) (17 datasets)](https://xenabrowser.net/datapages/?cohort=GDC%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443) -[HTSeq - FPKM-UQ (n=11,768) GDC Hub](https://gdc.xenahubs.net/download/GDC-PANCAN.htseq_fpkm-uq.tsv.gz)，[Gene Mapping](https://gdc.xenahubs.net/download/gencode.v22.annotation.gene.probeMap) 
+  
+- TCGA_phenotype_denseDataOnlyDownload.tsv, sample annotation. [TCGA Pan-Cancer (PANCAN) (41 datasets) phenotype](https://xenabrowser.net/datapages/?cohort=TCGA%20Pan-Cancer%20(PANCAN)&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443)-[sample type and primary disease (n=12,804) Pan-Cancer Atlas Hub](https://pancanatlas.xenahubs.net/download/TCGA_phenotype_denseDataOnlyDownload.tsv.gz), contains only full cancer names without abbreviations.
+
+- samplepair.txt, mapping between cancer abbreviations and full names
+
+```{r}
+# 读取泛癌表达谱和基因名文件
+# 文件较大，占内存，请谨慎操作
+# Reading Pan-cancer Expression Profiles and Gene Annotation Files
+# Large file size, memory intensive - proceed with caution
+panexpr <- fread("tcga_RSEM_gene_tpm",sep = "\t",header = T,check.names = F,stringsAsFactors = F)
+annopb <- read.delim("gencode.v23.annotation.gene.probemap",row.names = 1,check.names = F,stringsAsFactors = F,header = T,sep = "\t")
+
+# 匹配基因名
+# Gene Name Matching
+panexpr <- as.data.frame(panexpr)
+rownames(panexpr) <- panexpr$sample; panexpr <- panexpr[,-1]
+comgene <- intersect(rownames(annopb), rownames(panexpr))
+panexpr <- panexpr[comgene,]; annopb <- annopb[comgene,]
+panexpr$genename <- annopb$gene; panexpr <- panexpr[!duplicated(panexpr$genename),]
+rownames(panexpr) <- panexpr$genename; panexpr <- panexpr[,-ncol(panexpr)]
+panexpr[1:3,1:3]
+
+# 读取样本注释
+# Reading Sample Annotations
+tcgacase <- read.delim(file="TCGA_phenotype_denseDataOnlyDownload.tsv",header = T,row.names = NULL,check.names = F,stringsAsFactors = F,sep = "\t")
+tcgacase[1:2,]
+
+# 读取疾病缩写和全称
+# Reading Disease Abbreviations and Full Names
+samplepair <- read.delim("samplepair.txt",as.is = T)
+tissueinfo <- samplepair[,1:2]
+tissueinfo[1:2,]
+
+# 把疾病缩写加到样本注释里
+# Adding disease abbreviations to sample annotations
+colnames(tcgacase)[4] <- "Detail"
+tcgacase <- merge(tcgacase, tissueinfo, by = "Detail", all.x = T)
+rownames(tcgacase) <- tcgacase$sample
+
+# 取出原位癌以及癌旁样本
+# Extracting Primary Tumor and Adjacent Normal Samples
+tcgacase <- tcgacase[which(tcgacase$sample_type_id %in% c(1,11)),]
+
+# 取出例文图中的癌症Samples
+# Extracting Cancer Samples Shown in Example Figure
+tumors <- c("KIRC","THCA","COAD","STAD","CHOL","LUAD","HNSC","LIHC","KIRP","READ","PRAD","LUSC","GBM","ESCA","BLCA","PAAD","UCEC","BRCA","KICH","CESC")
+tcgacase <- tcgacase[which(tcgacase$TCGA %in% tumors),]
+
+# 提取既有表达数据又有样本注释信息的Samples
+# Extracting Samples with Both Expression Data and Annotations
+comsam <- intersect(colnames(panexpr),rownames(tcgacase)) 
+tcgacase <- tcgacase[comsam,] # TCGA的sample
+
+# 提取pancancer表达矩阵
+# Extracting Pan-cancer Expression Matrix
+panexpr <- panexpr[,comsam]
+
+# 输出到文件，可用于后续更多分析
+# Output to file for downstream analysis
+#write.csv(panexpr, "output_pancancer_expr.csv", quote = F)
+```
+
+# 计算FPI
+# Calculating FPI
+
+套用例文计算FPI的方法，你也可以自己定义个某某index/score。
+
+1) 查文献定义了24个ferroptosis regulator genes (FRGs)。
+
+原文：In this study, the twenty four genes that were identified to play critical roles in regulating ferroptosis by pre- vious studies were defined as ferroptosis regulator genes (FRGs).
+
+2) 定义了两类基因：positive components (pos.comp)和negative components (neg.comp)。
+
+原文：The index to represent the ferroptosis level was establish based on the expression data for genes of ferroptosis core machine including positive components of LPCAT3, ACSL4, NCOA4, ALOX15, GPX4, SLC3A2, SLC7A11, NFE2L2, NOX1, NOX3, NOX4, NOX5 and negative components of FDFT1, HMGCR, COQ10A, COQ10B. 
+
+3) 用GSVA里的ssGSEA计算positively (pos.comp) or negatively (neg.comp) regulated ferroptosis的enrichment score，二者相减就是FPI。
+
+原文：The enrichment score (ES) of gene set that positively or negatively regulated ferroptosis was calculated using single sample gene set enrichment analysis (ssGSEA) in the R package ‘GSVA’ (Hanzelmann et al., 2013), and the normalized differences between the ES of the positive components minus negative components was defined as the ferroptosis potential index (FPI) to computationally dissect the ferroptosis levels/trends of the tissue samples.
+
+Following the example method for calculating FPI, you can also define your own XX index/score.
+
+1) Literature review identified 24 ferroptosis regulator genes (FRGs).
+
+Original text: In this study, the twenty four genes that were identified to play critical roles in regulating ferroptosis by pre- vious studies were defined as ferroptosis regulator genes (FRGs).
+
+2) Defined two gene categories: positive components (pos.comp) and negative components (neg.comp).
+
+Original text: The index to represent the ferroptosis level was establish based on the expression data for genes of ferroptosis core machine including positive components of LPCAT3, ACSL4, NCOA4, ALOX15, GPX4, SLC3A2, SLC7A11, NFE2L2, NOX1, NOX3, NOX4, NOX5 and negative components of FDFT1, HMGCR, COQ10A, COQ10B. 
+
+3) Using ssGSEA in GSVA to calculate enrichment scores for positively (pos.comp) or negatively (neg.comp) regulated ferroptosis, with FPI obtained by subtracting the two.
+
+Original text: The enrichment score (ES) of gene set that positively or negatively regulated ferroptosis was calculated using single sample gene set enrichment analysis (ssGSEA) in the R package ‘GSVA’ (Hanzelmann et al., 2013), and the normalized differences between the ES of the positive components minus negative components was defined as the ferroptosis potential index (FPI) to computationally dissect the ferroptosis levels/trends of the tissue samples.
+
+```{r}
+# 用ssGSEA计算
+# Calculating with ssGSEA
+pos.comp <- c("LPCAT3","ACSL4","NCOA4","ALOX15","GPX4","SLC3A2","SLC7A11","NFE2L2","NOX1","NOX3","NOX4","NOX5")
+neg.comp <- c("FDFT1","HMGCR","COQ10A","COQ10B")
+fpi.sig <- list(pos.comp = pos.comp,
+                neg.comp = neg.comp)
+
+# 写个循环批量计算出所有癌症的enrichment score
+# Writing loop to batch calculate enrichment scores for all cancers
+ssgsea.list <- list()
+for (t in tumors) {
+  message("--analysis of ",t," starts...")
+  tumsam <- rownames(tcgacase[which(tcgacase$TCGA == t & tcgacase$sample_type == "Primary Tumor"),])
+  norsam <- rownames(tcgacase[which(tcgacase$TCGA == t & tcgacase$sample_type == "Solid Tissue Normal"),])
+  
+  # 每次计算一个癌症类型的enrichment score
+  # 提取当前癌症的表达矩阵
+  # Calculating enrichment score for each cancer type
+  # Extract expression matrix for current cancer
+  expr <- panexpr[,c(tumsam,norsam)]
+
+  ## 重新对表达谱对数化（以下步骤请根据自己表达谱的情况来）
+  ## Re-logarithmize expression profile (Adjust following steps according to your expression profile)
+  
+  # 原始数据为log2(x+0.001) 
+  # Original data is log2(x+0.001)
+  expr <- 2^expr - 0.001 
+  
+  # 小于0的值拉到0 
+  # Set values <0 to 0
+  expr[expr < 0] <- 0 
+  
+  # 重新对数化 
+  # Re-logarithmize
+  expr <- log2(expr + 1)
+  
+  # 去除全0值 
+  # Remove all-zero rows
+  expr <- expr[rowSums(expr) > 0,]
+  
+  # 去除平坦值 
+  # Remove flat rows
+  expr <- expr[apply(expr, 1, sd) > 0,] 
+  
+  #expr <- t(scale(t(expr)))
+  
+  #write.csv(expr, paste0("normalized_expr_", t, ".csv"), quote = F)
+  
+  # 创建参数对象
+  # Create parameter object
+  params_es <- GSVA::ssgseaParam(expr = as.matrix(expr),
+                           geneSets = fpi.sig)
+
+  # 运行GSVA分析
+  # Run GSVA analysis
+  es <- GSVA::gsva(params_es)
+ 
+  # 存储结果 
+  # Store results
+  ssgsea.list[[t]] <- es
+  
+  # 释放内存 
+  # Free up memory
+  gc() 
+}
+
+# 查看ssgsea.list里的结构
+# Examine structure of ssgsea.list
+ssgsea.list$KIRC[,1:4]
+# 可以看出，每种癌症有两行：pos.comp和neg.comp，接下来，用这两行相减，获得每个sample的PFI
+# Each cancer has two rows: pos.comp and neg.comp. Next, subtract these to get FPI for each sample
+
+# 计算FPI
+# Calculate FPI
+fpi.res <- NULL
+dirct <- c()
+for (t in tumors) {
+  tumsam <- rownames(tcgacase[which(tcgacase$TCGA == t & tcgacase$sample_type == "Primary Tumor"),])
+  norsam <- rownames(tcgacase[which(tcgacase$TCGA == t & tcgacase$sample_type == "Solid Tissue Normal"),])
+  
+  # 获取当前癌症的富集分数 
+  # Get enrichment scores for current cancer
+  es <- ssgsea.list[[t]]
+  
+  # 计算FPI并标准化 
+  # Calculate FPI and standardize
+  fpi <- scale(as.numeric(es[1,] - es[2,]))[,1] 
+  
+  # 命名样本 
+  # Name samples
+  names(fpi) <- c(tumsam, norsam)
+  
+  # 计算肿瘤中位数 
+  # Calculate tumor median
+  med.fpi.tum <- median(fpi[tumsam]) 
+  
+  # 计算正常中位数 
+  # Calculate normal median
+  med.fpi.nor <- median(fpi[norsam]) 
+  
+  # 秩和检验 
+  # Wilcoxon rank sum test
+  wt <- wilcox.test(fpi[tumsam],fpi[norsam]) 
+  
+  # 若肿瘤FPI大于癌旁，则标签为黄色
+  # If tumor FPI > normal, label yellow
+  dirct <- c(dirct, ifelse(med.fpi.tum > med.fpi.nor, "yellow", "green")) 
+  
+  fpi.res <- rbind.data.frame(fpi.res,
+                              data.frame(sampleID = names(fpi),
+                                         fpi = as.numeric(fpi),
+                                         tissue = rep(c("Tumor","Normal"), c(length(tumsam),length(norsam))),
+                                         p = wt$p.value,
+                                         p.lab = ifelse(wt$p.value < 0.001,formatC(wt$p.value,format = "e",digits = 1), round(wt$p.value, 3)),
+                                         TCGA = t,
+                                         stringsAsFactors = F),
+                              stringsAsFactors = F)
+}
+
+# 命名方向向量 
+# Name direction vector
+names(dirct) <- tumors
+
+# 根据标签的颜色排序 
+# Sort by label color
+dirct <- sort(dirct) 
+
+# 设置因子 
+# Set factor levels
+fpi.res$TCGA <- factor(fpi.res$TCGA, levels = names(dirct)) 
+
+# 查看前几行结果 
+# View first few results
+head(fpi.res)
+
+# 输出到文件
+# Output to file
+write.csv(fpi.res, "output_FPI.csv", quote = F, row.names = F)
+```
+
+# 绘制泛癌箱型图
+# Drawing Pan-Cancer Boxplots
+
+```{r, fig.width=5, fig.height=6}
+# 定义颜色
+# Define colors
+green <- "#2E8049"
+yellow <- "#DD8606"
+
+# 创建ggplot对象 
+# Create ggplot object
+p <- ggplot(fpi.res, aes(TCGA, fpi, fill=tissue)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_text(aes(TCGA, y = 4,
+                label = paste0("P = ", p.lab)),
+            data = fpi.res,
+            inherit.aes = F) +
+  scale_fill_manual(values = c(green, yellow)) + 
+  scale_y_continuous(breaks = c(-2.5,0,2.5,5), labels = c(-2.5,0,2.5,5), limits = c(-3,5)) + 
+  xlab(NULL) + ylab("FPI") + coord_flip() +
+  theme_classic() +
+  
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5,vjust = 0.5,size = 11, colour = "black"),
+        axis.text.y = element_text(colour = ifelse(as.character(dirct) == "yellow", yellow, green), size = 10), 
+        legend.position = "bottom",
+        legend.title = element_blank()) 
+
+# 显示图形 
+#  Display plot
+p
+
+# 保存图形 
+# Save plot
+ggsave("FPI_Pancancer.pdf", width = 5, height = 6)
+```
+
+输出的pdf文件是矢量图，可以用Adobe Illustrator等矢量图编辑器打开，移动文字位置。
+
+The output PDF files are vector graphics that can be opened and edited in vector editing software like Adobe Illustrator, allowing you to reposition text elements.
+
+# GEO数据验证FPI
+# Validating FPI Using GEO Data
+
+这里所谓的验证，其实就是在另一套数据里看到同样的趋势。
+
+Here, "validation" essentially means observing the same trends in an independent dataset.
+
+## 输入文件
+## Input Files
+
+```{r}
+# 数据加载 (数据下载方式可参考FigureYa203ComBat)
+# Data Loading (refer to FigureYa203ComBat for download method)
+gse.expr <- read.table("GSE121689.expr.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gse.sinfo <- read.table("GSE121689.sinfo.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+# 取出DMSO样本 
+# Extract DMSO control samples
+dmso.sam <- rownames(gse.sinfo)[grep("DMSO",gse.sinfo$Title)] 
+
+# 取出Erastin样本 
+# Extract Erastin-treated samples
+erastin.sam <- rownames(gse.sinfo)[grep("erastin",gse.sinfo$Title)] 
+
+# 处理表达谱行名并去重复
+# Processing expression matrix rownames and removing duplicates
+gse.expr$genename <- sapply(strsplit(rownames(gse.expr), " /// ", fixed = T), "[", 1)
+gse.expr <- gse.expr[!duplicated(gse.expr$genename),]; rownames(gse.expr) <- gse.expr$genename; gse.expr <- gse.expr[,-ncol(gse.expr)] 
+```
+
+## 计算FPI
+## Calculate FPI
+
+```{r}
+# 使用 ssgseaParam 创建参数对象
+# Creating parameter object using ssgseaParam
+params_es.gse <- GSVA::ssgseaParam(
+  expr = as.matrix(gse.expr),  
+  geneSets = fpi.sig         
+)
+
+# 运行 GSVA 分析
+# Running GSVA analysis
+es.gse <- GSVA::gsva(params_es.gse)
+
+# 计算FPI
+# Calculating FPI
+fpi.gse <- as.numeric(scale(es.gse[1,] - es.gse[2,])); names(fpi.gse) <- colnames(gse.expr)
+
+# 统计分析 
+# Statistical analysis
+wt <- wilcox.test(fpi.gse[dmso.sam],fpi.gse[erastin.sam]) 
+```
+
+## 绘制箱型图
+## Drawing Boxplots
+
+```{r, fig.width=3, fig.height=4}
+# 设置图形参数 
+# Setting graphic parameters
+par(bty="l", mgp = c(2,0.5,0), mar = c(3.1,4.1,2.1,2.1),tcl=-.25,las = 1,xpd = T)
+
+# 绘制箱线图 
+# Drawing boxplot
+boxplot(fpi.gse[dmso.sam],
+        fpi.gse[erastin.sam],
+        col = c("#2E8049","#DD8606"),
+        ylab = "FPI (GSE121689)",
+        xlab = "",
+        ylim = c(-2,2), 
+        names = c("DMSO","Erastin"))
+
+# 添加显著性标记 
+# Adding significance markers
+lines(c(1,2),c(2.2,2.2)) 
+lines(c(1,1),c(2.1,2.2)) 
+lines(c(2,2),c(2.1,2.2)) 
+text(1.5, 2.3, paste0("p = ",round(wt$p.value, 3)))
+
+# 保存图形 
+# Saving plot
+dev.copy2pdf(file = "FPI_GSE121689.pdf", width = 3, height = 3.8)
+```
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
