@@ -1,0 +1,579 @@
+---
+title: "FigureYa195PanPair"
+params:
+  author: "Xiaofan Lu; Yasi Zhang"  
+  reviewer: "Ying Ge"
+  date: "2025-05-20"
+output: html_document
+---
+
+**Author(s)**: `r params$author`  
+**Reviewer(s)**: `r params$reviewer`  
+**Date**: `r params$date` 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+# Requirements Description
+
+直接比较了泛癌里面paired的基因的表达差异。之前的FigureYa55panCancer_violin比较癌和normal，没有paired的数据。
+
+A direct comparison was made of the gene expression differences in paired samples across pan-cancer. The previous FigureYa55panCancer_violin compared cancer versus normal tissues but did not use paired data.
+
+![](example.png)
+
+出自：<https://www.nature.com/articles/s41388-019-1026-9>
+
+图1 人类癌症中rRNA代谢相关基因的表达图谱。
+a) TCGA数据库中按癌症类型分组的所有样本的rRNA代谢评分。Y轴表示基于TCGA基因表达数据通过ssGSEA方法计算的rRNA代谢评分。箱线图展示了中位数、四分位数、最小值和最大值，每个点代表一个独立样本。p值采用Mann-Whitney检验计算。
+b) 与(a)相似，但分析的是TCGA中按癌症类型分组的配对样本。每个点代表一个样本。p值通过双尾Student t检验得出。
+
+Source: <https://www.nature.com/articles/s41388-019-1026-9>
+
+Fig. 1 Expression landscape of rRNA metabolism-related genes in human cancer. 
+a) rRNA metabolic score among all samples grouped by cancer from the TCGA. Y-axis representing rRNA metabolic score, which was calculated by ssGSEA based on the gene expression in the TCGA. Boxplots show median, quartiles, min, and max, each point representing one sample. p-values are based on the Mann–Whitneytest. 
+b) Similar to (a), but **in paired samples** grouped by cancer from the TCGA. Each point representing one sample. p-values are based on two-tailed Student t-test.
+
+# 应用场景
+# Application Scenario
+
+提取TCGA泛癌里配对样本的表达量，再从中提取感兴趣的通路里的基因，计算通路富集得分，画出连线图。
+
+根据barcode提取配对样本的方法同样适用于TCGA的其他类型数据，例如DNA甲基化等。
+
+配对样本的表达量还可以用来做更能多分析，画更多图。例如用来筛选配对间的差异表达基因，用FigureYa149rankHeatmap来展示。
+
+还可以把基因集换成你感兴趣的signature、biomarker。你在某个cohort里发现的差异基因，再来TCGA泛癌里看看异同。
+
+更多泛癌的图看这里<https://k.koudai.com/Wi1xos9X>
+
+Extract expression data from paired samples in TCGA pan-cancer, then select genes from pathways of interest, calculate pathway enrichment scores, and generate a connected-line plot.
+
+The same barcode-based method for extracting paired samples can also be applied to other TCGA data types, such as DNA methylation.
+
+The paired-sample expression data can be used for additional analyses and visualizations. For example, it can be used to identify differentially expressed genes (DEGs) between paired samples and display them using FigureYa149rankHeatmap.
+
+You can also replace the gene sets with your own signatures or biomarkers of interest. For instance, DEGs identified in a specific cohort can be further examined in TCGA pan-cancer to compare similarities and differences.
+
+For more pan-cancer visualizations, check here<https://k.koudai.com/Wi1xos9X>
+
+# 环境设置
+# Environment Setup
+
+使用国内镜像安装包。
+
+Using domestic mirrors for package installation.
+
+```{r eval=FALSE}
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+install.packages(c("data.table", "knitr"))
+```
+
+# 加载包
+# Loading packages
+
+```{r}
+library(data.table)
+library(GSVA)
+
+# 显示英文报错信息
+# Show English error messages
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止chr转成factor
+# Prevent character-to-factor conversion
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件的获得
+# Obtaining Input Files
+
+如果你已经准备好easy_input_pair.txt、easy_input_expr.RDS和easy_input_gene.txt文件，就可以跳过这步，直接进入“输入文件”。
+
+If you already have the files easy_input_pair.txt, easy_input_expr.RDS and easy_input_gene.txt prepared, you can skip this step and go directly to "Input Files".
+
+## TCGA pan-cancer配对样本的表达矩阵提取
+## Extracting Paired-Sample Expression Matrix from TCGA Pan-Cancer
+
+这步运行一次就行，可直接跳到“获取感兴趣的基因集”。
+
+这步提取出的配对样本及其表达矩阵，已保存到easy_input_pair.txt和easy_input_expr.RDS文件。你可以用这些配对样本的表达量做很多事情，不要局限于例图哦～
+
+GDC-PANCAN.basic_phenotype.tsv，样本信息，从XENA下载<https://xenabrowser.net/datapages/>
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv，表达矩阵，从TCGA PanCanAtlas下载：<https://gdc.cancer.gov/about-data/publications/pancanatlas>。太大，已上传微云<https://share.weiyun.com/K5dlEurP>
+
+This step only needs to be run once. You can go directly to "Obtaining Gene Sets of Interest".
+
+The extracted paired samples and their expression matrices have been saved in easy_input_pair.txt and easy_input_expr.RDS. You can use this paired-sample expression data for many analyses - don't limit yourself to the example plots.
+
+GDC-PANCAN.basic_phenotype.tsv: Sample information, downloaded from XENA<https://xenabrowser.net/datapages/>
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv: Expression matrix, downloaded from TCGA PanCanAtlas <https://gdc.cancer.gov/about-data/publications/pancanatlas>. (File is too large; already uploaded to Weiyun<https://share.weiyun.com/K5dlEurP>
+
+```{r eval=FALSE}
+# 载入样本信息
+# Load sample information
+pheno <- read.table("GDC-PANCAN.basic_phenotype.tsv",sep = "\t",row.names = 1,header = T,check.names = F,stringsAsFactors = F)
+
+# 加载基因表达矩阵
+# Load gene expression matrix
+expr <- fread("EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",sep = "\t",header = T,check.names = F,stringsAsFactors = F)
+
+# 表达矩阵数据处理
+# Process expression matrix data
+expr <- as.data.frame(expr)
+
+# 取"|"左侧的基因名
+# Take gene names before "|" 
+expr$gene_id <- sapply(strsplit(expr$gene_id,"|",fixed = T), "[", 1)
+
+# 去重
+# Remove duplicates
+expr <- expr[!duplicated(expr$gene_id),] 
+
+# 移除带有"?"的基因
+# Remove genes with "?" and drop first column
+rownames(expr) <- expr$gene_id; expr <- expr[-grep("?",rownames(expr),fixed = T),-1] 
+
+# 取前16位barcode
+# Take first 16 characters of barcode 
+colnames(expr) <- substr(colnames(expr), start = 1, stop = 16) 
+
+expr[1:3,1:3]
+
+# 样本信息处理（取TCGA中原位癌和正常样本）
+# Process sample information (Select TCGA primary tumor and normal samples)
+pheno <- pheno[which(pheno$program == "TCGA" & pheno$sample_type_id %in% c(1,11)),] 
+
+# 更新数据
+# Update data
+com_sam <- intersect(colnames(expr),rownames(pheno))
+expr <- expr[,com_sam]
+pheno <- pheno[com_sam,]
+```
+
+根据TCGA sample barcode的规则提取配对样本及其对应的表达矩阵，<https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/>
+
+Extracting paired samples and their corresponding expression matrices based on TCGA sample barcode rules, <https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/>
+
+```{r eval=FALSE}
+# 获取唯一的项目ID
+# Get unique project IDs 
+proid <- unique(pheno$project_id)
+
+# 初始化空数据框用于存储配对样本
+# Initialize empty dataframe for paired samples 
+tcga.pan.pair <- NULL
+
+# 遍历每个项目
+# Loop through each project
+for (i in proid) {
+  
+  # 获取当前项目的所有样本
+  # Get all samples for current project 
+  sam <- rownames(pheno[which(pheno$project_id == i),])
+  
+  # 识别正常样本(-11A)
+  # Identify normal samples (-11A)
+  n.sam <- sam[grep("-11A",sam)]
+  
+  # 识别肿瘤样本(-01A)
+  # Identify tumor samples (-01A) 
+  t.sam <- sam[grep("-01A",sam)]
+  
+  # 如果存在正常样本
+  # If normal samples exist 
+  if(length(n.sam) > 0) {
+    
+    # 从正常样本中提取患者代码
+    # Extract patient codes from normal samples 
+    toMatch <- substr(n.sam,start = 9, stop = 12)
+    
+    # 寻找匹配的肿瘤样本
+    # Find matching tumor samples 
+    matches <- unique(grep(paste(toMatch,collapse = "|"), 
+                           t.sam, value = TRUE))
+    
+    # 如果找到匹配
+    # If matches found 
+    if(length(matches) > 0) {
+      
+      # 提取患者代码
+      # Extract patient codes
+      t.code <- substr(matches, start = 1, stop = 12)
+      n.code <- substr(n.sam, start = 1, stop = 12)
+      
+      # 寻找共有的患者代码
+      # Find common patient codes 
+      com_code <- intersect(t.code, n.code)
+      
+      # 创建配对样本ID
+      # Create paired sample IDs
+      pair.t.sam <- paste0(com_code, "-01A")
+      pair.n.sam <- paste0(com_code, "-11A")
+      
+      # 创建配对样本数据框
+      # Create dataframe for paired samples 
+      tmp <- data.frame(samID = c(pair.t.sam,pair.n.sam),
+                        tissue = rep(c("paired.tumor","paired.normal"), each = length(com_code)),
+                        project = i,
+                        row.names = c(pair.t.sam,pair.n.sam),
+                        stringsAsFactors = F)
+      
+      # 合并结果
+      # Combine results 
+      tcga.pan.pair <- rbind.data.frame(tcga.pan.pair,tmp,stringsAsFactors = F)
+    } else {cat("Fail to find matched tumor samples for ",i,"\n")}
+
+  } else {cat("Fail to find normal samples for ",i,"\n")}
+}
+
+# 按项目统计样本数
+# Count samples by project
+table(tcga.pan.pair$project)
+
+# 保存配对样本信息到文件
+# Save paired sample info to file
+write.table(tcga.pan.pair,"easy_input_pair.txt",sep = "\t",row.names = F,quote = F)
+
+# 进一步更新数据
+# Further update data
+expr <- as.data.frame(na.omit(expr[,tcga.pan.pair$samID]))
+
+# 保存配对样本表达矩阵
+# Save expression matrix of paired samples
+saveRDS(expr, "easy_input_expr.RDS")
+```
+
+## 获取感兴趣的基因集
+## Obtaining Gene Sets of Interest
+
+感兴趣的通路里包含哪些基因？
+
+可以从领域内的网站或数据库下载，或者通过阅读综述、研究论文，自己总结基因名。
+
+这里提供一个方法，从GSEA网站下载MSigDB的gmt文件<http://software.broadinstitute.org/gsea/downloads.jsp>，从gmt文件中获得感兴趣通路里的基因，以`h: hallmark gene sets`为例，下载`h.all.v7.1.symbols.gmt`文件。
+
+用到了FigureYa151pathifier里的自定义函数。
+
+Which genes are included in your pathways of interest?
+
+You can download them from domain-specific websites or databases, or manually compile gene lists by reviewing literature and research papers.
+
+Here we provide one method: Download GMT files from MSigDB on the GSEA website<http://software.broadinstitute.org/gsea/downloads.jsp>, then extract genes from your target pathways in the GMT file. Taking the `h: hallmark gene sets` as an example, download the file `h.all.v7.1.symbols.gmt`.
+
+This process utilizes custom functions from FigureYa151pathifier.
+
+```{r eval=FALSE}
+# 自定义函数，用于读取gmt文件为列表形式
+# Custom function to read GMT file as list
+gmt2list <- function(annofile){
+  
+  # 检查文件是否存在
+  # Check file existence
+  if (!file.exists(annofile)) {
+    stop("There is no such gmt file.")
+  }
+  
+  # 处理压缩文件
+  # Handle compressed files
+  if (tools::file_ext(annofile) == "xz") {
+    annofile <- xzfile(annofile)
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+    close(annofile)
+  } else if (tools::file_ext(annofile) == "gmt") {
+    x <- scan(annofile, what="", sep="\n", quiet=TRUE)
+  } else {
+    stop ("Only gmt and gmt.xz are accepted for gmt2list")
+  }
+  
+  # 处理GMT文件内容
+  # Process GMT content
+  y <- strsplit(x, "\t")
+  names(y) <- sapply(y, `[[`, 1)
+  
+  # 返回基因列表
+  # Return gene lists
+  annoList <- lapply(y, `[`, c(-1,-2))
+}
+
+# 读取GMT文件
+# Read GMT file
+gset <- gmt2list("h.all.v7.1.symbols.gmt") 
+
+# 提取带有OXIDATIVE字样的通路
+# Extract pathways containing "OXIDATIVE"
+gset_meta <- gset[names(gset) %like% "OXIDATIVE"]
+gset_meta
+meta <- gset_meta$HALLMARK_OXIDATIVE_PHOSPHORYLATION
+
+# 或者要多个通路
+# Alternative, combine multiple pathways
+#meta <- c(gset$HALLMARK_DNA_REPAIR, gset$HALLMARK_APOPTOSIS)
+
+# 保存到文件
+# Save to file
+#write.table(meta, "easy_input_gene.txt", row.names = F, col.names = F, quote = F)
+```
+
+# 输入文件
+# Input Files
+
+easy_input_gene.txt，代谢基因，来自例文补充材料41388_2019_1026_MOESM2_ESM.xlsx中Table S1。不局限于通路，还可以是某一群基因，例如前期研究筛选出的signature等。
+
+easy_input_pair.txt，配对样本信息。
+
+easy_input_expr.RDS，配对样本的表达矩阵。太大，已上传微云<https://share.weiyun.com/K5dlEurP>
+
+easy_input_gene.txt - Metabolic genes sourced from Supplementary Table S1 in the reference publication (41388_2019_1026_MOESM2_ESM.xlsx). Not limited to pathway genes, this may also include specific gene sets such as signatures identified in previous studies.
+
+easy_input_pair.txt - Paired sample information.
+
+easy_input_expr.RDS - Expression matrix of paired samples. Due to large file size, this has been uploaded to Weiyun<https://share.weiyun.com/K5dlEurP>
+
+```{r}
+# 加载感兴趣通路里的基因
+# Load genes from pathway of interest
+meta <- read.table("easy_input_gene.txt")$V1
+
+# 加载配对样本信息
+# Load paired sample information
+tcga.pan.pair <- read.table("easy_input_pair.txt", header = T)
+
+# 加载配对样本的表达矩阵
+# Load expression matrix of paired samples
+expr <- readRDS("easy_input_expr.RDS")
+expr[1:3, 1:3]
+```
+
+# 单样本富集得分
+# Single-Sample Enrichment Score
+
+大白话：把每一个样本中多个基因的表达值（多个数值）用ssGSEA换算成一个数值。这样一来，画图时就可以清晰地看到每对配对样本的normal和tumor之间的表达量谁高谁低了。
+
+用ssGSEA计算通路的富集得分。
+
+In simple terms: Convert the expression values of multiple genes (multiple numerical values) in each sample into a single numerical value using ssGSEA. This allows clear visualization in plots to compare expression levels between normal and tumor samples in each paired set.
+
+Use ssGSEA to calculate pathway enrichment scores.
+
+```{r}
+# 准备输入数据
+# Prepare input data 
+indata <- expr
+
+# 数据转换：log2(标准化计数+1)
+# Data transformation: log2(normalized counts + 1) 
+indata <- round(log2(pmax(indata + abs(min(indata)), 0) + .Machine$double.eps + 1),3) 
+
+# 创建GSVA参数对象
+# Create GSVA parameter object
+gsva_params <- ssgseaParam(exprData = as.matrix(indata),
+                          geneSets = list("metabolism" = meta))
+
+# 运行ssGSEA分析
+# Run ssGSEA analysis
+meta.ssgsea <- gsva(gsva_params)
+
+# 准备包含得分的元数据
+# Prepare metadata with scores
+pan.meta <- tcga.pan.pair
+
+# 对富集分数进行Z-score标准化
+# Z-score normalization of enrichment scores
+pan.meta$mscore <- scale(as.numeric(meta.ssgsea[1,pan.meta$samID])) 
+```
+
+# 配对检验
+# Paired Testing
+
+```{r}
+# 获取所有癌症类型 
+# Get all cancer types
+proid <- unique(pan.meta$project)
+
+# 初始化p值和显著性标记向量 
+# Initialize vectors for p-values and significance markers
+wp <- sig <- c()
+
+# 遍历每种癌症类型 
+# Loop through each cancer type
+for(i in proid) {
+  
+  # 提取当前癌症类型的样本 
+  # Extract samples for current cancer type
+  tmp <- pan.meta[which(pan.meta$project == i),]
+  
+  # 分离肿瘤和正常样本 
+  # Separate tumor and normal samples
+  t <- tmp[which(tmp$tissue == "paired.tumor"),]
+  n <- tmp[which(tmp$tissue == "paired.normal"),]
+  
+  # 执行配对Wilcoxon检验 
+  # Perform paired Wilcoxon test
+  wp <- c(wp, wilcox.test(t$mscore,n$mscore,paired = T)$p.value)
+  
+  # 根据p值计算显著性标记 
+  # Calculate significance markers based on p-value
+  sig <- c(sig, as.character(cut(wilcox.test(t$mscore,n$mscore,paired = T)$p.value,
+                                 c(0,0.001,0.005,0.01,0.05,1),c("****","***","**","*",""))))
+}
+
+# 设置名称 
+# Set names
+names(wp) <- names(sig) <- unique(pan.meta$project)
+
+# 查看结果 
+# View results
+wp
+sig
+```
+
+# 开始画图
+# Plotting
+
+```{r}
+# 基础绘图
+# Base R plotting 
+ylim <- c(floor(range(pan.meta$mscore)[1]), ceiling(range(pan.meta$mscore)[2]))
+
+# 初始化PDF输出
+# Initialize PDF output
+pdf("Metabolic landscape of tcga paired sample.pdf",width = 8.5,height = 3.5)
+
+# 默认不显示布局结构
+# Default: don't show layout structure in final PDF
+showLayout <- F 
+
+# 设置复杂布局矩阵
+# Set complex layout matrix 
+mat <- c(rep(c(rep(1,2), rep(2,2), rep(3:24,each = 3)),16))
+layout(matrix(c(mat, rep(25, 4+22*3)),byrow = T,nrow = 17)) 
+
+# 可选布局预览
+# Optional layout preview
+if(showLayout) {
+  layout.show(n = 25) 
+}
+
+#---------------------------#
+# 画布区域1：绘制最左侧标签 #
+# Canvas Area 1: Left label #
+#---------------------------#
+par(bty = "n", mgp = c(2,.6,0), mar = c(0,0,0,0), xpd = T)
+plot(0,0,col = "white",
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n",
+     xaxs = "i", yaxs = "i") 
+text(0,0,"rRNA metabolic score\n[Z-score (ssGSE)]", srt = 90, cex = 1, font = 2)
+
+#------------------------------#
+# 画布区域2：绘制最左侧区域y轴 #
+#  Canvas Area 2: Left y-axis  #
+#------------------------------#
+par(bty = "o", mgp = c(2,.6,0), mar = c(3,1.5,1,0), las = 2, font.axis = 2, xpd = F) 
+a <- barplot(c(0,0),
+             border = NA,
+             ylim = ylim,
+             xlab = "", xaxt = "n", 
+             ylab = "rRNA metabolic score\n[Z-score (ssGSE)]", yaxt = "n") 
+axis(side = 2, at = pretty(ylim), lwd = 2)
+abline(h = par("usr")[3], col = "black", lwd = 3)
+abline(h = par("usr")[4], col = "black", lwd = 2) 
+
+#-------------------------------#
+#  画布区域3-24：绘制22种癌症   #
+# Canvas Areas 3-24: 22 cancers #
+#-------------------------------#
+for (i in proid) {
+  
+  # 提取肿瘤/正常样本分数
+  # Extract tumor/normal scores
+  t.dat <- pan.meta[which(pan.meta$project == i & pan.meta$tissue == "paired.tumor"),]
+  n.dat <- pan.meta[which(pan.meta$project == i & pan.meta$tissue == "paired.normal"),]
+  
+  # 设置空柱状图对齐
+  # Setup empty barplot for alignment 
+  par(bty = "n", mgp = c(2,.6,0), mar = c(3,0,1,0), las = 2, font.axis = 2, xpd = F) 
+  a <- barplot(c(0,0), col = "white",
+               border = NA,
+               ylim = ylim,
+               xlab = "", xaxt = "n", 
+               ylab = "", yaxt = "n")
+  
+  # 添加癌症名称标签
+  # Add cancer name label 
+  par(xpd = T)
+  text((a[1,] + a[2,])/2 - 0.05, y = par("usr")[3]-0.4, gsub("TCGA-","",i), srt = 35) # 倾斜35度角
+  abline(h = par("usr")[3], col = "black", lwd = 2)
+  abline(h = par("usr")[4], col = "black", lwd = 2) 
+  par(xpd = F)
+  
+  # 右侧边框处理
+  # Right border handling 
+  if(i != proid[length(proid)]) {
+    abline(v = par("usr")[2], col = "#3B50A0", lwd = 3, lty = 3) 
+  } else { # 否则封上蓝色虚线
+    abline(v = par("usr")[2]-0.05, col = "black", lwd = 3) 
+  }
+  
+  # 绘制连接线
+  # Draw connecting lines 
+  segments(a[1,], t.dat$mscore,
+           a[2,], n.dat$mscore,
+           col = "#6C99CE", lwd = 1.5)
+  
+  # 添加点
+  # Add points
+  points(rep(a[1,], nrow(t.dat)), t.dat$mscore, pch = 19, col = "#BB61A1", cex = 1.2)
+  points(rep(a[2,], nrow(n.dat)), n.dat$mscore, pch = 19, col = "#7EC09A", cex = 1.2)
+  
+  # 添加显著性标记
+  # Add significance markers 
+  text((a[1,] + a[2,])/2, y = par("usr")[4]-0.3, as.character(sig[i]), cex = 1.2)
+}
+
+#--------------------------#
+# 画布区域25：绘制底部图例 #
+#  Canvas Area 25: Legend  #
+#--------------------------#
+par(bty = "n", mgp = c(2,.6,0), mar = c(0,0,0,0), xpd = T)
+plot(0,0,col = "white",
+     xlab = "",xaxt = "n", 
+     ylab = "",yaxt = "n",
+     xaxs = "i", yaxs = "i") 
+legend((par("usr")[1] + par("usr")[2])/2,par("usr")[4],
+       legend = c("Tumor","Normal"),
+       col = c("#BB61A1","#7EC09A"),
+       pch = c(19,19),
+       border = NA, 
+       bty = "n", 
+       cex = 1.1,
+       x.intersp = 0.5,
+       y.intersp = 1,
+       #yjust = 0.5,
+       horiz = T) 
+
+# 关闭图形设备
+# Close graphics device
+invisible(dev.off())
+
+# 保存工作空间
+# Save workspace 
+#save.image("PanMeta.RData")
+```
+
+![](Metabolic landscape of tcga paired sample.pdf)
+
+# 会话信息
+# Session Info
+
+```{r}
+# 显示会话信息
+# Show session information
+sessionInfo()
+```
