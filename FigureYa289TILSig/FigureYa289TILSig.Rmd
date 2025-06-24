@@ -1,0 +1,572 @@
+---
+title: "FigureYa289TILSig"
+author: "Guoqi Li, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+# 需求描述
+
+利用纯化细胞系计算免疫相关指数的计算方法，想学习框里的这个复现方法
+
+#Requirement description
+
+I want to learn the replication method in the box for calculating immune related indices using purified cell lines
+
+![](example.png)
+
+出自<https://jitc.bmj.com/content/8/1/e000110.long>
+
+from<https://jitc.bmj.com/content/8/1/e000110.long>
+
+Figure 1 Strategy for identifying tumor-infiltrating immune-related lncRNA signature (TILSig) in this study. Top 5% expressed long non-coding RNAs (lncRNAs) were obtained as candidate immune-related lncRNAs for each immune cell line. The specificity of expression of a candidate immune-related lncRNA with respect to different immune cell types was calculated using tissue specificity index (TSI). Those housekeeping lncRNAs (hklncRNAs) which are upregulated in immune cell lines and downregulated in non-small cell lung cancer (NSCLC) cell lines were selected as tumor-infiltrating immune-related lncRNAs.
+
+A prognostic signature by focusing tumor-infiltrating immune-related lncRNAs (TILSig) was constructed using the linear combination of the expression values of the prognostic tumor-infiltrating immune-related lncRNAs, weighted by their estimated regression coefficients in the multivariate Cox regression analysis.
+
+# 应用场景
+
+从表达数据鉴定肿瘤免疫浸润相关lncRNA。
+
+#Application scenarios
+
+Identify tumor immune infiltration related lncRNAs from expression data.
+
+# 环境设置
+
+使用国内镜像安装包
+
+#Environment settings
+
+Use domestic image installation package
+
+```{r eval=FALSE}
+# 设置CRAN镜像为清华大学镜像源（Set CRAN mirror to Tsinghua University mirror source）
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+# 设置Bioconductor镜像为清华大学镜像源（Set Bioconductor mirror to Tsinghua University mirror source）
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+# 下载DealGPL570，下载地址https://cran.r-project.org/src/contrib/Archive/DealGPL570/
+# DealGPL570 package version 2.0 will report errors during operation, so I installed version 1.0 locally. 
+# Place the compressed package DealGPL570_0.0.1.tar.gz in the current working directory. 
+# In Rstudio, click Install in the lower right corner, select the second option for "Install from", 
+# click Browse and select DealGPL570_0.0.1.tar.gz, then click Install.
+# Or install from the command line
+# 从本地源安装DealGPL570包（Install the DealGPL570 package from a local source）
+install.packages("DealGPL570", repos = NULL, type = "source")
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载DealGPL570包，用于处理GPL570平台的表达谱数据（Load the DealGPL570 package to process expression profile data from the GPL570 platform）
+# 由于所有免疫细胞系的表达谱数据均来自GPL570平台([HG-U133_Plus_2] Affymetrix Human Genome U133 Plus 2.0 Array)，因此这里使用DealGPL570包来处理GPL570平台的表达谱数据。
+# Since the expression profile data of all immune cell lines are from the GPL570 platform ([HG-U133_Plus_2] Affymetrix Human Genome U133 Plus 2.0 Array), 
+# the DealGPL570 package is used here to process the expression profile data from the GPL570 platform.
+library(DealGPL570) 
+
+# 加载字符串处理包（Load the string processing package）
+library(stringr)
+# 加载批次效应校正包（Load the batch effect correction package）
+library(sva)
+# 加载数据框处理包（Load the data frame processing package）
+library(tibble)
+# 加载数据处理包（Load the data processing package）
+library(dplyr)
+# 加载数据科学工具集合包（Load the data science toolkit package）
+library(tidyverse)
+# 加载基因组特征处理包（Load the genomic features processing package）
+library(GenomicFeatures)
+# 加载微阵列数据分析包（Load the microarray data analysis package）
+library(limma)
+# 加载生存分析包（Load the survival analysis package）
+library(survival)
+# 加载基因组轨道数据处理包（Load the genomic track data processing package）
+library(rtracklayer)
+
+# 设置环境变量，显示英文报错信息（Set environment variable to display English error messages）
+Sys.setenv(LANGUAGE = "en") 
+
+# 禁止将字符向量自动转换为因子类型（Disable automatic conversion of character vectors to factors）
+options(stringsAsFactors = FALSE) 
+```
+
+# 输入文件
+
+## 数据收集
+
+文章所使用的大型数据均上传到百度网盘，链接：<https://pan.baidu.com/s/1mpYgfy1cCZPQPzmkv4VQDA>，提取码：ibzk。
+
+包括19种免疫细胞系表达谱数据，GENECODE注释文件，RefSeq注释文件。
+CCLE表达谱数据，TCGA胃癌表达谱数据和临床数据，count数据转换为TPM数据的参考数据集。
+
+#Input file
+
+##Data collection
+
+The large data used in the article has been uploaded to Baidu Cloud, link:< https://pan.baidu.com/s/1mpYgfy1cCZPQPzmkv4VQDA >Extract code: ibzk.
+
+Including expression profile data of 19 immune cell lines, GENECODE annotation files, and RefSeq annotation files.
+The reference dataset for converting CCLE expression profile data, TCGA gastric cancer expression profile data, clinical data, and count data into TPM data.
+
+## 来自GEO的表达数据处理
+
+##Expression data processing from GEO
+
+```{r}
+# 使用DealGPL570处理16个表达谱数据，包含114个细胞系，19种免疫细胞类型
+# Process 16 expression profile datasets containing 114 cell lines and 19 immune cell types using DealGPL570
+GSE13906 <- DealGPL570(file = "GSE13906_RAW.tar",type = "geneSymbol")
+# 将symbol列设置为行名（Set the 'symbol' column as row names）
+GSE13906 <- column_to_rownames(GSE13906,"symbol")
+
+# 依次处理其余15个GSE数据集（Process the remaining 15 GSE datasets in sequence）
+GSE23371 <- DealGPL570(file = "GSE23371_RAW.tar",type = "geneSymbol")
+GSE23371 <- column_to_rownames(GSE23371,"symbol")
+
+GSE25320 <- DealGPL570(file = "GSE25320_RAW.tar",type = "geneSymbol")
+GSE25320 <- column_to_rownames(GSE25320,"symbol")
+
+GSE27291 <- DealGPL570(file = "GSE27291_RAW.tar",type = "geneSymbol")
+GSE27291 <- column_to_rownames(GSE27291,"symbol")
+
+GSE27838 <- DealGPL570(file = "GSE27838_RAW.tar",type = "geneSymbol")
+GSE27838 <- column_to_rownames(GSE27838,"symbol")
+
+GSE28490 <- DealGPL570(file = "GSE28490_RAW.tar",type = "geneSymbol")
+GSE28490 <- column_to_rownames(GSE28490,"symbol")
+
+GSE28698 <- DealGPL570(file = "GSE28698_RAW.tar",type = "geneSymbol")
+GSE28698 <- column_to_rownames(GSE28698,"symbol")
+
+GSE28726 <- DealGPL570(file = "GSE28726_RAW.tar",type = "geneSymbol")
+GSE28726 <- column_to_rownames(GSE28726,"symbol")
+
+GSE37750 <- DealGPL570(file = "GSE37750_RAW.tar",type = "geneSymbol")
+GSE37750 <- column_to_rownames(GSE37750,"symbol")
+
+GSE39889 <- DealGPL570(file = "GSE39889_RAW.tar",type = "geneSymbol")
+GSE39889 <- column_to_rownames(GSE39889,"symbol")
+
+GSE42058 <- DealGPL570(file = "GSE42058_RAW.tar",type = "geneSymbol")
+GSE42058 <- column_to_rownames(GSE42058,"symbol")
+
+GSE49910 <- DealGPL570(file = "GSE49910_RAW.tar",type = "geneSymbol")
+GSE49910 <- column_to_rownames(GSE49910,"symbol")
+
+GSE51540 <- DealGPL570(file = "GSE51540_RAW.tar",type = "geneSymbol")
+GSE51540 <- column_to_rownames(GSE51540,"symbol")
+
+GSE59237 <- DealGPL570(file = "GSE59237_RAW.tar",type = "geneSymbol")
+GSE59237 <- column_to_rownames(GSE59237,"symbol")
+
+GSE6863 <- DealGPL570(file = "GSE6863_RAW.tar",type = "geneSymbol")
+GSE6863 <- column_to_rownames(GSE6863,"symbol")
+
+GSE8059 <- DealGPL570(file = "GSE8059_RAW.tar",type = "geneSymbol")
+GSE8059 <- column_to_rownames(GSE8059,"symbol")
+
+# 修改列名，仅保留GSE开头的GSE样本编号，去除.CEL后缀
+# Modify column names to keep only GSE sample IDs starting with "GSE" and remove .CEL suffix
+for (i in ls(pattern = "^GSE")) {
+  rt <- get(i)
+  colnames(rt) <- str_replace_all(colnames(rt),".CEL","")
+  assign(i,rt)
+}
+
+# 从PMID: 28052254文献的补充材料中（文件名:1-s2.0-S2211124716317090-mmc3.xlsx）提取每个样本对应的细胞类型，整理后的文件命名为Immune_cell_line.txt
+# Extract the cell type corresponding to each sample from the supplementary materials of the literature PMID: 28052254 
+# (file name: 1-s2.0-S2211124716317090-mmc3.xlsx), and name the organized file Immune_cell_line.txt
+# 读取注释信息（Read annotation information）
+ann <- read.table("Immune_cell_line.txt",header=T,sep="\t",quote="",check.name=F)
+# 查看注释信息（View annotation information）
+head(ann)
+
+# 提取16个数据集的注释信息（按GSE号提取，粗略提取）
+# Extract annotation information for 16 datasets (extracted by GSE number, rough extraction)
+ann <- ann[which(ann$`Data set`%in%ls(pattern = "^GSE")),]
+# 查看各数据集样本数量分布（View the sample count distribution of each dataset）
+table(ann$`Data set`)
+
+# 提取16个数据集中仅在注释中有的免疫细胞系（按GSM号提取，详细提取）
+# Extract immune cell lines from 16 datasets that are only present in the annotations (extracted by GSM number, detailed extraction)
+for (j in ls(pattern = "^GSE")) {
+  rt <- get(j)
+  rt <- rt[,which(colnames(rt)%in%ann[which(ann$`Data set`==j),"Sample ID"])]
+  assign(j,rt)
+}
+
+# 将数据合并（Merge the data）
+data <- cbind(GSE13906, GSE23371, GSE25320, GSE27291, GSE27838, GSE28490, GSE28698, 
+            GSE28726, GSE37750, GSE39889, GSE42058, GSE49910, GSE51540, 
+            GSE59237, GSE6863, GSE8059)
+
+# 主成分分析查看数据集间批次效应
+# Perform principal component analysis to check batch effects between datasets
+source("batchPCA.R")
+batchPCA(indata = t(scale(t(data))), 
+         batch = rep(c("GSE13906", "GSE23371", "GSE25320", "GSE27291", "GSE27838", "GSE28490", "GSE28698", 
+                       "GSE28726", "GSE37750", "GSE39889", "GSE42058", "GSE49910", "GSE51540", 
+                       "GSE59237", "GSE6863", "GSE8059"),
+                     times=c(2,3,4,8,8,5,2,14,8,4,4,26,9,10,3,4)),
+         fig.dir = ".",
+         PCA.fig.title = "Raw PCA for GEO Immune cell lines",
+         #cols =brewer.pal(6, "Set1"),
+         showID = F,
+         cex = 0.5,
+         showLegend =T,
+         pos = "bottomright")
+
+# 去除批次效应（Remove batch effects）
+batch <- data.frame(batch = rep(c("GSE13906", "GSE23371", "GSE25320", "GSE27291", "GSE27838", "GSE28490", "GSE28698", 
+                                "GSE28726", "GSE37750", "GSE39889", "GSE42058", "GSE49910", "GSE51540", 
+                                "GSE59237", "GSE6863", "GSE8059"),
+                              times=c(2,3,4,8,8,5,2,14,8,4,4,26,9,10,3,4)))
+modcombat <- model.matrix(~1,data = batch)
+data_combat <- as.data.frame(ComBat(dat=as.matrix(data),batch=batch$batch,mod=modcombat))
+
+# 将去除批次效应后的整合数据输出（Output the integrated data after batch effect removal）
+write.table(data_combat,"data_combat.txt",quote = F,row.names = T,col.names = T,sep = "\t")
+
+# 批次效应校正后的主成分分析（Principal component analysis after batch effect correction）
+batchPCA(indata = t(scale(t(data_combat))),
+         batch = rep(c("GSE13906", "GSE23371", "GSE25320", "GSE27291", "GSE27838", "GSE28490", "GSE28698", 
+                       "GSE28726", "GSE37750", "GSE39889", "GSE42058", "GSE49910", "GSE51540", 
+                       "GSE59237", "GSE6863", "GSE8059"),
+                     times=c(2,3,4,8,8,5,2,14,8,4,4,26,9,10,3,4)),
+         fig.dir = ".",
+         PCA.fig.title = "Combat PCA for GEO",
+         #cols =brewer.pal(6, "Set1"),
+         showID = F,
+         cex = 1,
+         showLegend = T,
+         pos = "bottomright")
+```
+
+## 提取lncRNA表达谱数据
+
+##Extract lncRNA expression profile data
+
+```{r}
+# 提取lncRNA表达谱数据（Extract lncRNA expression profile data）
+# 首先是通过GENCODE注释信息提取lncRNA（First, extract lncRNA through GENCODE annotation information）
+genecode <- import('gencode.v25.long_noncoding_RNAs.gtf')  # 导入GENCODE数据库的lncRNA的gtf注释文件（Import the gtf annotation file of lncRNA from the GENCODE database）
+genecode <- as.data.frame(genecode)  # 转换成数据框便于操作（Convert to a data frame for easy manipulation）
+genecode_lncRNA <- unique(genecode$gene_name)  # 去重（Remove duplicates）
+
+# 然后是通过RefSeq注释信息提取lncRNA（Then extract lncRNA through RefSeq annotation information）
+refseq <- import('GRCh38_latest_genomic.gff')  # 导入RefSeq数据库的gff注释文件（Import the gff annotation file from the RefSeq database）
+refseq <- cbind(ID=refseq$ID, gene=refseq$gene, gene_biotype=refseq$gene_biotype)  # 选择需要的三列（Select the three required columns）
+refseq <- as.data.frame(refseq)  # 转换成数据框便于操作（Convert to a data frame for easy manipulation）
+
+refseq_lncRNA1 <- unique(refseq[which(refseq$gene_biotype=="lncRNA"), "gene"])  # 提取基因类型为“lncRNA”的基因（Extract genes with gene type "lncRNA"）
+refseq_lncRNA2 <- unique(refseq[grep("NR_", as.character(refseq$ID)), "gene"])  # 提取Refseq ID以NR_开头的基因（Extract genes with Refseq ID starting with "NR_"）
+refseq_lncRNA <- intersect(refseq_lncRNA1, refseq_lncRNA2)  # 取二者交集（Take the intersection of the two）
+
+lncRNA <- intersect(genecode_lncRNA, refseq_lncRNA)  # 取GENCODE和RefSeq数据库lncRNA的交集（Take the intersection of lncRNA from GENCODE and RefSeq databases）
+
+# 最后得到lncRNA表达谱数据（Finally, obtain lncRNA expression profile data）
+data_lncRNA <- data_combat[which(rownames(data_combat) %in% lncRNA), ]  # 从合并数据中筛选出lncRNA的表达数据（Filter lncRNA expression data from the merged data）
+
+# 输出全部免疫细胞系表达谱数据（Output expression profile data of all immune cell lines）
+write.table(data_combat, "expall_114line.txt", col.names = T, row.names = T, sep = "\t", quote = F)
+# 输出全部免疫细胞系lncRNA表达谱数据（Output lncRNA expression profile data of all immune cell lines）
+write.table(data_lncRNA, "explncRNA_114line.txt", col.names = T, row.names = T, sep = "\t", quote = F)
+```
+
+# 对每个免疫细胞系的lncRNA进行排序
+
+#Sort the lncRNAs of each immune cell line
+
+```{r}
+# 提取lncRNA表达谱数据的免疫细胞系注释信息（Extract annotation information of immune cell lines for lncRNA expression profile data）
+ann_114 <- ann[which(ann$`Sample ID` %in% colnames(data_lncRNA)), ]  # 筛选出与lncRNA表达谱样本ID匹配的注释信息（Filter annotations matching lncRNA expression profile sample IDs）
+table(ann_114$Population)  # 统计各免疫细胞类型的样本数量（Count sample numbers for each immune cell type）
+
+# 调整表达谱顺序，使得注释信息和表达谱数据的样本顺序一致（Adjust expression profile order to match annotation sample order）
+loc <- match(ann_114$`Sample ID`, colnames(data_lncRNA))  # 获取样本ID在表达谱中的位置索引（Get position indices of sample IDs in expression profile）
+data_lncRNA <- data_lncRNA[, loc]  # 按注释顺序重排表达谱列（Rearrange expression profile columns by annotation order）
+
+# 处理一个lncRNA对应多个相同免疫细胞系的情况（Handle cases where one lncRNA corresponds to multiple same immune cell lines）
+mean_lncRNA <- as.data.frame(t(data_lncRNA))  # 转置数据，使行为细胞系、列为lncRNA（Transpose data: rows=cell lines, columns=lncRNA）
+mean_lncRNA$CellType <- ann_114$Population  # 添加细胞类型注释列（Add cell type annotation column）
+CellType <- ann_114$Population  # 存储细胞类型向量（Store cell type vector）
+
+# 按细胞类型聚合表达值并计算均值（Aggregate expression values by cell type and calculate mean）
+mean_lncRNA <- aggregate(mean_lncRNA, by = list(CellType), FUN = mean)  # 
+# by=list(CellType)：按CellType列分组（Group by CellType column）
+# FUN=mean：对每组计算均值（Calculate mean for each group）
+
+mean_lncRNA$CellType <- NULL  # 删除临时分组列（Remove temporary grouping column）
+mean_lncRNA <- column_to_rownames(mean_lncRNA, "Group.1")  # 将分组列设为行名（Set grouping column as row names）
+rank_lncRNA <- as.data.frame(t(mean_lncRNA))  # 再次转置，使行为lncRNA、列为细胞类型（Transpose again: rows=lncRNA, columns=cell types）
+
+# 提取19种免疫细胞系中每种细胞系的lncRNA排序结果（Extract lncRNA ranking results for each of 19 immune cell lines）
+top_outTab <- data.frame()  # 创建空数据框存储排序结果（Create empty data frame for ranking results）
+
+for (m in c(seq(0.01, 1, 0.01))) {  # 按1%间隔遍历阈值（Traverse thresholds at 1% intervals）
+  outTab <- data.frame(ID = 1:(nrow(rank_lncRNA) * m))  # 初始化每行阈值对应的空表（Initialize empty table for each threshold）
+  
+  # 对每种免疫细胞系中的lncRNA表达值进行降序排列（Descending sort of lncRNA expression values for each cell line）
+  for (i in 1:ncol(rank_lncRNA)) {
+    top <- rownames(rank_lncRNA[order(rank_lncRNA[, i], decreasing = T), ])[1:(nrow(rank_lncRNA) * m)]
+    # order(decreasing=T)：降序排序（Sort in descending order）
+    # [1:(nrow*M)]：取前M%的基因（Take top M% genes）
+    outTab[, i] <- top  # 将排序结果存入表中（Store ranking results in table）
+  }
+  colnames(outTab) <- colnames(rank_lncRNA)  # 设置列名为细胞类型（Set column names as cell types）
+  
+  # 方法1：提取19种细胞系的共有lncRNA（交集）（Method 1: Extract common lncRNA across 19 cell lines (intersection)）
+  inter <- Reduce(intersect, list(
+    v1 = outTab[, 1], v2 = outTab[, 2], v3 = outTab[, 3], v4 = outTab[, 4], v5 = outTab[, 5],
+    v6 = outTab[, 6], v7 = outTab[, 7], v8 = outTab[, 8], v9 = outTab[, 9], v10 = outTab[, 10],
+    v11 = outTab[, 11], v12 = outTab[, 12], v13 = outTab[, 13], v14 = outTab[, 14], v15 = outTab[, 15],
+    v16 = outTab[, 16], v17 = outTab[, 17], v18 = outTab[, 18], v19 = outTab[, 19]
+  ))
+  # Reduce(intersect, list(...))：对所有细胞系的top基因取交集（Intersect top genes across all cell lines）
+  
+  # 方法2：提取19种细胞系的共有lncRNA（并集）（Method 2: Extract common lncRNA across 19 cell lines (union)）
+  union <- Reduce(union, list(
+    v1 = outTab[, 1], v2 = outTab[, 2], v3 = outTab[, 3], v4 = outTab[, 4], v5 = outTab[, 5],
+    v6 = outTab[, 6], v7 = outTab[, 7], v8 = outTab[, 8], v9 = outTab[, 9], v10 = outTab[, 10],
+    v11 = outTab[, 11], v12 = outTab[, 12], v13 = outTab[, 13], v14 = outTab[, 14], v15 = outTab[, 15],
+    v16 = outTab[, 16], v17 = outTab[, 17], v18 = outTab[, 18], v19 = outTab[, 19]
+  ))
+  # Reduce(union, list(...))：对所有细胞系的top基因取并集（Union top genes across all cell lines）
+  
+  # 合并结果（Merge results）
+  union <- data.frame(top_index = rep(m, length(union)), gene = union)  # 构建并集结果表（Build union result table）
+  top_outTab <- rbind(union, top_outTab)  # 按行合并结果（Row-wise merge results）
+  
+  # （交集方法的代码已注释，如需使用请取消注释下方两行）
+  # inter <- data.frame(top_index = rep(m, length(inter)), gene = inter)
+  # top_outTab <- rbind(inter, top_outTab)
+}
+
+# 结果说明：第一列为阈值（1%到100%），第二列为对应的lncRNA（Result description: 1st column=threshold (1%-100%), 2nd column=corresponding lncRNA）
+head(top_outTab)  # 查看结果前几行（View first few rows of results）
+```
+
+# 计算TSI，提取ihk-lnc
+
+计算TSI，这里要说明一下TSI的计算思想，例如，lncRNA（命名A）在5种免疫细胞系中的表达值分别为1，2，3，4，5
+
+则原文公式中的X(A,i)值分别为(1-1)/(5-1)=0,(2-1)/(5-1)=0.25,(3-1)/(5-1)=0.5,(4-1)/(5-1)=0.75,(5-1)/(5-1)=1
+
+#Calculate TSI and extract ihk lnc
+
+To calculate TSI, we need to explain the calculation idea of TSI. For example, the expression values of lncRNA (named A) in five immune cell lines are 1, 2, 3, 4, and 5, respectively
+
+The values of X (A, i) in the original formula are (1-1)/(5-1)=0, (2-1)/(5-1)=0.25, (3-1)/(5-1)=0.5, (4-1)/(5-1)=0.75, and (5-1)/(5-1)=1, respectively
+
+```{r}
+# TSI(A)计算公式示例：[(1-0)+(1-0.25)+(1-0.5)+(1-0.75)+(1-1)]/(5-1)=2.5/4=0.625
+# TSI(A) calculation example: [(1-0)+(1-0.25)+(1-0.5)+(1-0.75)+(1-1)]/(5-1)=2.5/4=0.625
+top_TSI_outTab <- data.frame()  # 初始化存储TSI结果的数据框（Initialize data frame to store TSI results）
+
+for (n in unique(top_outTab$top_index)) {  # 遍历所有唯一的阈值（Traverse all unique thresholds）
+  # 对前1%到100%的lncRNA进行TSI计算（Calculate TSI for lncRNA from top 1% to 100%）
+  TSI <- data.frame(TSI = top_outTab[which(top_outTab$top_index == n), "gene"])  # 提取当前阈值下的lncRNA（Extract lncRNA under current threshold）
+  rownames(TSI) <- TSI$TSI  # 设置行名为lncRNA名称（Set row names as lncRNA names）
+  
+  # 实现TSI计算公式（Implement TSI calculation formula）
+  for (j in top_outTab[which(top_outTab$top_index == n), "gene"]) {  # 遍历每个lncRNA（Traverse each lncRNA）
+    y <- 0  # 初始化累加变量（Initialize accumulation variable）
+    for (m in 1:ncol(rank_lncRNA)) {  # 遍历每种免疫细胞系（Traverse each immune cell line）
+      # 计算归一化的排序值（Calculate normalized rank value）
+      x <- 1 - (rank_lncRNA[j, m] - min(rank_lncRNA[j, ])) / (max(rank_lncRNA[j, ]) - min(rank_lncRNA[j, ]))
+      # x = 1 - (当前排序 - 最小排序)/(最大排序 - 最小排序)
+      y <- sum(y, x)  # 累加归一化值（Accumulate normalized values）
+    }
+    TSI[j, 1] <- y / (ncol(rank_lncRNA) - 1)  # 计算TSI值（Calculate TSI value）
+    # TSI = 累加和 / (细胞类型数量 - 1)
+  }
+  
+  TSI$gene <- rownames(TSI)  # 添加lncRNA名称列（Add lncRNA name column）
+  # 合并阈值信息和TSI结果（Merge threshold information and TSI results）
+  TSI <- merge(top_outTab[which(top_outTab$top_index == n), ], TSI, by = "gene")
+  top_TSI_outTab <- rbind(TSI, top_TSI_outTab)  # 按行合并结果（Row-wise merge results）
+}
+
+# 结果说明：第一列为lncRNA，第二列为排序阈值，第三列为TSI值（Result description: 1st column=lncRNA, 2nd column=rank threshold, 3rd column=TSI value）
+head(top_TSI_outTab)  # 查看结果前几行（View first few rows of results）
+# 输出TSI计算结果（Output TSI calculation results）
+write.table(top_TSI_outTab, "output_TSI_all_result.txt", col.names = T, row.names = F, sep = "\t", quote = F)
+
+# 提取设定阈值下的lncRNA（Extract lncRNA under specified thresholds）
+# 条件：TSI<0.4且排序前5%（对应原文的ihk-lnc）
+# Conditions: TSI<0.4 and top 5% rank (corresponding to ihk-lnc in the paper)
+tsi <- read.table("output_TSI_all_result.txt", header = T, sep = "\t", quote = "", check.names = F)
+tsi_0.4 <- tsi[which(tsi$TSI < 0.4 & tsi$top_index <= 0.05), ]
+ihk_lnc <- unique(tsi_0.4$gene)  # 去重得到ihk-lnc（Remove duplicates to get ihk-lnc）
+```
+
+# 筛选TILncRNA
+
+#Screening TILncRNA
+
+```{r}
+# 读取lncRNA表达谱数据（Read lncRNA expression profile data）
+exp <- read.table("explncRNA_114line.txt", header = T, sep = "\t", quote = "", check.names = F, row.names = 1)
+# 读取CCLE数据库癌症细胞系表达谱数据（Read cancer cell line expression profile data from CCLE database）
+ccle <- read.table("CCLE_RNAseq_genes_counts_20180929.txt", header = T, sep = "\t", quote = "", check.names = F)
+
+# 提取胃癌的表达谱数据（若要取肺癌，将STOMACH替换为LUNG）
+# Extract expression profile data of gastric cancer (replace STOMACH with LUNG for lung cancer)
+ccle <- dplyr::select(ccle, contains(c("STOMACH", "Description")))
+# 基因去重（Remove duplicate genes）
+ccle <- ccle[!duplicated(ccle$Description), ]
+rownames(ccle) <- ccle$Description  # 设置行名为基因名称（Set row names as gene names）
+ccle$Description <- NULL  # 删除描述列（Remove description column）
+
+# count数据转换为TPM数据（Convert count data to TPM data）
+TxDb <- loadDb(file = 'txdbensemble101.sqlite')  # 载入参考数据集（Load reference dataset）
+source("normalizeGeneCounts.R")  # 载入本地脚本（Load local script）
+# 这种方式转换TPM值基因数不损失（This method converts TPM without gene loss）
+ccle_TPM <- normalizeGeneCounts(ccle, TxDb, method = "TPM")
+# 对数标准化（Log2 normalization）
+ccle_TPM <- log2(ccle_TPM + 1)
+
+# 提取特定TSI和排序指标下的lncRNA表达谱数据（Extract lncRNA expression profile data under specific TSI and ranking criteria）
+geo <- exp[which(rownames(exp) %in% ihk_lnc), ]
+# 取CCLE和GEO免疫细胞系共有的lncRNA（Get common lncRNA between CCLE and GEO immune cell lines）
+inter <- intersect(rownames(geo), rownames(ccle))
+# 合并数据：114个免疫细胞系和37个胃癌细胞系（Merge data: 114 immune cell lines and 37 gastric cancer cell lines）
+geo_ccle <- cbind(geo[inter, ], ccle_TPM[inter, ])
+
+# 去除批次效应（Remove batch effects）
+batch <- data.frame(batch = rep(c("Immune cell lines", "STOMACH cancer cell lines"),
+                              times = c(114, 37)))
+modcombat <- model.matrix(~1, data = batch)
+geo_ccle_combat <- as.data.frame(ComBat(dat = as.matrix(geo_ccle), batch = batch$batch, mod = modcombat))
+
+# 输出去除批次效应后的整合数据（Output integrated data after batch effect removal）
+write.table(geo_ccle_combat, "output_geo_ccle_combat.txt", quote = F, row.names = T, col.names = T, sep = "\t")
+
+# 在免疫细胞系和癌症细胞系间做差异分析（Perform differential expression analysis between immune and cancer cell lines）
+group <- rep(c("Immune", "STOMACH"),
+           times = c(114, 37))
+design <- model.matrix(~0 + factor(group))  # 构建设计矩阵（Build design matrix）
+colnames(design) <- levels(factor(group))  # 设置列名为分组名称（Set column names as group names）
+rownames(design) <- colnames(geo_ccle_combat)  # 设置行名为样本名称（Set row names as sample names）
+
+# 构建对比矩阵（Build contrast matrix）
+contrast.matrix <- makeContrasts(paste0(unique(group), collapse = "-"),
+                               levels = design)
+fit <- lmFit(geo_ccle_combat, design)  # 拟合线性模型（Fit linear model）
+fit2 <- contrasts.fit(fit, contrast.matrix)  # 应用对比（Apply contrast）
+fit2 <- eBayes(fit2)  # 经验贝叶斯调整（Empirical Bayes adjustment）
+
+temp <- topTable(fit2, coef = 1, n = Inf)  # 提取所有差异基因（Extract all differentially expressed genes）
+DEG <- na.omit(temp)  # 去除缺失值（Remove missing values）
+DEG$symbol <- rownames(DEG)  # 添加基因符号列（Add gene symbol column）
+
+# 差异分析结果说明（Note: Differential analysis results may not be significant, adjust previous thresholds as needed）
+write.table(DEG, "output_DEG.txt",
+            sep = '\t', quote = FALSE, col.names = T, row.names = FALSE)
+
+# 根据差异分析结果得到TILncRNA（Obtain TILncRNA from differential analysis results）
+# 实际应用中可根据需要过滤差异分析结果（In practice, filter DEG results as needed）
+TILncRNA <- DEG$symbol
+```
+
+# 构建TILSig打分 
+
+#Build TILSig scoring system
+
+```{r}
+# 读取TCGA表达谱数据（包含226个癌症样本和22个正常样本，预后分析仅用癌症样本）
+# Read TCGA expression profile data (including 226 cancer samples and 22 normal samples, only cancer samples for prognosis analysis)
+TCGA <- read.table("TCGA_STAD_226_22_expCli.txt", header = T, sep = "\t", quote = "", check.names = F)
+
+# count数据转换为TPM数据（该方法转换TPM时基因数不损失）
+# Convert count data to TPM (this method preserves all genes when converting to TPM)
+TCGA_TPM <- normalizeGeneCounts(TCGA, TxDb, method = "TPM")
+# 对数标准化（log2(x+1)防止log(0)错误）
+# Log2 normalization (log2(x+1) avoids log(0) error)
+TCGA_TPM <- log2(TCGA_TPM + 1)
+# 仅保留癌症样本（前226列为癌症样本，后22列为正常样本）
+# Keep only cancer samples (first 226 columns are cancer, last 22 are normal)
+TCGA_TPM <- TCGA_TPM[, 1:226]
+
+# 提取TILncRNA表达谱数据（仅保留在TILncRNA列表中的基因）
+# Extract TILncRNA expression profile data (keep only genes in TILncRNA list)
+TCGA_TPM <- TCGA_TPM[which(rownames(TCGA_TPM) %in% TILncRNA), ]
+# 读取临床数据（包含生存时间和生存状态等信息）
+# Read clinical data (including survival time and status)
+TCGA_cli <- read.table("cli_STAD_226.txt", header = T, sep = "\t", quote = "", check.names = F)
+
+# 整合临床生存数据和表达谱数据（用于单因素和多因素Cox分析）
+# Integrate clinical survival data and expression profile data (for univariate and multivariate Cox analysis)
+TCGA_TPM <- as.data.frame(t(TCGA_TPM))  # 转置表达矩阵，使行为样本、列为基因
+unicox <- cbind(TCGA_cli[, c(1, 3, 4)], TCGA_TPM)  # 合并临床数据(ID、OS时间、OS状态)和表达数据
+unicox$id <- NULL  # 删除冗余ID列
+
+
+### 单因素Cox分析（评估每个基因对生存的单独影响）
+### Univariate Cox analysis (evaluate individual effect of each gene on survival)
+outTab_uni <- data.frame()
+for (i in colnames(unicox[, 3:ncol(unicox)])) {  # 遍历所有基因列
+  # 拟合Cox比例风险模型（Surv(OS时间, OS状态) ~ 基因表达）
+  # Fit Cox proportional hazards model (Surv(OS time, OS status) ~ gene expression)
+  cox <- coxph(Surv(OStime, OSstat) ~ unicox[, i], data = unicox)
+  coxSummary <- summary(cox)  # 获取模型汇总结果
+  
+  # 提取关键指标：HR、95%置信区间、p值
+  # Extract key metrics: HR, 95% confidence interval, p-value
+  coxP <- coxSummary$coefficients[,"Pr(>|z|)"]
+  outTab_uni <- rbind(outTab_uni,
+                cbind(id = i,
+                      HR = coxSummary$conf.int[,"exp(coef)"],       # 风险比（Hazard Ratio）
+                      HR.95L = coxSummary$conf.int[,"lower .95"],  # 95%置信区间下限
+                      HR.95H = coxSummary$conf.int[,"upper .95"],  # 95%置信区间上限
+                      pvalue = coxSummary$coefficients[,"Pr(>|z|)"]
+                ))
+}
+# 输出单因素Cox分析结果
+# Output univariate Cox analysis results
+write.table(outTab_uni, file = "output_uniCox.txt", sep = "\t", row.names = F, quote = F)
+
+
+### 多因素Cox分析（考虑多个基因的联合影响）
+### Multivariate Cox analysis (consider combined effect of multiple genes)
+mul <- unicox  # 初始化多因素分析数据（实际应用中需先筛选显著基因）
+# 拟合Cox模型并通过逐步回归筛选变量（direction="both"表示双向筛选）
+# Fit Cox model and perform stepwise variable selection (direction="both" for forward-backward selection)
+multiCox <- coxph(Surv(OStime, OSstat) ~ ., data = mul)
+multiCox <- step(multiCox, direction = "both", steps = 2000)
+multiCoxSum <- summary(multiCox)  # 获取模型汇总结果
+
+# 整理多因素分析结果
+# Organize multivariate analysis results
+outTab_mul <- data.frame()
+outTab_mul <- cbind(
+  coef = multiCoxSum$coefficients[,"coef"],         # 回归系数
+  HR = multiCoxSum$conf.int[,"exp(coef)"],         # 风险比
+  HR.95L = multiCoxSum$conf.int[,"lower .95"],      # 95%置信区间下限
+  HR.95H = multiCoxSum$conf.int[,"upper .95"],      # 95%置信区间上限
+  pvalue = multiCoxSum$coefficients[,"Pr(>|z|)"]
+)
+outTab_mul <- cbind(id = row.names(outTab_mul), outTab_mul)  # 添加基因ID列
+
+# 输出多因素Cox分析结果
+# Output multivariate Cox analysis results
+write.table(outTab_mul, file = "output_multiCox.txt", sep = "\t", row.names = F, quote = F)
+
+# 计算风险分数（原文中TILSig值即为此处riskScore）
+# Calculate risk score (TILSig in the paper is equivalent to riskScore here)
+riskScore <- predict(multiCox, type = "risk", newdata = mul)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
