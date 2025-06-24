@@ -1,0 +1,392 @@
+---
+title: "FigureYa271panMethExpr"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+```
+
+# 需求描述
+
+小丫姐好，我还有很多小伙伴想众筹这篇铁死亡泛癌的其他图片，主要是Figure 1。感觉这个套路只要换一个通路就可以测试，我看大鱼老师写了这篇文章的Figure 2A（铁死亡基因在泛癌肿瘤与正常的差异箱线图，FigureYa208FPI），Figure 3B（铁死亡与免疫通路的相关性，FigureYa253panGSEA），可否请大鱼老师详细写一下文章Figure 1的相关代码？
+
+- 1A（铁死亡在泛癌中体细胞拷贝数变异情况，绘制条形图，可参考FigureYa265panCNV）
+- 1B（铁死亡基因在肿瘤与正常的差异表达，绘制拼接的点图和柱状图，可参考FigureYa263panDiff）
+- 1C（铁死亡基因体细胞拷贝数与基因表达的相关性点图，可参考FigureYa268panCNVexpr）
+- 1D（铁死亡基因肿瘤与正常组织甲基化状态点图，可参考FigureYa270panMeth）
+- 1E（铁死亡转录组表达与启动子甲基化相关性的点图）
+
+这些图都是泛癌的，不知道大鱼老师可不可以用例文数据分别众筹个教程 [皱眉] ？（感觉都可以出一期专栏——iSicence复现了哈哈）
+
+这次众筹Figure 1E，铁死亡转录组表达与启动子甲基化相关性的点图。
+
+#Requirement description
+
+Hello Xiaoya, I have many other friends who want to crowdfund for this iron death pan cancer image, mainly Figure 1. I feel that this routine can be tested by simply changing the pathway. I saw that Professor Dayu wrote Figure 2A (Box plot of differences in ferroptosis genes between pan cancer tumors and normal, Figure Ya208FPI) and Figure 3B (Correlation between ferroptosis and immune pathways) in this article, FigureYa253panGSEA）， Could you please ask Teacher Big Fish to write the relevant code for Figure 1 in detail?
+
+-1A (Iron induced cell copy number variation in pan cancer, plot a bar chart, refer to FigureYa265panCNV)
+-1B (Differential expression of ferroptosis genes between tumors and normal, plot concatenated dot plots and bar charts, refer to FigureYa263panDiff)
+-1C (Correlation plot between iron death gene somatic copy number and gene expression, refer to FigureYa268panCNVexpr)
+-1D (Methylation status point map of iron death gene tumors and normal tissues, refer to Figure Ya270panMeth)
+-1E (Point plot of correlation between iron death transcriptome expression and promoter methylation)
+
+These images are all pan cancerous. Can Big Fish Teacher crowdfund a tutorial using example text data? (I feel like I could even publish a column - iSicence has reproduced it haha)
+
+Figure 1E, a dot plot of the correlation between iron death transcriptome expression and promoter methylation, was raised for this crowdfunding campaign.
+
+![](example.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+from<https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+Figure 1. The Dysregulation of Ferroptosis Regulator Genes (FRGs)
+(E) Pearson’s correlation of FRGs between transcriptional expression and promoter methylation. Red and blue represent positive and negative correlations, respectively.
+
+# 应用场景
+
+分析基因（以铁死亡为例）转录组表达与启动子甲基化相关并绘制点图。
+
+#Application scenarios
+
+Analyze the correlation between gene transcriptome expression and promoter methylation (using iron death as an example) and draw a dot plot.
+
+# 环境设置
+
+使用国内镜像安装包
+
+#Environment settings
+
+Use domestic image installation package
+
+```{r}
+# 设置CRAN镜像为清华大学镜像源（提升R包下载速度）
+# Set CRAN mirror to Tsinghua University mirror (improve R package download speed)
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为清华大学镜像源（用于生物信息学相关R包）
+# Set Bioconductor mirror to Tsinghua University mirror (for bioinformatics-related R packages)
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载数据分析与可视化所需的R包
+# Load R packages for data analysis and visualization
+library(ggplot2)            # 高级数据可视化包
+library(ChAMP)              # 甲基化数据分析包
+library(data.table)         # 高效数据处理包
+library(randomcoloR)        # 生成随机颜色包
+library(ggpubr)             # 增强ggplot2的绘图功能
+library(GSVA)               # 基因集变异分析包
+library(clusterProfiler)    # 基因功能富集分析包
+library(impute)             # 数据缺失值插补包
+library(ComplexHeatmap)     # 复杂热图绘制包
+
+data("probe.features") # 读取甲基化450k数据的探针注释
+# Read probe annotations for methylation 450k data
+
+Sys.setenv(LANGUAGE = "en") # 显示英文报错信息
+# Set error messages to English
+
+options(stringsAsFactors = FALSE) # 禁止字符向量自动转换为因子
+# Disable automatic conversion of character vectors to factors
+```
+
+# 输入文件
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv，表达矩阵，第一列是基因，之后是其在每个样本中的表达量。下载自<http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611>，跟FigureYa263panDiff、FigureYa268panCNVexpr相同，已经下载的小伙伴就不用重复下载了。
+
+merged_sample_quality_annotations.tsv，下载自<https://gdc.cancer.gov/about-data/publications/pancanatlas>，下载地址<http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>。
+
+tcga_methy450文件夹里面是甲基化数据，过滤掉了有空值的探针，均已保存为RData文件，微云链接：<https://share.weiyun.com/jRry4rlU>。下载后把tcga_methy450文件夹放到当前文件夹。跟FigureYa270panMeth使用的是同一文件。
+
+#Input file
+
+EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv， The expression matrix consists of genes in the first column, followed by their expression levels in each sample. Download from< http://api.gdc.cancer.gov/data/3586c0da-64d0-4b74-a449-5ff4d9136611 >Similar to FigureYa263panDiff and FigureYa268panCNVexpr, users who have already downloaded them do not need to download them again.
+
+merged_sample_quality_annotations.tsv， Download from< https://gdc.cancer.gov/about-data/publications/pancanatlas >, download link< http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf >.
+
+The tcga_sthy450 folder contains methylation data, filtered out probes with null values, and saved them as RData files. Weiyun link:< https://share.weiyun.com/jRry4rlU >After downloading, place the tcga_cethy450 folder into the current folder. The same file is used as FigureYa270panMet.
+
+```{r}
+# 获得同时有肿瘤和正常样本的肿瘤名（20种癌症类型缩写）
+# Obtain tumor names with both tumor and normal samples (20 cancer type abbreviations)
+tumors <- c("BLCA","BRCA","CESC","CHOL","COAD",
+            "ESCA","GBM","HNSC","KICH","KIRC",
+            "KIRP","LIHC","LUAD","LUSC","PAAD",
+            "PRAD","READ","STAD","THCA","UCEC")
+
+# 获得感兴趣的基因集（包含铁死亡相关基因，TTC35是EMC2的同名基因）
+# Obtain gene set of interest (including ferroptosis-related genes, TTC35 is an alias of EMC2)
+frg <- c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1","FDFT1","SLC1A5","SAT1",
+         "TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4","EMC2")
+
+# 修正TCGA样本注释名称（基于PanCanAtlas数据集）
+# Correct TCGA sample annotations (based on PanCanAtlas dataset)
+# https://gdc.cancer.gov/about-data/publications/pancanatlas
+rawAnno <- read.delim("merged_sample_quality_annotations.tsv",  # 读取样本注释文件
+                      sep = "\t",                 # 分隔符为制表符
+                      row.names = NULL,           # 不将任何列设为行名
+                      check.names = F,            # 不检查列名有效性
+                      stringsAsFactors = F,       # 不将字符转换为因子
+                      header = T)                 # 第一行为表头
+rawAnno$simple_barcode <- substr(rawAnno$aliquot_barcode, 1, 15)  # 提取前15位作为简化条形码
+samAnno <- rawAnno[!duplicated(rawAnno$simple_barcode), c("cancer type", "simple_barcode")]  # 去重并保留癌症类型和条形码
+samAnno <- samAnno[which(samAnno$`cancer type` != ""), ]  # 移除癌症类型为空的记录
+write.table(samAnno, "simple_sample_annotation.txt",  # 保存处理后的样本注释
+            sep = "\t", row.names = F, col.names = T, quote = F)
+
+# 提取匹配到FRG基因的启动子探针（基于注释文件筛选）
+# Extract promoter probes matching FRG genes (filtered by annotation file)
+promoter <- probe.features[which(probe.features$feature %in% c("TSS1500", "TSS200")), ]  # 筛选启动子区域探针（转录起始位点附近）
+# Filter promoter region probes (near transcription start site)
+promoter <- promoter[which(promoter$gene %in% frg), ]  # 仅保留感兴趣基因的探针
+# Retain only probes of interested genes
+write.table(promoter, "promoter_annotation_for_interested_genes.txt",  # 保存探针注释
+            sep = "\t", row.names = T, col.names = NA, quote = F)
+
+# 快速读取TCGA表达谱数据（基于PanCanAtlas数据集）
+# Fast read TCGA expression profile (based on PanCanAtlas dataset)
+# https://gdc.cancer.gov/about-data/publications/pancanatlas
+expr <- fread("EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",  # 读取基因表达数据
+              sep = "\t",                 # 分隔符为制表符
+              stringsAsFactors = F,       # 不转换字符为因子
+              check.names = F,            # 不检查列名有效性
+              header = T)                 # 第一行为表头
+expr <- as.data.frame(expr); rownames(expr) <- expr[, 1]; expr <- expr[,-1]  # 转换格式并设置行名
+gene <- sapply(strsplit(rownames(expr), "|", fixed = T), "[", 1)  # 从行名中提取基因名称
+# Extract gene names from row names
+expr$gene <- gene  # 添加基因名列
+expr <- expr[!duplicated(expr$gene), ]  # 移除重复基因
+rownames(expr) <- expr$gene; expr <- expr[,-ncol(expr)]  # 设置行名并移除基因名列
+
+comgene <- intersect(rownames(expr), frg)  # 获取表达谱与感兴趣基因的交集
+# Get intersection of expression profile and interested genes
+expr_sub <- expr[comgene, ]  # 提取感兴趣基因的表达数据
+colnames(expr_sub) <- substr(colnames(expr_sub), 1, 15)  # 简化样本列名
+expr_sub <- expr_sub[, !duplicated(colnames(expr_sub))]  # 移除重复样本列
+
+# 循环处理每种肿瘤类型的表达数据
+# Loop through each tumor type for expression data processing
+for (i in tumors) {
+  message("--", i, "...")  # 输出当前处理的肿瘤类型
+  sam <- samAnno[which(samAnno$`cancer type` == i), "simple_barcode"]  # 获取当前肿瘤的样本条形码
+  comsam <- intersect(colnames(expr_sub), sam)  # 匹配表达数据和样本注释的公共样本
+  
+  tumsam <- comsam[substr(comsam, 14, 14) == "0"]  # 提取肿瘤样本（条形码第14位为0）
+  # Extract tumor samples (14th character of barcode is 0)
+  norsam <- comsam[substr(comsam, 14, 14) == "1"]  # 提取正常样本（条形码第14位为1）
+  # Extract normal samples (14th character of barcode is 1)
+  
+  expr_subset <- expr_sub[, c(tumsam, norsam)]  # 提取当前肿瘤的样本表达数据
+  expr_subset[expr_subset < 0] <- 0  # 矫正负值（该数据集存在少量负值）
+  # Correct negative values (minor negative values exist in this dataset)
+  expr_subset <- as.data.frame(impute.knn(as.matrix(expr_subset))$data)  # 使用KNN插补缺失值
+  # Impute missing values using KNN
+  write.table(expr_subset, paste0("TCGA_", i, "_expr_subset.txt"),  # 保存处理后的表达数据
+              sep = "\t", row.names = T, col.names = NA, quote = F)
+}
+rm(expr); gc()  # 移除原始表达数据并清理内存
+# Remove original expression data and clean memory
+
+# 循环处理每种肿瘤类型的甲基化数据（过程较慢需耐心等待）
+# Loop through each tumor type for methylation data processing (slow process, please wait)
+for (i in tumors) { 
+  message("--", i, "...")  # 输出当前处理的肿瘤类型
+  load(file.path("tcga_methy450", paste0("TCGA-", i, "_methy450.RData")))  # 加载甲基化数据
+  # Load methylation data
+  methy450 <- as.data.frame(methy450)  # 转换为数据框格式
+  # Convert to data frame
+  rownames(methy450) <- methy450[, 1]  # 设置行名为第一列（探针ID）
+  # Set row names as first column (probe ID)
+  methy450 <- methy450[,-1]  # 移除探针ID列
+  # Remove probe ID column
+  dimname <- dimnames(methy450)  # 获取行名和列名
+  # Get row and column names
+  methy450 <- sapply(methy450, as.numeric)  # 转换所有数据为数值型以防报错
+  # Convert all data to numeric to avoid errors
+  dimnames(methy450) <- dimname  # 恢复行名和列名
+  # Restore row and column names
+  methy450 <- as.data.frame(methy450)  # 重新转换为数据框
+  
+  compb <- intersect(rownames(methy450), rownames(promoter))  # 获取甲基化探针与启动子探针的交集
+  # Get intersection of methylation probes and promoter probes
+  methy450 <- methy450[compb, ]  # 提取交集探针数据
+  # Extract intersecting probe data
+  methy450$gene <- promoter[compb, "gene"]  # 映射探针到基因名称
+  # Map probes to gene names
+  
+  # 若基因匹配多个探针，取甲基化beta值的中位数（处理多探针映射问题）
+  # If a gene matches multiple probes, take median of methylation beta values (handle multi-probe mapping)
+  methy450 <- apply(methy450[, setdiff(colnames(methy450), "gene")], 2, 
+                    function(x) tapply(x, INDEX = factor(methy450$gene), FUN = median, na.rm = TRUE))
+  methy450 <- as.data.frame(methy450)
+  write.table(methy450, paste0("TCGA_", i, "_methy450_subset.txt"),  # 保存处理后的甲基化数据
+              sep = "\t", row.names = T, col.names = NA, quote = F)
+  rm(methy450); gc()  # 移除当前甲基化数据并清理内存
+  # Remove current methylation data and clean memory
+}
+gc()  # 最终清理内存
+# Final memory cleanup
+```
+
+# 相关性分析
+
+#Correlation analysis
+
+```{r}
+# 初始化存储基因表达与甲基化相关性结果的数据框
+# Initialize data frame to store correlation results between gene expression and methylation
+corExprMeth <- NULL
+
+# 遍历每种肿瘤类型计算表达与甲基化的相关性
+# Iterate through each tumor type to calculate correlation between expression and methylation
+for (i in tumors) {
+  message("--",i,"...")
+  
+  # 读取只包含感兴趣基因的表达谱和甲基化数据
+  # Read expression and methylation data subsets containing only genes of interest
+  expr_subset <- read.table(paste0("TCGA_",i,"_expr_subset.txt"),sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+  meth_subset <- read.table(paste0("TCGA_",i,"_methy450_subset.txt"),sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+  colnames(meth_subset) <- substr(colnames(meth_subset),1,15)  # 简化样本名称
+  
+  comsam <- intersect(colnames(expr_subset),colnames(meth_subset))  # 获取相同的样本
+  # Get samples common to both expression and methylation data
+  tumsam <- comsam[substr(comsam,14,14) == "0"]  # 仅获取肿瘤样本
+  # Extract only tumor samples (14th character of barcode is '0')
+  
+  expr_subset <- expr_subset[,tumsam]  # 取出表达谱子集
+  # Subset expression data to include only tumor samples
+  meth_subset <- meth_subset[,tumsam]  # 取出甲基化子集
+  # Subset methylation data to include only tumor samples
+  
+  # 初始化存储当前肿瘤类型相关性结果的数据框
+  # Initialize data frame to store correlation results for current tumor type
+  corTab <- NULL
+  
+  # 对每个基因计算甲基化与表达的Spearman相关性
+  # Calculate Spearman correlation between methylation and expression for each gene
+  for (j in rownames(meth_subset)) {
+    tmp1 <- as.numeric(meth_subset[j,])  # 甲基化beta值
+    # Methylation beta values
+    tmp2 <- as.numeric(expr_subset[j,])  # 表达谱
+    # Expression values
+    
+    # 计算启动子甲基化与基因表达的Spearman相关性
+    # Calculate Spearman correlation between promoter methylation and gene expression
+    cor.res <- cor.test(tmp1,tmp2, method = "spearman")
+    
+    # 存储相关性结果，处理可能的NA值
+    # Store correlation results, handle potential NA values
+    corTab <- rbind.data.frame(corTab,
+                               data.frame(gene = j,
+                                          tumor = i,
+                                          Correlation = ifelse(is.na(cor.res$estimate), 0, cor.res$estimate),
+                                          Pvalue = ifelse(is.na(cor.res$p.value), 1, cor.res$p.value),
+                                          stringsAsFactors = F),
+                               stringsAsFactors = F)
+  }
+  
+  # 将当前肿瘤类型的相关性结果添加到总体结果中
+  # Append correlation results for current tumor type to overall results
+  corExprMeth <- rbind.data.frame(corExprMeth,
+                                  corTab,
+                                  stringsAsFactors = F)
+}
+
+# 将所有肿瘤类型的相关性分析结果保存到文件
+# Save correlation analysis results for all tumor types to file
+write.table(corExprMeth, "TCGA_pancan_correlation_expr_meth_subset.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+```
+
+例文展示相关性画的是点图，也可以画成热图、圆圈图等形式。
+
+`TCGA_pancan_correlation_expr_meth_subset.txt`文件里存放了n*n的correlation和pvalue，可以套用到我们以前众筹过的FigureYa当中。更多相关性展示方式看这里：[相关性展示的8种情况，还想要哪样？](https://mp.weixin.qq.com/s/D9wheY5QdnOh4JrjIc8-Cg)
+
+The example text shows the correlation by drawing a point chart, which can also be drawn in the form of a heat map, circle chart, etc.
+
+`The TCGA_cncan_correlation-expr_eth_stubset. txt file contains n * n correlations and p-values, which can be applied to the FigureYa we previously crowdfunded. More ways to display relevance can be found here: [Which of the 8 situations to display relevance would you like?]（ https://mp.weixin.qq.com/s/D9wheY5QdnOh4JrjIc8-Cg )
+
+# 开始画图
+
+# start plot
+
+```{r}
+# 设置绘图颜色（用于后续相关性泡泡图的颜色映射）
+# Set plot colors (for color mapping in subsequent correlation bubble plot)
+blue <- "#4577FF"       
+red <- "#C2151A"        
+orange <- "#E45737"     
+green <- "#6F8B35"      
+darkblue <- "#303B7F"   
+darkred <- "#D51113"    
+yellow <- "#EECA1F"     
+
+# 生成基因表达与甲基化相关性泡泡图
+# Generate bubble plot of correlation between gene expression and methylation
+corExprMeth$gene <- factor(corExprMeth$gene,
+                          # 将gene列转换为因子并指定显示顺序（逆序排列基因）
+                          # Convert 'gene' column to factor and specify display order (reverse gene order)
+                          levels = rev(c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1",
+                                         "FDFT1","SLC1A5","SAT1","TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4")))
+
+# 定义颜色渐变palette（从蓝色到白色到橙色，共128种颜色，带透明度）
+# Define color gradient palette (from blue to white to orange, 128 colors with transparency)
+my_palette <- colorRampPalette(c(blue, "white", orange), alpha = TRUE)(n = 128)
+
+# 使用ggplot2绘制相关性泡泡图
+# Use ggplot2 to create correlation bubble plot
+ggplot(corExprMeth, aes(x = tumor, y = gene)) +
+  # 绘制散点图，点的大小映射为 -log10(Pvalue)，颜色映射为相关系数Correlation
+  # Draw scatter plot, point size mapped to -log10(Pvalue), color mapped to correlation coefficient
+  geom_point(aes(size = -log10(Pvalue), color = Correlation)) +
+  # 设置颜色渐变刻度，标题为"Correlation"，使用定义的颜色palette
+  # Set color gradient scale, title "Correlation", use defined color palette
+  scale_color_gradientn('Correlation', 
+                        colors = my_palette) +
+  # 使用黑白主题
+  # Use black and white theme
+  theme_bw() +
+  # 自定义图表主题样式
+  # Customize plot theme style
+  theme(
+    # 坐标轴x轴文本：45度倾斜，大小12，水平对齐0.3，垂直对齐0.5，黑色
+    # X-axis text: 45-degree angle, size 12, hjust 0.3, vjust 0.5, black color
+    axis.text.x = element_text(angle = 45, size = 12, hjust = 0.3, vjust = 0.5, color = "black"),
+    # 坐标轴y轴文本：大小12，颜色交替使用红色和蓝色（前14个基因红色，后10个蓝色）
+    # Y-axis text: size 12, colors alternating red and blue (first 14 genes red, next 10 blue)
+    axis.text.y = element_text(size = 12, color = rep(c(red, blue), c(14, 10))),
+    # 隐藏坐标轴标题
+    # Hide axis titles
+    axis.title = element_blank(),
+    # 绘制黑色实线边框，宽度0.7
+    # Draw black solid border, size 0.7
+    panel.border = element_rect(size = 0.7, linetype = "solid", colour = "black"),
+    # 图例位置设为右侧
+    # Legend position at right
+    legend.position = "right",
+    # 图表边距设为1行
+    # Plot margin set to 1 line
+    plot.margin = unit(c(1, 1, 1, 1), "lines")
+  )
+
+# 保存图表为PDF文件，宽度8英寸，高度6英寸
+# Save plot as PDF file, width 8 inches, height 6 inches
+ggsave("Figure 1E correlation between promoter methylation and expression of interested genes in pancancer.pdf", width = 8, height = 6)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
