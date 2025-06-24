@@ -1,0 +1,392 @@
+---
+title: "FigureYa270panMeth"
+author: "Xiaofan Lu, Taojun Ye"
+reviewer: "Ying Ge"
+date: "2025-5-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# 设置knitr代码块的全局选项 / Set global options for knitr code chunks
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 需求描述
+
+小丫姐好，我还有很多小伙伴想众筹这篇铁死亡泛癌的其他图片，主要是Figure 1。感觉这个套路只要换一个通路就可以测试，我看大鱼老师写了这篇文章的Figure 2A（铁死亡基因在泛癌肿瘤与正常的差异箱线图，FigureYa208FPI），Figure 3B（铁死亡与免疫通路的相关性，FigureYa253panGSEA），可否请大鱼老师详细写一下文章Figure 1的相关代码？
+
+- 1A（铁死亡在泛癌中体细胞拷贝数变异情况，绘制条形图，可参考FigureYa265panCNV）
+- 1B（铁死亡基因在肿瘤与正常的差异表达，绘制拼接的点图和柱状图，可参考FigureYa263panDiff）
+- 1C（铁死亡基因体细胞拷贝数与基因表达的相关性点图，可参考FigureYa268panCNVexpr）
+- 1D（铁死亡基因肿瘤与正常组织甲基化状态点图）
+- 1E（铁死亡转录组表达与启动子甲基化相关性的点图）
+
+这些图都是泛癌的，不知道大鱼老师可不可以用例文数据分别众筹个教程 [皱眉] ？（感觉都可以出一期专栏——iSicence复现了哈哈）
+
+这次众筹Figure 1D，铁死亡基因肿瘤与正常组织甲基化状态点图。
+
+#Requirement description
+
+Hello Xiaoya, I have many other friends who want to crowdfund for this iron death pan cancer image, mainly Figure 1. I feel that this routine can be tested by simply changing the pathway. I saw that Professor Dayu wrote Figure 2A (Box plot of differences in ferroptosis genes between pan cancer tumors and normal, Figure Ya208FPI) and Figure 3B (Correlation between ferroptosis and immune pathways) in this article, FigureYa253panGSEA）， Could you please ask Teacher Big Fish to write the relevant code for Figure 1 in detail?
+
+-1A (Iron induced cell copy number variation in pan cancer, plot a bar chart, refer to FigureYa265panCNV)
+-1B (Differential expression of ferroptosis genes between tumors and normal, plot concatenated dot plots and bar charts, refer to FigureYa263panDiff)
+-1C (Correlation plot between iron death gene somatic copy number and gene expression, refer to FigureYa268panCNVexpr)
+-1D (Methylation Status Point Map of Iron Death Gene Tumors and Normal Tissues)
+-1E (Point plot of correlation between iron death transcriptome expression and promoter methylation)
+
+These images are all pan cancerous. Can Big Fish Teacher crowdfund a tutorial using example text data? (I feel like I could even publish a column - iSicence has reproduced it haha)
+
+Figure 1D, a point map of methylation status between iron death gene tumors and normal tissues, was crowdfunded this time.
+![](example.png)
+
+出自<https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+from<https://linkinghub.elsevier.com/retrieve/pii/S2589004220304892>
+
+接下来会陆续众筹Figure1E，敬请关注。
+
+We will continue to crowdfund Figure 1E, please stay tuned.
+
+Figure 1. The Dysregulation of Ferroptosis Regulator Genes (FRGs)
+(D) Heatmap shows the differential methylation of FRGs in cancers; **hypermethylated and hypomethylated genes are marked in red and blue**, respectively (Wilcoxon rank-sum test).
+
+# 应用场景
+
+分析铁死亡基因肿瘤与正常组织甲基化状态并绘制点图
+
+#Application scenarios
+
+Analyze the methylation status of iron death genes in tumors and normal tissues and draw a point map
+
+# 环境设置
+
+使用国内镜像安装包
+
+#Environment settings
+
+Use domestic image installation package
+
+```{r eval=FALSE}
+# 设置CRAN镜像为清华大学镜像源，加速R包下载
+# Set CRAN mirror to Tsinghua University mirror source to speed up R package downloads
+options("repos"= c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 设置Bioconductor镜像为清华大学镜像源，加速生物信息学相关包的下载
+# Set Bioconductor mirror to Tsinghua University mirror source to speed up downloads of bioinformatics-related packages
+options(BioC_mirror="http://mirrors.tuna.tsinghua.edu.cn/bioconductor/")
+
+# 使用BiocManager安装ChAMP包，用于DNA甲基化数据分析
+# Install the ChAMP package using BiocManager for DNA methylation data analysis
+BiocManager::install("ChAMP")
+
+# 使用BiocManager安装ChAMPdata包，包含ChAMP分析所需的示例数据集
+# Install the ChAMPdata package using BiocManager, which contains example datasets required for ChAMP analysis
+BiocManager::install("ChAMPdata")
+
+# 使用BiocManager安装ComplexHeatmap包，用于创建复杂热图可视化
+# Install the ComplexHeatmap package using BiocManager for creating complex heatmap visualizations
+BiocManager::install("ComplexHeatmap")
+
+# 安装ggpubr包用于增强ggplot2的统计可视化功能，以及randomcoloR包用于生成随机配色方案
+# Install the ggpubr package to enhance ggplot2's statistical visualization capabilities, and the randomcoloR package to generate random color schemes
+install.packages(c("ggpubr", "randomcoloR"))
+```
+
+加载包
+
+library packages
+
+```{r}
+# 加载ggplot2包，用于创建优雅的统计图形
+# Load the ggplot2 package for creating elegant statistical graphics
+library(ggplot2)
+
+# 加载ChAMP包，用于DNA甲基化数据分析
+# Load the ChAMP package for DNA methylation data analysis
+library(ChAMP)
+
+# 加载data.table包，提供高效处理大型数据集的功能
+# Load the data.table package for efficient processing of large datasets
+library(data.table)
+
+# 加载randomcoloR包，用于生成视觉上愉悦的随机颜色
+# Load the randomcoloR package to generate visually pleasing random colors
+library(randomcoloR)
+
+# 加载ggpubr包，提供ggplot2的增强功能和 publication-ready 图表
+# Load the ggpubr package, which provides enhanced ggplot2 functionality and publication-ready charts
+library(ggpubr)
+
+# 加载GSVA包，用于基因集变异分析
+# Load the GSVA package for gene set variation analysis
+library(GSVA)
+
+# 加载clusterProfiler包，用于基因富集分析和功能注释
+# Load the clusterProfiler package for gene enrichment analysis and functional annotation
+library(clusterProfiler)
+
+# 加载impute包，用于处理数据集中的缺失值
+# Load the impute package for handling missing values in datasets
+library(impute)
+
+# 加载ComplexHeatmap包，用于创建复杂的热图可视化
+# Load the ComplexHeatmap package for creating complex heatmap visualizations
+library(ComplexHeatmap)
+
+# 加载甲基化450k数据的探针注释数据
+# Load probe annotation data for methylation 450k data
+data("probe.features")
+
+# 设置环境语言为英文，确保报错信息以英文显示
+# Set the environment language to English to ensure error messages are displayed in English
+Sys.setenv(LANGUAGE = "en")
+
+# 禁止R自动将字符型数据转换为因子类型，避免意外的数据转换
+# Disable R's automatic conversion of character data to factors to avoid unexpected data transformations
+options(stringsAsFactors = FALSE)
+```
+
+# 输入文件
+
+merged_sample_quality_annotations.tsv，下载自<https://gdc.cancer.gov/about-data/publications/pancanatlas>，下载地址<http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf>。跟FigureYa263panDiff、FigureYa265panCNV、FigureYa268panCNVexpr使用的是同一套数据，已经下载的小伙伴就不用重复下载了。
+
+tcga_methy450文件夹里面是甲基化数据，过滤掉了有空值的探针，均已保存为RData文件，微云链接：<https://share.weiyun.com/jRry4rlU>。下载后把tcga_methy450文件夹放到当前文件夹。
+
+#Input file
+
+merged_sample_quality_annotations.tsv， Download from< https://gdc.cancer.gov/about-data/publications/pancanatlas >, download link< http://api.gdc.cancer.gov/data/1a7d7be8-675d-4e60-a105-19d4121bdebf >The same set of data is used for FigureYa263panDiff, FigureYa265panCNV, and FigureYa268panCNVexpr, so users who have already downloaded it do not need to download it again.
+
+The tcga_sthy450 folder contains methylation data, filtered out probes with null values, and saved them as RData files. Weiyun link:< https://share.weiyun.com/jRry4rlU >After downloading, place the tcga_cethy450 folder into the current folder.
+
+```{r}
+# 获得同时有肿瘤和正常样本的肿瘤名
+# Obtain the names of tumors that have both tumor and normal samples
+tumors <- c("BLCA","BRCA","CESC","CHOL","COAD",
+            "ESCA","GBM","HNSC","KICH","KIRC",
+            "KIRP","LIHC","LUAD","LUSC","PAAD",
+            "PRAD","READ","STAD","THCA","UCEC")
+
+# 获得感兴趣的基因集(TTC35是EMC2的同名)
+# Obtain the gene set of interest (TTC35 is an alias for EMC2)
+frg <- c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1","FDFT1","SLC1A5","SAT1",
+         "TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4","EMC2")
+
+# 修正TCGA名称
+# Correct TCGA naming
+# https://gdc.cancer.gov/about-data/publications/pancanatlas
+rawAnno <- read.delim("merged_sample_quality_annotations.tsv",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = T) # 数据来自PanCanAtlas
+# Data from PanCanAtlas
+rawAnno$simple_barcode <- substr(rawAnno$aliquot_barcode,1,15)
+samAnno <- rawAnno[!duplicated(rawAnno$simple_barcode),c("cancer type", "simple_barcode")]
+samAnno <- samAnno[which(samAnno$`cancer type` != ""),]
+write.table(samAnno,"simple_sample_annotation.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+
+# 提取匹配到FRG基因的启动子探针
+# Extract promoter probes that match FRG genes
+promoter <- probe.features[which(probe.features$feature %in% c("TSS1500","TSS200")),] # 根据注释文件筛选启动子探针，也可以分析其他探针比如增强子Enhancer等等
+# Filter promoter probes based on annotation file; other probe types like enhancers can also be analyzed
+promoter <- promoter[which(promoter$gene %in% frg),] # 取出感兴趣基因在感兴趣位点的探针
+# Extract probes of interested genes at interested sites
+write.table(promoter, "promoter_annotation_for_interested_genes.txt",sep = "\t",row.names = T,col.names = NA,quote = F)
+
+# 获取只有感兴趣探针/基因的甲基化子集
+# Obtain methylation subsets of only the probes/genes of interest
+for (i in tumors) { # 比较慢请耐心
+  # This loop is slow, please be patient
+  message("--",i,"...")
+  load(file.path("tcga_methy450",paste0("TCGA-",i,"_methy450.RData"))) # 加载甲基化RData文件
+  # Load methylation RData file
+  methy450 <- as.data.frame(methy450) # 转数据框
+  # Convert to data frame
+  rownames(methy450) <- methy450[,1] # 行名改为第一列
+  # Set row names to the first column
+  methy450 <- methy450[,-1] # 去掉第一列探针名
+  # Remove the first column (probe names)
+  dimname <- dimnames(methy450) # 获取行名和列明
+  # Get row and column names
+  methy450 <- sapply(methy450, as.numeric) # 将数据全部转为数值以防报错
+  # Convert all data to numeric to avoid errors
+  dimnames(methy450) <- dimname # 重新赋值行名和列名
+  # Reassign row and column names
+  methy450 <- as.data.frame(methy450) # 转数据框
+  # Convert back to data frame
+  
+  compb <- intersect(rownames(methy450),rownames(promoter)) # 获取甲基化数据和感兴趣探针的交集
+  # Get the intersection of methylation data and probes of interest
+  methy450 <- methy450[compb,] # 取出子集
+  # Extract subset
+  methy450$gene <- promoter[compb,"gene"] # 将探针名和基因名进行映射
+  # Map probe names to gene names
+  
+  # 如果基因匹配多个探针，则取中位数beta值
+  # If a gene matches multiple probes, take the median beta value
+  methy450 <- apply(methy450[,setdiff(colnames(methy450), "gene")], 2, function(x) tapply(x, INDEX=factor(methy450$gene), FUN=median, na.rm=TRUE))
+  methy450 <- as.data.frame(methy450)
+  write.table(methy450, paste0("TCGA_",i,"_methy450_subset.txt"),sep = "\t",row.names = T,col.names = NA,quote = F)
+  rm(methy450); gc() # 释放内存
+  # Free up memory
+}
+gc()
+```
+
+# 提取甲基化数据
+
+#Extract methylation data
+
+```{r}
+# 初始化存储差异甲基化结果的数据框
+# Initialize data frame to store differential methylation results
+deltaMeth <- NULL
+
+# 遍历每种肿瘤类型进行差异甲基化分析
+# Iterate through each tumor type for differential methylation analysis
+for (i in tumors) {
+  message("--",i,"...")
+  
+  # 获取只包含感兴趣探针/基因的甲基化数据
+  # Read methylation data subset containing only probes/genes of interest
+  meth_subset <- read.table(paste0("TCGA_",i,"_methy450_subset.txt"),sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+  colnames(meth_subset) <- substr(colnames(meth_subset),1,15)
+  
+  # 根据样本条形码的第14位字符区分肿瘤样本和正常样本
+  # Differentiate tumor and normal samples by the 14th character of the sample barcode
+  tumsam <- colnames(meth_subset)[substr(colnames(meth_subset),14,14) == "0"] # 获取肿瘤样本
+  norsam <- colnames(meth_subset)[substr(colnames(meth_subset),14,14) == "1"] # 获取正常样本
+  
+  # 初始化存储当前肿瘤类型分析结果的数据框
+  # Initialize data frame to store analysis results for current tumor type
+  outTab <- NULL
+  
+  # 对每个基因进行差异甲基化分析
+  # Perform differential methylation analysis for each gene
+  for (j in rownames(meth_subset)) {
+    # KICH肿瘤类型没有正常甲基化样本，特殊处理
+    # Special handling for KICH tumor type which lacks normal methylation samples
+    if(i == "KICH") { 
+      delta <- 0 # 如果在分析KICH则delta设置为0
+      wt <- 1 # 如果在分析KICH则设置pvalue为1
+      outTab <- rbind.data.frame(outTab,
+                                 data.frame(gene = j,
+                                            tumor = i,
+                                            Delta = delta,
+                                            Pvalue = wt,
+                                            stringsAsFactors = F),
+                                 stringsAsFactors = F)
+    } else {
+      # 获取当前基因在肿瘤样本和正常样本中的甲基化beta值
+      # Get methylation beta values for current gene in tumor and normal samples
+      tmp1 <- as.numeric(meth_subset[j,tumsam]) # 获取肿瘤样本的beta值
+      tmp2 <- as.numeric(meth_subset[j,norsam]) # 获取正常样本的beta值
+      
+      # 进行Wilcoxon秩和检验评估差异显著性
+      # Perform Wilcoxon rank-sum test to assess significance of differences
+      wt <- wilcox.test(tmp1,tmp2)$p.value # wilcox检验
+      
+      # 计算肿瘤样本和正常样本的平均甲基化水平
+      # Calculate average methylation levels for tumor and normal samples
+      avgt <- mean(tmp1) # 肿瘤样本的平均beta值
+      avgn <- mean(tmp2) # 正常样本的平均beta值
+      
+      # 计算差异甲基化值（肿瘤组-正常组）
+      # Calculate differential methylation value (tumor - normal)
+      delta <- avgt - avgn # delta值由肿瘤样本减去正常样本计算得到
+      
+      # 存储当前基因的分析结果
+      # Store analysis results for current gene
+      outTab <- rbind.data.frame(outTab,
+                                 data.frame(gene = j,
+                                            tumor = i,
+                                            Delta = delta,
+                                            Pvalue = wt,
+                                            stringsAsFactors = F),
+                                 stringsAsFactors = F)
+    }
+  }
+  
+  # 将当前肿瘤类型的分析结果添加到总体结果中
+  # Append analysis results for current tumor type to overall results
+  deltaMeth <- rbind.data.frame(deltaMeth,
+                                outTab,
+                                stringsAsFactors = F)
+}
+
+# 将所有肿瘤类型的差异甲基化分析结果保存到文件
+# Save differential methylation analysis results for all tumor types to file
+write.table(deltaMeth, "TCGA_pancan_delta_meth_subset.txt",sep = "\t",row.names = F,col.names = T,quote = F)
+
+```
+
+# 开始画图
+
+# start plot
+
+```{r}
+# 设置颜色（用于后续绘图的颜色映射）
+# Set colors (for color mapping in subsequent plotting)
+blue <- "#4577FF"       # 蓝色
+red <- "#C2151A"        # 红色
+orange <- "#E45737"     # 橙色
+green <- "#6F8B35"      # 绿色
+darkblue <- "#303B7F"   # 深蓝色
+darkred <- "#D51113"    # 深红色
+yellow <- "#EECA1F"     # 黄色
+
+# 产生泡泡图（可视化肿瘤与正常样本的启动子甲基化差异）
+# Generate bubble plot (visualize promoter methylation differences between tumor and normal samples)
+deltaMeth$gene <- factor(deltaMeth$gene,
+                         # 将gene列转换为因子并指定显示顺序（逆序排列基因）
+                         # Convert 'gene' column to factor and specify display order (reverse gene order)
+                         levels = rev(c("CDKN1A","HSPA5","TTC35","SLC7A11","NFE2L2","MT1G","HSPB1","GPX4","FANCD2","CISD1",
+                                        "FDFT1","SLC1A5","SAT1","TFRC","RPL8","NCOA4","LPCAT3","GLS2","DPP4","CS","CARS","ATP5G3","ALOX15","ACSL4")))
+
+# 定义颜色渐变 palette（从蓝色到白色到橙色，共128种颜色，带透明度）
+# Define color gradient palette (from blue to white to orange, 128 colors with transparency)
+my_palette <- colorRampPalette(c(blue,"white",orange), alpha=TRUE)(n=128)
+
+# 使用ggplot2绘制泡泡图
+# Use ggplot2 to create bubble plot
+ggplot(deltaMeth, aes(x=tumor, y=gene)) +
+  # 绘制散点图，点的大小映射为 -log10(Pvalue)，颜色映射为Delta值
+  # Draw scatter plot, point size mapped to -log10(Pvalue), color mapped to Delta value
+  geom_point(aes(size=-log10(Pvalue), color=Delta)) +
+  # 设置颜色渐变刻度，标题为"Delta(T-N)"，使用定义的颜色 palette
+  # Set color gradient scale, title "Delta(T-N)", use defined color palette
+  scale_color_gradientn('Delta(T-N)', 
+                        colors=my_palette) + 
+  # 使用黑白主题
+  # Use black and white theme
+  theme_bw() +
+  # 自定义图表主题样式
+  # Customize plot theme style
+  theme(
+        # 坐标轴x轴文本：45度倾斜，大小12，水平对齐0.3，垂直对齐0.5，黑色
+        # X-axis text: 45-degree angle, size 12, hjust 0.3, vjust 0.5, black color
+        axis.text.x = element_text(angle = 45, size = 12, hjust = 0.3, vjust = 0.5, color = "black"),
+        # 坐标轴y轴文本：大小12，颜色交替使用红色和蓝色（前14个基因红色，后10个蓝色）
+        # Y-axis text: size 12, colors alternating red and blue (first 14 genes red, next 10 blue)
+        axis.text.y = element_text(size = 12, color = rep(c(red, blue), c(14, 10))),
+        # 隐藏坐标轴标题
+        # Hide axis titles
+        axis.title = element_blank(),
+        # 绘制黑色实线边框，宽度0.7
+        # Draw black solid border, size 0.7
+        panel.border = element_rect(size = 0.7, linetype = "solid", colour = "black"),
+        # 图例位置设为右侧
+        # Legend position at right
+        legend.position = "right",
+        # 图表边距设为1行
+        # Plot margin set to 1 line
+        plot.margin = unit(c(1, 1, 1, 1), "lines")
+  )
+
+# 保存图表为PDF文件，宽度8英寸，高度6英寸
+# Save plot as PDF file, width 8 inches, height 6 inches
+ggsave("Figure 1D delta between tumor and normal promoter methylation of interested genes in pancancer.pdf", width = 8, height = 6)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
