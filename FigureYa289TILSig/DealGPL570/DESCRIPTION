@@ -1,0 +1,21 @@
+Package: DealGPL570
+Title: Dealing GPL570 RAW.tar file
+Version: 0.0.1
+Authors@R: c(person("Nan", "Zhang", email = "15776658849@163.com", role = "cre"), person("YaKun", "Zhang", email = "15776452861@163.com", role = "aut"))
+Description: Dealing GPL570 (Affymetrix Human Genome U133 Plus 2.0 Array) RAW.tar file using the robust multi-array average expression measure and returning expression profile.
+Depends: R (>= 3.5.0)
+License: Artistic-2.0
+Encoding: UTF-8
+LazyData: true
+Imports: dplyr, stringr, R.utils, affy, tibble
+Suggests: BiocGenerics, knitr, rmarkdown, spelling
+RoxygenNote: 6.1.1
+VignetteBuilder: knitr
+Language: en-US
+NeedsCompilation: no
+Packaged: 2019-11-08 14:11:35 UTC; ZN
+Author: Nan Zhang [cre],
+  YaKun Zhang [aut]
+Maintainer: Nan Zhang <15776658849@163.com>
+Repository: CRAN
+Date/Publication: 2019-11-12 11:10:02 UTC

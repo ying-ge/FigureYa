@@ -1,0 +1,60 @@
+---
+title: "Introduction to the DealGPL570 package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{DealGPL570-introduction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+#Introduction
+
+GEO provides a wealth of biology related data, and GPL570 (Affymetrix Human Genome U133 Plus 2.0 Array) is one of the the most common biological chip platform.Although the post-processed matrix data are always provided, but the RAW data are most convincing!
+Here we developed to deal GPL570 RAW.tar file using the robust multi-array average expression measure, and returns data frame which is expression profile.
+Plus: DealGPL570 function can filter cels which are not of GPL570 platform in the RAW.tar file.
+
+#Usage
+
+Load package.
+
+```{r load-package, message=FALSE}
+library(DealGPL570)
+```
+
+You can put your own `GSE*_RAW.tar` under the working directory, now we download one online and test!
+First running this package, you need to keep your device online.
+
+```{r, message=FALSE, eval=FALSE}
+GEOquery::getGEOSuppFiles("GSE104683", makeDirectory = FALSE, baseDir = tempdir())
+file <- list.files(path = tempdir(), pattern = "GSE104683_RAW.tar", full.names = TRUE)
+file
+result <- DealGPL570(file = file)
+result[1:5, 1:3]
+```
+
+When type is "probeID"~
+
+```{r, eval=FALSE}
+result <- DealGPL570(file = file, type = "probeID")
+result[1:5, 1:2]
+```
+
+And when type is "geneSymbol"~
+
+```{r, eval=FALSE}
+result <- DealGPL570(file = file, type = "geneSymbol")
+result[1:5, 1:2]
+```
+
+
+## Details
+
+For the gene symbols corresponding many probes, we take the median of those probes' expression values as the corresponding gene symbol's expression value.
+
+
