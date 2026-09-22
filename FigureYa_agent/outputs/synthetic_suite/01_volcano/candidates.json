@@ -1,0 +1,364 @@
+{
+  "query": "ggplot2 火山图 基因标签 候选基因",
+  "commit": "f627917b79f28558779fb2e3ea2014cede41b89e",
+  "curation_current": true,
+  "matched_families": {
+    "volcano": [
+      "火山"
+    ]
+  },
+  "profile_used": true,
+  "design": "unknown",
+  "domain": "general",
+  "decision": "CANDIDATES_ONLY: agent must compare semantics, full source and visual reference; scores are not confidence or a final selection.",
+  "needs": [
+    "Confirm observational unit, roles, units and missingness",
+    "Compare at least 3 genuinely relevant modules when available; document rejection reasons",
+    "Inspect selected source and helper dependencies before fetching or running"
+  ],
+  "candidates": [
+    {
+      "id": "FigureYa59volcanoV2",
+      "retrieval_score": 96,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 20,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [
+        "ggplot2",
+        "火山图"
+      ],
+      "specific_hits": [
+        "ggplot2",
+        "基因标签",
+        "候选基因"
+      ],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。",
+        "已有差异结果；logFC与原始/校正P值需要明确选择；高亮基因表可选。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa59volcanoV2",
+      "scripts": [
+        "FigureYa59volcanoV2/FigureYa59volcanoV2.Rmd"
+      ],
+      "summary": "画出像paper里这样美的火山图。 Draw a beautiful volcano plot like this one in the paper. From<[link] / 展示两组之间总体的基因表达变化趋势。 Demonstrate overall gene expression trends between the two groups."
+    },
+    {
+      "id": "FigureYa135multiVolcano",
+      "retrieval_score": 76,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [
+        "ggplot2",
+        "火山图"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。",
+        "名称中的multi主要是中心火山+顶部/侧边比例的多层信息，不保证开箱即用的多个contrast火山图；差异量可以是deltaBeta。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa135multiVolcano",
+      "scripts": [
+        "FigureYa135multiVolcano/FigureYa135multiVolcano.Rmd"
+      ],
+      "summary": "从形式上复现文章里的这个复杂火山图。 Reproduce the complex volcano map in the article in form. From <[link] Figure 1. DMPs analysis in LSTs cases and controls. (b) Volcano plot of top DMPs and position of methylation probes in relation to the gene (IGR, intergenic region; TSS, transcription start site; UTR, untranslated region). The percentages of hypermethylated and hypomethylated DMPs are displayed on top. The proportions of differe"
+    },
+    {
+      "id": "FigureYa321volcanoSE",
+      "retrieval_score": 76,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [
+        "ggplot2",
+        "火山图"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。",
+        "原流程针对APA/PDUI差异；不能把PDUI差异误标为log2FC。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa321volcanoSE",
+      "scripts": [
+        "FigureYa321volcanoSE/FigureYa321volcanoSE.Rmd"
+      ],
+      "summary": "在癌症中高低分数组中的APA分析，用火山图展示 (图5B)。 Differential APA analysis between high- and low-risk groups in cancer, presented via volcano plot (Fig.5 B). From <[link] FIGURE 5 Transcriptional and post-transcriptional characteristics related to WM_Score. (B) **The differences in the PDUI** of each gene between WM_Score_high and WM_Score_low groups. / TC3A (The Cancer 3′ UTR Atlas) 专门分析了TCGA 33种癌症类型的3′UTR长度，系统注释了可变多聚腺苷化位点APA (Altern"
+    },
+    {
+      "id": "FigureYa75bubble_volcano",
+      "retrieval_score": 76,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano",
+        "bubble"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [
+        "ggplot2",
+        "火山图"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。",
+        "base绘图同时编码多个属性，需要真实对应的size/score/分组；不能为更花哨而编造变量。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa75bubble_volcano",
+      "scripts": [
+        "FigureYa75bubble_volcano/FigureYa75bubble_volcano.Rmd"
+      ],
+      "summary": "用base plot画美美的火山图 Create a beautiful volcano map using a base plot / 同时展示多个特征，同时展示P value、ajust P value、分组、size、score等。 例如基因的火山图 Display multiple features simultaneously, including P value, ajust P value, grouping, size, score, etc. For example, a volcano map of genes From <[link] 或展示富集分析结果 Or display the enrichment analysis results From <[link] 想用ggplot2来画火山图，请参考FigureYa59Volcano。 If you want to use ggplot2 to draw "
+    },
+    {
+      "id": "FigureYa175quadrant",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano",
+        "special"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [
+        "ggplot2"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa175quadrant",
+      "scripts": [
+        "FigureYa175quadrant/FigureYa175quadrant.Rmd"
+      ],
+      "summary": "画出文章中这种九宫格的散点图，在图中标出想突出显示的基因名。 Draw a scatter plot of the nine-square grid in the article and mark the names of the genes you want to highlight on the plot. From <[link] Figure 5. Relationship between mRNA and protein expression in TW/NW (A) and TW/OW (B). From <[link] Figure 1. The translational landscape of the epidermis during premalignant transformation. d, Transcriptional and translational changes comparing SOX2"
+    },
+    {
+      "id": "FigureYa59Plus_volcano_shiny",
+      "retrieval_score": 65,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 0,
+        "data_structure": 25,
+        "source_metadata": 0,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "volcano"
+      ],
+      "matched_intent": [
+        "volcano"
+      ],
+      "keyword_hits": [],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: logfc",
+          "role candidate: padj"
+        ]
+      },
+      "input_contract": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "warnings": [
+        "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。",
+        "此快照没有Rmd；必须先在线读app相关源码，不把Rmd索引视为应用已核验。"
+      ],
+      "source_evidence": "inventory_only",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa59Plus_volcano_shiny",
+      "scripts": [],
+      "summary": ""
+    },
+    {
+      "id": "FigureYa97correlationV3",
+      "retrieval_score": 36,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "correlation"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "ggplot2",
+        "候选基因"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "at least two numeric columns"
+        ]
+      },
+      "input_contract": "至少两个可对齐的数值变量；说明观测单位和独立性。",
+      "warnings": [
+        "相关不代表一致性；离群值和重复测量影响系数；多重检验需校正。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa97correlationV3",
+      "scripts": [
+        "FigureYa97correlationV3/FigureYa97correlationV3.Rmd"
+      ],
+      "summary": "计算多个基因和免疫浸润的相关性，画出类似于文章中这种热图，用颜色展示相关系数，用**标出显著的。 Calculate the correlation between multiple genes and immune infiltration, draw a heatmap similar to the one in the article, display the correlation coefficients with colors, and mark the significant ones with * *. From<[link] / 评价基因对免疫浸润的影响，甚至可以批量筛选出影响免疫浸润的候选基因。 其本质是计算两种特征之间的相关性，此处的免疫浸润可以换成其他变量，例如临床表型等等。 如果要同时展示两个基因之间的相关性，及其与免疫浸润之间的关系，请参考“FigureYa96R2”。 Evaluate the im"
+    },
+    {
+      "id": "FigureYa129TCGAbox",
+      "retrieval_score": 33,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "distribution"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "ggplot2"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "numeric measurement and candidate grouping exist"
+        ]
+      },
+      "input_contract": "连续测量值、分组；配对/重复测量还需 subject ID。不能从均值和标准差重建分布。",
+      "warnings": [
+        "小样本显示原始点；配对不可用独立样本检验；单细胞按供体处理生物学重复。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa129TCGAbox",
+      "scripts": [
+        "FigureYa129TCGAbox/FigureYa129TCGAbox.Rmd"
+      ],
+      "summary": "用TCGA数据画这种图，在不同分期对比不同分型里某个基因的表达量。从数据下载到出图。 / Draw this graph using TCGA data to compare the expression level of a certain gene in different stages and subtypes. Download data to generate images. 出自<[link] From<[link] Figure 2. PD-L1 expression in molecular subtypes (A, B) To investigate the molecular relevance between PD-L1 and glioma, we asked the distribution of PD-L1 expression in different molecular subtypes defi"
+    }
+  ],
+  "matching_count": 146
+}

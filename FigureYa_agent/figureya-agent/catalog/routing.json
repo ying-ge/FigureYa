@@ -1,0 +1,840 @@
+{
+  "schema_version": 1,
+  "note": "人工维护的检索分组和数据契约，不等同于逐脚本运行验证。number 是入口，最终以模块完整 ID、源码及用户数据语义复核。未覆盖模块仍通过源码说明检索。",
+  "families": [
+    {
+      "id": "distribution",
+      "label": "分布与组间比较",
+      "keywords": [
+        "分布",
+        "组间",
+        "箱线",
+        "小提琴",
+        "雨云",
+        "distribution",
+        "boxplot",
+        "violin",
+        "raincloud"
+      ],
+      "numbers": [
+        12,
+        55,
+        68,
+        94,
+        129,
+        146,
+        162,
+        195,
+        227,
+        254,
+        298
+      ],
+      "contract": "group_value",
+      "needs": "连续测量值、分组；配对/重复测量还需 subject ID。不能从均值和标准差重建分布。",
+      "cautions": "小样本显示原始点；配对不可用独立样本检验；单细胞按供体处理生物学重复。"
+    },
+    {
+      "id": "heatmap",
+      "label": "矩阵与注释热图",
+      "keywords": [
+        "热图",
+        "矩阵",
+        "聚类",
+        "heatmap",
+        "matrix",
+        "annotation"
+      ],
+      "numbers": [
+        9,
+        17,
+        91,
+        98,
+        124,
+        126,
+        127,
+        144,
+        149,
+        165,
+        169,
+        174,
+        201,
+        206,
+        213,
+        232,
+        243,
+        266,
+        278,
+        307,
+        311,
+        320
+      ],
+      "contract": "matrix",
+      "needs": "明确行列方向的数值矩阵；注释须用唯一 ID 对齐。",
+      "cautions": "表达热图、相关热图、P值热图、CNV热图语义不同；行 Z-score 改变解释；不可按名字默认选择9或213。"
+    },
+    {
+      "id": "correlation",
+      "label": "相关性与变量关联",
+      "keywords": [
+        "相关",
+        "关联",
+        "correlation",
+        "association",
+        "scatter",
+        "散点"
+      ],
+      "numbers": [
+        37,
+        73,
+        76,
+        97,
+        103,
+        124,
+        126,
+        152,
+        163,
+        181,
+        201,
+        228,
+        242,
+        286,
+        300
+      ],
+      "contract": "two_numeric",
+      "needs": "至少两个可对齐的数值变量；说明观测单位和独立性。",
+      "cautions": "相关不代表一致性；离群值和重复测量影响系数；多重检验需校正。"
+    },
+    {
+      "id": "agreement",
+      "label": "测量方法一致性",
+      "keywords": [
+        "一致性",
+        "bland",
+        "altman",
+        "agreement",
+        "测量方法",
+        "可替换"
+      ],
+      "numbers": [
+        176
+      ],
+      "contract": "two_numeric",
+      "needs": "同一对象的两种连续测量方法、共同单位和配对关系。",
+      "cautions": "不能用高相关代替一致性；检查差值随均值变化；不能机械照抄上游样本量门槛或一致性界限。"
+    },
+    {
+      "id": "volcano",
+      "label": "差异结果与火山图",
+      "keywords": [
+        "火山",
+        "差异结果",
+        "volcano",
+        "differential",
+        "logfc",
+        "padj"
+      ],
+      "numbers": [
+        59,
+        75,
+        135,
+        175,
+        321
+      ],
+      "contract": "de_result",
+      "needs": "feature ID、log2FC 和原始/校正 P 值；多比较需要 contrast 列。",
+      "cautions": "原始表达矩阵不是差异结果；不能伪造P值；P=0仅为显示作有记录的下限处理。"
+    },
+    {
+      "id": "enrichment",
+      "label": "通路与富集结果",
+      "keywords": [
+        "富集",
+        "通路",
+        "enrichment",
+        "gsea",
+        "go",
+        "kegg",
+        "geneset"
+      ],
+      "numbers": [
+        13,
+        52,
+        60,
+        80,
+        83,
+        84,
+        88,
+        109,
+        136,
+        156,
+        209,
+        214,
+        253,
+        279,
+        318,
+        322
+      ],
+      "contract": "enrichment",
+      "needs": "绘图需 term、显著性及富集指标；GSEA曲线另需排序统计量和基因集。",
+      "cautions": "ORA、GSEA、GSVA不同；已有结果时仅提取绘图层；说明背景基因和多重检验。"
+    },
+    {
+      "id": "survival",
+      "label": "生存曲线与随访",
+      "keywords": [
+        "生存",
+        "随访",
+        "删失",
+        "survival",
+        "kaplan",
+        "km",
+        "logrank"
+      ],
+      "numbers": [
+        1,
+        4,
+        20,
+        35,
+        36,
+        99,
+        128,
+        141,
+        143,
+        171,
+        182,
+        183,
+        186,
+        187,
+        193,
+        197,
+        210,
+        251,
+        284,
+        291,
+        299
+      ],
+      "contract": "survival",
+      "needs": "time、event；组间比较另需 group，明确时间单位、事件编码和删失。",
+      "cautions": "不将普通时间序列当生存；不可默认按最优截点找显著性；竞争风险和非比例风险另行处理。"
+    },
+    {
+      "id": "forest",
+      "label": "效应量与森林图",
+      "keywords": [
+        "森林",
+        "效应量",
+        "forest",
+        "hazard ratio",
+        "odds ratio",
+        "置信区间",
+        "亚组"
+      ],
+      "numbers": [
+        6,
+        47,
+        66,
+        90,
+        171,
+        190,
+        216,
+        217
+      ],
+      "contract": "effect_ci",
+      "needs": "estimate、lower、upper和标签；比值尺度需要正值。",
+      "cautions": "没有标准误/区间不能生成；已计算的效应量不要强制重跑模型；亚组内P值不等于交互P值。"
+    },
+    {
+      "id": "roc",
+      "label": "二分类判别 ROC",
+      "keywords": [
+        "roc",
+        "auc",
+        "判别",
+        "受试者",
+        "分类性能"
+      ],
+      "numbers": [
+        24,
+        72,
+        102,
+        200
+      ],
+      "contract": "binary_score",
+      "needs": "二元真实标签和连续预测分数；说明阳性类、预测方向和验证集。",
+      "cautions": "只有硬分类标签难以展示完整ROC；避免训练集冒充独立验证；不用于删失生存结局。"
+    },
+    {
+      "id": "time_roc",
+      "label": "时间依赖预测评估",
+      "keywords": [
+        "时间依赖",
+        "time roc",
+        "timeroc",
+        "cindex",
+        "c-index"
+      ],
+      "numbers": [
+        85,
+        189
+      ],
+      "contract": "survival_score",
+      "needs": "随访time、event、风险分数和评估时点。",
+      "cautions": "普通ROC不能替代删失结局的评估；时点须有足够随访支持。"
+    },
+    {
+      "id": "calibration",
+      "label": "校准与决策曲线",
+      "keywords": [
+        "校准",
+        "净获益",
+        "决策曲线",
+        "calibration",
+        "dca",
+        "decision curve"
+      ],
+      "numbers": [
+        30,
+        33,
+        138
+      ],
+      "contract": "binary_score",
+      "needs": "真实结局和概率预测；若生存模型则另外明确时点和删失处理。",
+      "cautions": "概率范围[0,1]；DCA的阈值区间必须有实际意义；不能用任意风险分数冒充概率。"
+    },
+    {
+      "id": "ordination",
+      "label": "降维与样本结构",
+      "keywords": [
+        "降维",
+        "主成分",
+        "pca",
+        "pcoa",
+        "umap",
+        "tsne",
+        "t-sne",
+        "样本结构"
+      ],
+      "numbers": [
+        27,
+        38,
+        48,
+        101,
+        164,
+        204,
+        222,
+        229,
+        244,
+        93
+      ],
+      "contract": "matrix",
+      "needs": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "cautions": "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+    },
+    {
+      "id": "flow",
+      "label": "流向与多层类别关系",
+      "keywords": [
+        "桑基",
+        "流向",
+        "alluvial",
+        "sankey",
+        "flow",
+        "多层分类"
+      ],
+      "numbers": [
+        25,
+        40
+      ],
+      "contract": "flow",
+      "needs": "source、target、非负weight，或逐对象的多层分类记录。",
+      "cautions": "单位和分母一致；多个状态不等于真实时间迁移；聚合边表与逐对象表需要不同转换。"
+    },
+    {
+      "id": "sets",
+      "label": "集合交集",
+      "keywords": [
+        "集合",
+        "交集",
+        "韦恩",
+        "venn",
+        "upset",
+        "overlap"
+      ],
+      "numbers": [
+        112,
+        237,
+        283
+      ],
+      "contract": "sets",
+      "needs": "集合成员ID或二元成员矩阵。",
+      "cautions": "高阶集合优先清晰的UpSet；先确认所选脚本确实支持目标图型，缺失时独立实现并标注。"
+    },
+    {
+      "id": "network",
+      "label": "关系网络与相互作用",
+      "keywords": [
+        "网络",
+        "相互作用",
+        "network",
+        "ppi",
+        "interaction",
+        "节点",
+        "边表"
+      ],
+      "numbers": [
+        15,
+        53,
+        81,
+        147,
+        153,
+        178,
+        199,
+        212,
+        256,
+        267,
+        272,
+        310
+      ],
+      "contract": "edges",
+      "needs": "source、target，可选weight、节点注释；有向性和边的定义。",
+      "cautions": "表达矩阵不能直接证明相互作用；细胞通讯工具有上游对象与物种要求。"
+    },
+    {
+      "id": "circular",
+      "label": "环形与弦图",
+      "keywords": [
+        "环形",
+        "弦图",
+        "circos",
+        "circular",
+        "chord",
+        "circlize"
+      ],
+      "numbers": [
+        14,
+        26,
+        74,
+        89,
+        142,
+        236,
+        259,
+        261,
+        281,
+        303,
+        310,
+        313
+      ],
+      "contract": "edges",
+      "needs": "关系表/矩阵或带坐标的多轨道数据；按具体模块核实。",
+      "cautions": "装饰性圆形不优先于可读性；基因组坐标需版本、染色体命名和方向一致。"
+    },
+    {
+      "id": "composition",
+      "label": "比例与组成",
+      "keywords": [
+        "组成",
+        "占比",
+        "比例",
+        "堆叠",
+        "composition",
+        "proportion",
+        "stacked",
+        "pie"
+      ],
+      "numbers": [
+        39,
+        127,
+        140,
+        173,
+        196,
+        274,
+        290,
+        297,
+        315,
+        317
+      ],
+      "contract": "composition",
+      "needs": "类别计数或比例及样本/组的分母。",
+      "cautions": "比例受总和约束；不能将不同分母直接相加；细胞比例的统计重复是供体。"
+    },
+    {
+      "id": "mutation",
+      "label": "突变与变异景观",
+      "keywords": [
+        "突变",
+        "瀑布",
+        "mutation",
+        "oncoplot",
+        "oncoprint",
+        "maf",
+        "lollipop"
+      ],
+      "numbers": [
+        18,
+        19,
+        42,
+        51,
+        70,
+        110,
+        113,
+        123,
+        132,
+        139,
+        158,
+        168,
+        238,
+        248,
+        276,
+        288
+      ],
+      "contract": "mutation",
+      "needs": "MAF/变异事件表或已整理的基因×样本事件矩阵。",
+      "cautions": "同一样本多变异不能错误覆盖；区分突变类型、负荷、互斥和共现。"
+    },
+    {
+      "id": "genomic",
+      "label": "基因组轨道与 CNV",
+      "keywords": [
+        "基因组",
+        "染色体",
+        "轨道",
+        "cnv",
+        "genomic",
+        "chromosome",
+        "bigwig",
+        "atac",
+        "chip"
+      ],
+      "numbers": [
+        3,
+        10,
+        43,
+        44,
+        57,
+        67,
+        77,
+        79,
+        82,
+        86,
+        121,
+        133,
+        155,
+        157,
+        166,
+        172,
+        180,
+        185,
+        188,
+        257,
+        260,
+        265,
+        268,
+        307
+      ],
+      "contract": "genomic",
+      "needs": "基因组坐标、参考版本、信号或拷贝数；轨道常另需外部文件。",
+      "cautions": "不同参考基因组不直接混用；0/1-based坐标需确认；数据可能远大于脚本。"
+    },
+    {
+      "id": "single_cell",
+      "label": "单细胞与空间数据",
+      "keywords": [
+        "单细胞",
+        "空间",
+        "single cell",
+        "single-cell",
+        "seurat",
+        "scanpy",
+        "spatial",
+        "细胞通讯",
+        "拟时序",
+        "trajectory"
+      ],
+      "numbers": [
+        160,
+        166,
+        177,
+        178,
+        185,
+        194,
+        206,
+        223,
+        224,
+        231,
+        232,
+        235,
+        239,
+        241,
+        243,
+        249,
+        254,
+        267,
+        269,
+        272,
+        275,
+        285,
+        301,
+        304,
+        306,
+        310,
+        312,
+        314,
+        315,
+        317,
+        319,
+        320,
+        323
+      ],
+      "contract": "single_cell",
+      "needs": "Seurat/AnnData等对象或明确导出的坐标、表达、细胞注释、供体信息。",
+      "cautions": "不得把细胞数量当独立生物学重复；稀疏矩阵不盲目稠密化；先确认已有分析结果。"
+    },
+    {
+      "id": "modeling",
+      "label": "模型训练与特征选择",
+      "keywords": [
+        "模型",
+        "训练",
+        "机器学习",
+        "lasso",
+        "random forest",
+        "xgboost",
+        "model",
+        "classification"
+      ],
+      "numbers": [
+        7,
+        30,
+        31,
+        65,
+        96,
+        117,
+        159,
+        184,
+        190,
+        191,
+        198,
+        202,
+        207,
+        218,
+        219,
+        220,
+        221,
+        233,
+        245,
+        246,
+        250,
+        252,
+        258,
+        293,
+        295,
+        302,
+        316
+      ],
+      "contract": "modeling",
+      "needs": "样本×特征、目标和训练/验证划分；绘图优先复用已有模型结果。",
+      "cautions": "避免标签泄漏；特征选择放在训练折内；绘图请求不自动授权重跑完整模型。"
+    },
+    {
+      "id": "processing",
+      "label": "预处理与差异分析流程",
+      "keywords": [
+        "预处理",
+        "转换",
+        "差异分析",
+        "deseq",
+        "edger",
+        "limma",
+        "fpkm",
+        "tpm",
+        "batch",
+        "combat"
+      ],
+      "numbers": [
+        21,
+        22,
+        23,
+        32,
+        34,
+        41,
+        58,
+        59,
+        118,
+        119,
+        120,
+        122,
+        203,
+        262,
+        263,
+        287
+      ],
+      "contract": "processing",
+      "needs": "与方法匹配的原始数据和设计矩阵。",
+      "cautions": "这些不是通用画图基座；counts、TPM、FPKM、log表达不可互换；先分离分析与绘图目标。"
+    },
+    {
+      "id": "scores",
+      "label": "签名评分与免疫景观",
+      "keywords": [
+        "评分",
+        "免疫",
+        "signature",
+        "immune",
+        "gsva",
+        "ssgsea",
+        "score",
+        "stemness"
+      ],
+      "numbers": [
+        56,
+        61,
+        69,
+        71,
+        92,
+        106,
+        115,
+        116,
+        128,
+        145,
+        150,
+        151,
+        154,
+        161,
+        167,
+        170,
+        179,
+        198,
+        205,
+        208,
+        211,
+        215,
+        225,
+        230,
+        234,
+        250,
+        255,
+        264,
+        269,
+        277,
+        280,
+        289,
+        291,
+        292,
+        296,
+        305,
+        308,
+        322
+      ],
+      "contract": "matrix",
+      "needs": "表达矩阵、基因集/模型及匹配的ID与物种。",
+      "cautions": "算法及基因集决定含义；已有score时只取绘图层；勿默认联网下载参考数据。"
+    },
+    {
+      "id": "drug",
+      "label": "药物敏感性与靶点",
+      "keywords": [
+        "药物",
+        "靶点",
+        "drug",
+        "cmap",
+        "gdsc",
+        "oncopredict",
+        "crispr"
+      ],
+      "numbers": [
+        105,
+        131,
+        145,
+        212,
+        213,
+        240,
+        246,
+        247,
+        282,
+        294
+      ],
+      "contract": "domain_specific",
+      "needs": "具体流程规定的表达、药物反应、靶点或已计算得分。",
+      "cautions": "外部平台、数据库和大文件常为前置要求；不能仅凭热图外观选择。"
+    },
+    {
+      "id": "special",
+      "label": "专题图形和辅助工具",
+      "keywords": [
+        "雷达",
+        "颜色",
+        "系统发育",
+        "鱼图",
+        "radar",
+        "color",
+        "tree",
+        "ternary",
+        "fish",
+        "趋势",
+        "时间序列"
+      ],
+      "numbers": [
+        2,
+        8,
+        16,
+        28,
+        62,
+        63,
+        64,
+        78,
+        87,
+        95,
+        98,
+        114,
+        125,
+        148,
+        175,
+        186,
+        192,
+        196,
+        217,
+        273,
+        298
+      ],
+      "contract": "domain_specific",
+      "needs": "根据子模块复核数据语义和输入约定。",
+      "cautions": "不能因图形相似而跳过数据契约；本库无适配基座时说明缺口并自编绘图层。"
+    },
+    {
+      "id": "bubble",
+      "label": "气泡与多指标点图",
+      "keywords": [
+        "气泡",
+        "泡泡",
+        "点图",
+        "bubble",
+        "dotplot"
+      ],
+      "numbers": [
+        5,
+        11,
+        75,
+        318
+      ],
+      "contract": "domain_specific",
+      "needs": "x/y分类或连续轴及真实的size/color指标，按具体模块核实。",
+      "cautions": "面积映射不等于半径映射；显著性、效应量和表达比例不可混用。"
+    },
+    {
+      "id": "categorical_association",
+      "label": "分类变量关联展示",
+      "keywords": [
+        "二元特征",
+        "分类关联",
+        "yes/no"
+      ],
+      "numbers": [
+        124,
+        125
+      ],
+      "contract": "domain_specific",
+      "needs": "分组和类别/二元特征；计数与比例的分母清楚。",
+      "cautions": "连续相关检验不适用yes/no列；稀疏列联表需合适方法。"
+    }
+  ]
+}

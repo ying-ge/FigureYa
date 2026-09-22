@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "source": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\05_sankey\\synthetic_input.csv",
+  "rows_observed": 240,
+  "sampled": false,
+  "row_count_exact": 240,
+  "sampling": "first rows",
+  "columns": [
+    {
+      "name": "source",
+      "kind": "text",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 3,
+      "nonfinite": 0,
+      "possible_identifier": false,
+      "possible_category": true,
+      "category_counts_sorted": [
+        96,
+        83,
+        61
+      ]
+    },
+    {
+      "name": "state",
+      "kind": "text",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 3,
+      "nonfinite": 0,
+      "possible_identifier": false,
+      "possible_category": true,
+      "category_counts_sorted": [
+        96,
+        80,
+        64
+      ]
+    },
+    {
+      "name": "outcome",
+      "kind": "text",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 3,
+      "nonfinite": 0,
+      "possible_identifier": false,
+      "possible_category": true,
+      "category_counts_sorted": [
+        94,
+        74,
+        72
+      ]
+    }
+  ],
+  "numeric_columns": [],
+  "category_candidates": [
+    "source",
+    "state",
+    "outcome"
+  ],
+  "role_candidates": {
+    "source": [
+      "source"
+    ],
+    "label": [
+      "outcome"
+    ]
+  },
+  "matrix_candidate": false,
+  "duplicate_rows_observed": 229,
+  "missing_tokens": [
+    "",
+    "n/a",
+    "na",
+    "nan",
+    "none",
+    "null"
+  ],
+  "warnings": [
+    "Names and numeric codes do not establish units, count normalization, event meaning, pairing, or biological independence."
+  ],
+  "delimiter": ",",
+  "encoding": "utf-8-sig"
+}

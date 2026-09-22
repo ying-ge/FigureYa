@@ -1,0 +1,354 @@
+{
+  "query": "多指标 ROC 判别 多面板",
+  "commit": "f627917b79f28558779fb2e3ea2014cede41b89e",
+  "curation_current": true,
+  "matched_families": {
+    "roc": [
+      "roc",
+      "判别"
+    ]
+  },
+  "profile_used": true,
+  "design": "unknown",
+  "domain": "general",
+  "decision": "CANDIDATES_ONLY: agent must compare semantics, full source and visual reference; scores are not confidence or a final selection.",
+  "needs": [
+    "Confirm observational unit, roles, units and missingness",
+    "Compare at least 3 genuinely relevant modules when available; document rejection reasons",
+    "Inspect selected source and helper dependencies before fetching or running"
+  ],
+  "candidates": [
+    {
+      "id": "FigureYa102multipanelROC",
+      "retrieval_score": 93,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 20,
+        "id_reference": 0
+      },
+      "families": [
+        "roc"
+      ],
+      "matched_intent": [
+        "roc"
+      ],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [
+        "多指标",
+        "多面板"
+      ],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: label",
+          "role candidate: score"
+        ]
+      },
+      "input_contract": "二元真实标签和连续预测分数；说明阳性类、预测方向和验证集。",
+      "warnings": [
+        "只有硬分类标签难以展示完整ROC；避免训练集冒充独立验证；不用于删失生存结局。",
+        "比较多个指标ROC；确保同一验证集和一致阳性类。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa102multipanelROC",
+      "scripts": [
+        "FigureYa102multipanelROC/FigureYa102multipanelROC.Rmd"
+      ],
+      "summary": "FigureYa24ROC能拿到4个miRNA的ROC，每个miRNA一条线。这里的Figure5E是把上述4条miRNA都一起进行预测，Figure6根据4个miRNA建立logistic regression model，然后对不同病理分期的肿瘤阶段进行预测。 / Figure Ya24ROC can obtain ROC for 4 miRNAs, with one line for each miRNA. Figure 5E predicts all four miRNAs together, while Figure 6 establishes a logistic regression model based on the four miRNAs and predicts tumor stages at different pathological stages. 出自<[link] from<[link] Figu"
+    },
+    {
+      "id": "FigureYa24ROC",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "roc"
+      ],
+      "matched_intent": [
+        "roc"
+      ],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: label",
+          "role candidate: score"
+        ]
+      },
+      "input_contract": "二元真实标签和连续预测分数；说明阳性类、预测方向和验证集。",
+      "warnings": [
+        "只有硬分类标签难以展示完整ROC；避免训练集冒充独立验证；不用于删失生存结局。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa24ROC",
+      "scripts": [
+        "FigureYa24ROC/FigureYa24ROC.Rmd"
+      ],
+      "summary": "用R画出ROC曲线（receiver operating characteristic curve）。 Draw the ROC curve in R（receiver operating characteristic curve） / 在分类任务中，直观展示敏感性和特异性连续变量的综合指标。 场景一：比较多个biomarker或临床参数的诊断表现 场景二：比较多个算法的分类效果 Visualize composite metrics of sensitivity and specificity continuous variables in a classification task. Scenario 1: Compare the diagnostic performance of multiple biomarkers or clinical parameters Scenario 2: Compare the class"
+    },
+    {
+      "id": "FigureYa200pairwiseAUC",
+      "retrieval_score": 70,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 0,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "roc"
+      ],
+      "matched_intent": [
+        "roc"
+      ],
+      "keyword_hits": [],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: label",
+          "role candidate: score"
+        ]
+      },
+      "input_contract": "二元真实标签和连续预测分数；说明阳性类、预测方向和验证集。",
+      "warnings": [
+        "只有硬分类标签难以展示完整ROC；避免训练集冒充独立验证；不用于删失生存结局。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa200pairwiseAUC",
+      "scripts": [
+        "FigureYa200pairwiseAUC/FigureYa200pairwiseAUC.Rmd"
+      ],
+      "summary": "我想实现Figure 1B，两个数据集里面看预后判断力都很好的基因。 I want to draw Figure 1B, and look at the genes with good prognostic judgment in both datasets. From <[link] FIg. 1. PDLIM1 is down-regulated in human metastatic HCC tissues. (A) Heat map showing 402 genes differentially expressed in HCC tissues with or without metastasis based on data set **GSE364**. (B) area under the curve evaluation of the prognostic value of candidate genes inv"
+    },
+    {
+      "id": "FigureYa72biomarker",
+      "retrieval_score": 70,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 0,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "roc"
+      ],
+      "matched_intent": [
+        "roc"
+      ],
+      "keyword_hits": [],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "role candidate: label",
+          "role candidate: score"
+        ]
+      },
+      "input_contract": "二元真实标签和连续预测分数；说明阳性类、预测方向和验证集。",
+      "warnings": [
+        "只有硬分类标签难以展示完整ROC；避免训练集冒充独立验证；不用于删失生存结局。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa72biomarker",
+      "scripts": [
+        "FigureYa72biomarker/FigureYa72biomarker.Rmd"
+      ],
+      "summary": "复现原文的nearest shrunken centroid classification找biomarker，画出文章里的图。 / Reproduce the original article's nearest shrunken centroid classification to find the biomarker and draw the graph in the article. 出自<[link] from<[link] / 找癌症分型的biomarker。不限于例文的DNA甲基化数据，经典的用法是根据表达数据分型。 参考资料：Robert Tibshirani, Trevor Hastie, Balasubramanian Narasimhan, and Gilbert Chu. 2002. Diagnosis of multiple cancer types by shrunken centroids of g"
+    },
+    {
+      "id": "FigureYa129TCGAbox",
+      "retrieval_score": 33,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "distribution"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "numeric measurement and candidate grouping exist"
+        ]
+      },
+      "input_contract": "连续测量值、分组；配对/重复测量还需 subject ID。不能从均值和标准差重建分布。",
+      "warnings": [
+        "小样本显示原始点；配对不可用独立样本检验；单细胞按供体处理生物学重复。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa129TCGAbox",
+      "scripts": [
+        "FigureYa129TCGAbox/FigureYa129TCGAbox.Rmd"
+      ],
+      "summary": "用TCGA数据画这种图，在不同分期对比不同分型里某个基因的表达量。从数据下载到出图。 / Draw this graph using TCGA data to compare the expression level of a certain gene in different stages and subtypes. Download data to generate images. 出自<[link] From<[link] Figure 2. PD-L1 expression in molecular subtypes (A, B) To investigate the molecular relevance between PD-L1 and glioma, we asked the distribution of PD-L1 expression in different molecular subtypes defi"
+    },
+    {
+      "id": "FigureYa305PMAPscore",
+      "retrieval_score": 33,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "scores"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "表达矩阵、基因集/模型及匹配的ID与物种。",
+      "warnings": [
+        "算法及基因集决定含义；已有score时只取绘图层；勿默认联网下载参考数据。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa305PMAPscore",
+      "scripts": [
+        "FigureYa305PMAPscore/FigureYa305PMAPscore.Rmd"
+      ],
+      "summary": " /  / 计算PMAP得分，增加了全部KEGG通路到这个计算中。 他计算的时候只关心有哪些基因出现了突变，将发生突变的基因数，根据他们在KEGG通路网上的位置，进行加权求和。 这个PMAPscore需要的通路信息格式得是kgml，所以msigdb的基因集是不能直接用在这上面的。所以增加了批量下载kgml文件，并读取为R对象，以及应用到PMAP计算的代码。 Calculate PMAP score, added all KEGG pathways to this calculation. It only cares which genes have mutations during calculation, weights and sums the number of mutated genes based on their positions in the KEGG pathway network. The PMAPscore"
+    },
+    {
+      "id": "FigureYa85timeROC",
+      "retrieval_score": 16,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 8,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "time_roc"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 8,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "missing role: time",
+          "missing role: event"
+        ],
+        "evidence": [
+          "role candidate: score"
+        ]
+      },
+      "input_contract": "随访time、event、风险分数和评估时点。",
+      "warnings": [
+        "missing role: time",
+        "missing role: event",
+        "普通ROC不能替代删失结局的评估；时点须有足够随访支持。",
+        "time/event/marker和时点；普通二分类ROC不能替代。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa85timeROC",
+      "scripts": [
+        "FigureYa85timeROC/FigureYa85timeROC.Rmd"
+      ],
+      "summary": "绘制不同拟合模型的time-dependent AUC。 Draw time-dependent AUC for different fitting models. From <[link] Figure 3.Area under the curves (AUC) of the baseline, baseline cir- culating tumour cell (CTC) and CTC progression survival models. / 绘制不同拟合模型的timeROC曲线。 Draw timeROC curves for different fitting models."
+    },
+    {
+      "id": "FigureYa191bestLogistic",
+      "retrieval_score": 8,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 0,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "modeling"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "roc"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 0,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "Specialized input object/analysis contract must be checked in source"
+        ],
+        "evidence": []
+      },
+      "input_contract": "样本×特征、目标和训练/验证划分；绘图优先复用已有模型结果。",
+      "warnings": [
+        "Specialized input object/analysis contract must be checked in source",
+        "避免标签泄漏；特征选择放在训练折内；绘图请求不自动授权重跑完整模型。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa191bestLogistic",
+      "scripts": [
+        "FigureYa191bestLogistic/FigureYa191bestLogistic.Rmd"
+      ],
+      "summary": " / 找最佳截断值，然后用截断值分组，生成分组后的数据。最好每一个变量带有一个标有最佳截断值的roc曲线。 Find the best cutoff value, then group with the cutoff value, and generate the grouped data. It is best that each variable has an roc curve marked with the optimal cutoff value. 换句话说：y~x，这个x原本是连续变量，现在要换成分类变量，使得它在预测y的时候有最小的p值。 In other words: y~x. This x was originally a continuous variable, but now it needs to be changed to a categorical variable so that it has th"
+    }
+  ],
+  "matching_count": 9
+}

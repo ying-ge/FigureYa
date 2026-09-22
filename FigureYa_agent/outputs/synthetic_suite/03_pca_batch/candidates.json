@@ -1,0 +1,369 @@
+{
+  "query": "PCA 分组 批次 batch 形状",
+  "commit": "f627917b79f28558779fb2e3ea2014cede41b89e",
+  "curation_current": true,
+  "matched_families": {
+    "ordination": [
+      "pca"
+    ],
+    "processing": [
+      "batch"
+    ]
+  },
+  "profile_used": true,
+  "design": "unknown",
+  "domain": "bulk",
+  "decision": "CANDIDATES_ONLY: agent must compare semantics, full source and visual reference; scores are not confidence or a final selection.",
+  "needs": [
+    "Confirm observational unit, roles, units and missingness",
+    "Compare at least 3 genuinely relevant modules when available; document rejection reasons",
+    "Inspect selected source and helper dependencies before fetching or running"
+  ],
+  "candidates": [
+    {
+      "id": "FigureYa101PCA",
+      "retrieval_score": 105,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 15,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 20,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca",
+        "分组",
+        "批次",
+        "batch",
+        "形状"
+      ],
+      "specific_hits": [
+        "批次",
+        "batch",
+        "形状"
+      ],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。",
+        "同时编码分组和批次/重复；需要独立元数据；不能仅凭PCA图删除不顺眼的样本。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa101PCA",
+      "scripts": [
+        "FigureYa101PCA/FigureYa101PCA.Rmd"
+      ],
+      "summary": "RNA-seq的PCA图，同一组用相同颜色，多次重复（批次）用不同形状。我的分组很多，3次重复，不需要像FigureYa38PCA那样画圈画箭头。 PCA plot of RNA seq, with the same color for the same group and different shapes for multiple repetitions (batches). I have many groups and repeat them three times, so I don't need to draw circles or arrows like in FigureYa38PCA. From <[link] / 场景一：每个分组内的样品较多，是不同批次获得的。如果能用各种形状来区分批次的话，就能一眼看出哪个批次远离其他批次，有助于判断批次效应的影响。 场景二：每个分组内的样品是2到n次生物学重复获得的。如果能用"
+    },
+    {
+      "id": "FigureYa164PCA3D",
+      "retrieval_score": 79,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 9,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca",
+        "分组",
+        "batch"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa164PCA3D",
+      "scripts": [
+        "FigureYa164PCA3D/FigureYa164PCA3D.Rmd"
+      ],
+      "summary": "像文章里这样的3D PCA图，展示不同组sample的关系。 A 3D PCA plot like the one in the article, showing the relationships between different sample groups. Figure 1 Different immune phenotypes between glioma grades (A) Principal components analysis of immune-related genes between glioblastoma (GBM) and lower grade glioma (LGG). Figure 2 An 8-gene local immune signature for patients with glioblastoma (GBM) (C) Distribution of samples based "
+    },
+    {
+      "id": "FigureYa38PCA",
+      "retrieval_score": 79,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 9,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca",
+        "分组",
+        "批次"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。",
+        "样本×特征矩阵及分组表；不要与基因×样本的输入方向混用。椭圆不是分离显著性的证明。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa38PCA",
+      "scripts": [
+        "FigureYa38PCA/FigureYa38PCA.Rmd"
+      ],
+      "summary": "用TCGA数据画主成分分析(pricinple components analysis，PCA)的图。 例如：[画个小圈圈]([link] Draw plot of principal components analysis (PCA) with TCGA data. For example, this graph in [draw a small circle]([link] From <[link] From <[link] / 通常我们拿到的数据集，例如转录组的表达量矩阵都有成千上万个基因，这类高维度数据很难直接进行可视化展示。 为了能够在二维平面上展示，就需要对其进行降维，而PCA分析是目前最常用的降维工具。 然后你就能在图上一眼看出哪些样品之间更像，哪些样品属于/不属于同一组。不仅适用于测序数据。 场景一：多个分组，每组三次生物学重复。做PCA，看到某个样品远离了组内其他样品，它有什么问题？ 场景二：多个分组，分三批送"
+    },
+    {
+      "id": "FigureYa229PCOA",
+      "retrieval_score": 76,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 6,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca",
+        "分组"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa229PCOA",
+      "scripts": [
+        "FigureYa229PCOA/FigureYa229PCOA.Rmd"
+      ],
+      "summary": "把PCoA的散点图变成这样的： Turn the scatter plot of PCOA like this: From <[link] Figure 1. Shifts in the Gut Microbiota Composition in Parallel with Impaired Glycemic Status (A) The **principle coordinate analysis** of Bray-Curtis dissimilarities obtained for the metagenomic species profiles in the discovery (closed circles) and validation (open circles) cohorts. **The circles and error bars indicate the mean and standard error"
+    },
+    {
+      "id": "FigureYa204PCAscore",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa204PCAscore",
+      "scripts": [
+        "FigureYa204PCAscore/FigureYa204PCAscore.Rmd"
+      ],
+      "summary": "想实现下这个文章的建模方法，不同于常规的lasso, cox回归系数与基因表达量的乘积，这篇文章采用Boruta降维，联合主成分分析第一主成分构建 signature score，特别适合做分子分型分析。 I want to try the modeling method of this article, which is different from the conventional lasso, the product of the cox regression coefficient and the gene expression, this article uses Boruta to reduce the dimension and combine the principal component analysis with the first principal component to construct a sig"
+    },
+    {
+      "id": "FigureYa222PCAgene",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa222PCAgene",
+      "scripts": [
+        "FigureYa222PCAgene/FigureYa222PCAgene.Rmd"
+      ],
+      "summary": "这个PCA很特别 This PCA is quite special. From <[link] Figure 3. Dynamic Gene-Expression Patterns of Oocyte Subtypes at Stepwise Developmental Stages (A) PCA plot showing four oocyte subtypes based on gene-expression patterns exhibited by PC1 and PC2. (B) Relative gene-expression patterns of representative genes essential for oocyte development along the PC1 dimension. / 单细胞RNA-seq，从PCA结果就能看出基因表达模式跟细胞类型的关系。 Single-cell RNA"
+    },
+    {
+      "id": "FigureYa244PCAPlot",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "pca"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。",
+        "支持使用已有坐标的ggplot段；凸包是几何边界，二维重叠不能单独证明聚类过拟合。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa244PCAPlot",
+      "scripts": [
+        "FigureYa244PCAPlot/FigureYa244PCAPlot.Rmd"
+      ],
+      "summary": "基因聚类，然后在图上标注出来。不用说要跟原文一个数据吧，只要输入数据得出类似的图就行。 Genes are clustered and then annotated on the graph. Needless to say, you need to have the same data as the original text, as long as you enter the data to get a similar graph. From <[link] Fig. 1. Prognostic stratification of PDAC through their GT gene expression profile (a, b) and clinical features of patients with their PDAC molecular profiles (c, d). (a) Biplot of the H"
+    },
+    {
+      "id": "FigureYa48Adonis",
+      "retrieval_score": 73,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "ordination"
+      ],
+      "matched_intent": [
+        "ordination"
+      ],
+      "keyword_hits": [
+        "分组"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "wide numeric matrix candidate; orientation unconfirmed"
+        ]
+      },
+      "input_contract": "样本×特征矩阵或已计算坐标；分组元数据按样本ID对齐。",
+      "warnings": [
+        "PCoA需要适当距离；UMAP/tSNE距离不等同全局差异；别把已有坐标再次当表达矩阵降维。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa48Adonis",
+      "scripts": [
+        "FigureYa48Adonis/FigureYa48Adonis.Rmd"
+      ],
+      "summary": "进行置换多元方差分析（PERMANOVA，Adonis），画出图b Perform permutational multivariate analysis of variance (PERMANOVA, Adonis) and draw Figure b. 图 1：取样区域和肠道微生物群区域差异概览。 b，条形图说明了与肠道微生物变化显著相关的前 30 个宿主因素。这些变化来自样本间加权的 UniFrac 距离。条形图根据元数据类别着色。规模效应和统计显著性由 PERMANOVA (Adonis) 计算。FDR控制在5%。DBP：舒张压；TCHO：总胆固醇；FBG：空腹血糖。 出自<[link] Fig. 1: Overview of sampling regions and of regional variation in gut microbiota. b, Bar plot illustrating the top 30 "
+    }
+  ],
+  "matching_count": 108
+}

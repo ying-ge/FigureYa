@@ -1,0 +1,202 @@
+{
+  "query": "测量方法一致性 Bland Altman agreement",
+  "commit": "f627917b79f28558779fb2e3ea2014cede41b89e",
+  "curation_current": true,
+  "matched_families": {
+    "agreement": [
+      "一致性",
+      "bland",
+      "altman",
+      "agreement",
+      "测量方法"
+    ]
+  },
+  "profile_used": true,
+  "design": "unknown",
+  "domain": "general",
+  "decision": "CANDIDATES_ONLY: agent must compare semantics, full source and visual reference; scores are not confidence or a final selection.",
+  "needs": [
+    "Confirm observational unit, roles, units and missingness",
+    "Compare at least 3 genuinely relevant modules when available; document rejection reasons",
+    "Inspect selected source and helper dependencies before fetching or running"
+  ],
+  "candidates": [
+    {
+      "id": "FigureYa176BlandAltman",
+      "retrieval_score": 99,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 9,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 20,
+        "id_reference": 0
+      },
+      "families": [
+        "agreement"
+      ],
+      "matched_intent": [
+        "agreement"
+      ],
+      "keyword_hits": [
+        "bland",
+        "altman",
+        "agreement"
+      ],
+      "specific_hits": [
+        "一致性",
+        "agreement",
+        "bland",
+        "altman"
+      ],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "at least two numeric columns"
+        ]
+      },
+      "input_contract": "同一对象的两种连续测量方法、共同单位和配对关系。",
+      "warnings": [
+        "不能用高相关代替一致性；检查差值随均值变化；不能机械照抄上游样本量门槛或一致性界限。",
+        "两种方法的配对连续测量；独立测量与重复测量需不同处理，界限不照抄示例系数。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa176BlandAltman",
+      "scripts": [
+        "FigureYa176BlandAltman/FigureYa176BlandAltman.Rmd"
+      ],
+      "summary": "作者用Bland-Altman的方法比较了自己建立的模型和传统的模型的一致性。网上找了下，好像没有可以重复这个的代码。 The author compared the consistency between the model he established and the traditional model using the Bland-Altman method. I searched online and it seems there's no code that can repeat this. From<[link] Figure S1. Bland-Altman plots reveal consistency between the V-Net derived segmentation and the gold standard. The differences (y-axis) are plotted versu"
+    },
+    {
+      "id": "FigureYa138NiceCalibration",
+      "retrieval_score": 8,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 0,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "calibration"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "agreement"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 0,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "missing role: label|event",
+          "missing role: score"
+        ],
+        "evidence": []
+      },
+      "input_contract": "真实结局和概率预测；若生存模型则另外明确时点和删失处理。",
+      "warnings": [
+        "missing role: label|event",
+        "missing role: score",
+        "概率范围[0,1]；DCA的阈值区间必须有实际意义；不能用任意风险分数冒充概率。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa138NiceCalibration",
+      "scripts": [
+        "FigureYa138NiceCalibration/FigureYa138NiceCalibration.Rmd"
+      ],
+      "summary": "想要实现这个漂亮的calibration图（A），用于logistics回归，要有这个Hosmer-Lemeshow test。 I want to draw this beautiful calibration graph (A) for logistics regression, which requires this Hosmer-Lemeshow test. FIGURE 6 | Model performance and clinical usefulness of the LNM-nomogram. (A) Calibration curve with Hosmer-Lemeshow test of the LNM-nomogram in the training set of TCGA-cohort. Calibration curve depicts the calibration of the fitted m"
+    },
+    {
+      "id": "FigureYa236circGroup",
+      "retrieval_score": 8,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 0,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "circular"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "agreement"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 0,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "missing role: source",
+          "missing role: target"
+        ],
+        "evidence": []
+      },
+      "input_contract": "关系表/矩阵或带坐标的多轨道数据；按具体模块核实。",
+      "warnings": [
+        "missing role: source",
+        "missing role: target",
+        "装饰性圆形不优先于可读性；基因组坐标需版本、染色体命名和方向一致。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa236circGroup",
+      "scripts": [
+        "FigureYa236circGroup/FigureYa236circGroup.Rmd"
+      ],
+      "summary": "用圆圈图的方式展示不同分组的关系。网上没有找到可以实现的代码。最好是R语言做。 Draw this diagram to show the relationship between different groups in the form of a circle diagram. There is no code available online that can be implemented. It's best to do it in R. From <[link] Figure 3. Alignment of PDAC metabolic subgroups with known gene expression subtypes. A, Overlay of metabolic profiles (inner ring) with PDAC expression subtypes (outer rings) based o"
+    },
+    {
+      "id": "FigureYa30nomogram_update",
+      "retrieval_score": 8,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 0,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "calibration",
+        "modeling"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "agreement"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 0,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "missing role: label|event",
+          "missing role: score"
+        ],
+        "evidence": []
+      },
+      "input_contract": "真实结局和概率预测；若生存模型则另外明确时点和删失处理。",
+      "warnings": [
+        "missing role: label|event",
+        "missing role: score",
+        "概率范围[0,1]；DCA的阈值区间必须有实际意义；不能用任意风险分数冒充概率。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa30nomogram_update",
+      "scripts": [
+        "FigureYa30nomogram_update/FigureYa30nomogram_update.Rmd"
+      ],
+      "summary": "画出新型nomogram图（d）和对比曲线（f、g） Draw the new nomogram (d) and comparison curves (f, g) From <[link] Fig. 3. (d–e) Nomograms for predicting the probability of patient mortality based on TMRS-RFS (d), TMRS-OS (e) and clinical variables; (f–g) Plots depict the calibration of nomograms based on TMRS-RFS (f) and TMRS-OS (g) in terms of agreement between predicted and observed 2-year, 3-year, and 5-year outcomes. Nomogram perfo"
+    }
+  ],
+  "matching_count": 4
+}

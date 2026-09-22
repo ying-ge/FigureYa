@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "source": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\04_multipanel_roc\\synthetic_input.csv",
+  "rows_observed": 240,
+  "sampled": false,
+  "row_count_exact": 240,
+  "sampling": "first rows",
+  "columns": [
+    {
+      "name": "label",
+      "kind": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 2,
+      "nonfinite": 0,
+      "possible_identifier": false,
+      "possible_category": true,
+      "min": 0.0,
+      "max": 1.0,
+      "median": 0.0,
+      "q1": 0.0,
+      "q3": 1.0,
+      "zeros": 146,
+      "negative": 0,
+      "integer_like": true,
+      "binary_01": true,
+      "constant": false,
+      "tukey_outliers": 0,
+      "category_counts_sorted": [
+        146,
+        94
+      ]
+    },
+    {
+      "name": "model_a_score",
+      "kind": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 240,
+      "nonfinite": 0,
+      "possible_identifier": true,
+      "possible_category": false,
+      "min": -2.998915723644106,
+      "max": 2.8439685823622987,
+      "median": 0.1580146531932059,
+      "q1": -0.40404647192091914,
+      "q3": 0.7547760362712658,
+      "zeros": 0,
+      "negative": 99,
+      "integer_like": false,
+      "binary_01": false,
+      "constant": false,
+      "tukey_outliers": 2
+    },
+    {
+      "name": "model_b_score",
+      "kind": "numeric",
+      "missing": 0,
+      "missing_fraction": 0.0,
+      "distinct_observed": 240,
+      "nonfinite": 0,
+      "possible_identifier": true,
+      "possible_category": false,
+      "min": -2.573908519709612,
+      "max": 3.1370820985483485,
+      "median": 0.4314158537527259,
+      "q1": -0.31955781775733805,
+      "q3": 1.0751504432231156,
+      "zeros": 0,
+      "negative": 87,
+      "integer_like": false,
+      "binary_01": false,
+      "constant": false,
+      "tukey_outliers": 1
+    }
+  ],
+  "numeric_columns": [
+    "label",
+    "model_a_score",
+    "model_b_score"
+  ],
+  "category_candidates": [
+    "label"
+  ],
+  "role_candidates": {
+    "label": [
+      "label"
+    ]
+  },
+  "matrix_candidate": true,
+  "duplicate_rows_observed": 0,
+  "missing_tokens": [
+    "",
+    "n/a",
+    "na",
+    "nan",
+    "none",
+    "null"
+  ],
+  "warnings": [
+    "Names and numeric codes do not establish units, count normalization, event meaning, pairing, or biological independence."
+  ],
+  "delimiter": ",",
+  "encoding": "utf-8-sig"
+}
