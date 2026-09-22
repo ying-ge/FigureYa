@@ -1,0 +1,84 @@
+{
+  "seed": 20260921,
+  "synthetic_only": true,
+  "rscript_available": false,
+  "tasks": [
+    {
+      "task": "01_volcano",
+      "selected": "FigureYa59volcanoV2",
+      "sig_count": 84,
+      "products": {
+        "pdf": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\01_volcano\\figureya59volcano_adapted.pdf",
+        "png": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\01_volcano\\figureya59volcano_adapted.png",
+        "pdf_bytes": 24523,
+        "png_bytes": 127359
+      },
+      "profile_rows": 480,
+      "manifest_files": 1
+    },
+    {
+      "task": "02_bland_altman",
+      "selected": "FigureYa176BlandAltman",
+      "bias": 2.5279108137265727,
+      "loa": [
+        -3.727301195636227,
+        8.783122823089371
+      ],
+      "products": {
+        "pdf": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\02_bland_altman\\figureya176_bland_altman_adapted.pdf",
+        "png": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\02_bland_altman\\figureya176_bland_altman_adapted.png",
+        "pdf_bytes": 19206,
+        "png_bytes": 66210
+      },
+      "profile_rows": 96,
+      "manifest_files": 1
+    },
+    {
+      "task": "03_pca_batch",
+      "selected": "FigureYa101PCA",
+      "explained_variance": [
+        0.48942797105419544,
+        0.4049252488619721
+      ],
+      "products": {
+        "pdf": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\03_pca_batch\\figureya101_pca_batch_adapted.pdf",
+        "png": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\03_pca_batch\\figureya101_pca_batch_adapted.png",
+        "pdf_bytes": 18449,
+        "png_bytes": 75017
+      },
+      "profile_rows": 72,
+      "manifest_files": 1
+    },
+    {
+      "task": "04_multipanel_roc",
+      "selected": "FigureYa102multipanelROC",
+      "auc": {
+        "model_a_score": 0.7528417371028855,
+        "model_b_score": 0.7118915767997668
+      },
+      "products": {
+        "pdf": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\04_multipanel_roc\\figureya102_multipanel_roc_adapted.pdf",
+        "png": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\04_multipanel_roc\\figureya102_multipanel_roc_adapted.png",
+        "pdf_bytes": 16995,
+        "png_bytes": 66813
+      },
+      "profile_rows": 240,
+      "manifest_files": 1
+    },
+    {
+      "task": "05_sankey",
+      "selected": "FigureYa25Sankey_update",
+      "path_count": 11,
+      "products": {
+        "pdf": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\05_sankey\\figureya25_sankey_adapted.pdf",
+        "png": "D:\\BaiduNetdiskDownload\\FigureYa9heatmap_files\\outputs\\synthetic_suite\\05_sankey\\figureya25_sankey_adapted.png",
+        "pdf_bytes": 13421,
+        "png_bytes": 92984
+      },
+      "profile_rows": 240,
+      "manifest_files": 1
+    }
+  ],
+  "all_outputs_nonempty": true,
+  "note": "Upstream Rmd source was fetched and Git blob-hash checked per selected module; plots are Python adaptations of the selected FigureYa drawing semantics, not executed upstream R code."
+}

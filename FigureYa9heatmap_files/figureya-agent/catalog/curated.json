@@ -1,0 +1,389 @@
+{
+  "evidence": "人工复核远程Rmd说明及关键输入；不表示运行验证。匹配词是排序提示，不能越过数据契约。",
+  "modules": {
+    "FigureYa5bubbles": {
+      "families": [
+        "bubble",
+        "enrichment"
+      ],
+      "prefer": [
+        "气泡",
+        "泡泡",
+        "bubble",
+        "motif",
+        "表达量和显著性"
+      ],
+      "note": "可同时编码显著性和表达量；原示例含motif与RNA数据。已有整理表时只取绘图段。"
+    },
+    "FigureYa11bubble": {
+      "families": [
+        "bubble",
+        "enrichment"
+      ],
+      "prefer": [
+        "富集结果",
+        "gene ratio",
+        "generatio",
+        "对角线",
+        "bubble"
+      ],
+      "note": "已有富集结果的气泡图；核对Term、Pvalue、Count及背景/比例。"
+    },
+    "FigureYa38PCA": {
+      "prefer": [
+        "椭圆",
+        "ellipse",
+        "主成分"
+      ],
+      "note": "样本×特征矩阵及分组表；不要与基因×样本的输入方向混用。椭圆不是分离显著性的证明。"
+    },
+    "FigureYa101PCA": {
+      "prefer": [
+        "批次",
+        "batch",
+        "形状",
+        "重复"
+      ],
+      "note": "同时编码分组和批次/重复；需要独立元数据；不能仅凭PCA图删除不顺眼的样本。"
+    },
+    "FigureYa244PCAPlot": {
+      "prefer": [
+        "凸包",
+        "多边形",
+        "hull",
+        "已有坐标"
+      ],
+      "note": "支持使用已有坐标的ggplot段；凸包是几何边界，二维重叠不能单独证明聚类过拟合。"
+    },
+    "FigureYa59volcanoV2": {
+      "families": [
+        "volcano"
+      ],
+      "prefer": [
+        "ggplot2",
+        "基因标签",
+        "候选基因",
+        "经典火山"
+      ],
+      "note": "已有差异结果；logFC与原始/校正P值需要明确选择；高亮基因表可选。"
+    },
+    "FigureYa59Plus_GEO2DEG": {
+      "families": [
+        "processing"
+      ],
+      "prefer": [
+        "geo",
+        "芯片",
+        "下载芯片"
+      ],
+      "note": "GEO芯片数据获取和差异分析前处理；不是已有差异结果的首选绘图基座。"
+    },
+    "FigureYa59Plus_volcano_shiny": {
+      "families": [
+        "volcano"
+      ],
+      "prefer": [
+        "shiny",
+        "交互式"
+      ],
+      "note": "此快照没有Rmd；必须先在线读app相关源码，不把Rmd索引视为应用已核验。"
+    },
+    "FigureYa75bubble_volcano": {
+      "prefer": [
+        "base r",
+        "多属性",
+        "气泡火山",
+        "size",
+        "score"
+      ],
+      "note": "base绘图同时编码多个属性，需要真实对应的size/score/分组；不能为更花哨而编造变量。"
+    },
+    "FigureYa135multiVolcano": {
+      "prefer": [
+        "边际",
+        "百分比",
+        "feature",
+        "deltabeta",
+        "甲基化",
+        "多层信息"
+      ],
+      "note": "名称中的multi主要是中心火山+顶部/侧边比例的多层信息，不保证开箱即用的多个contrast火山图；差异量可以是deltaBeta。"
+    },
+    "FigureYa321volcanoSE": {
+      "prefer": [
+        "apa",
+        "pdui",
+        "可变多聚腺苷化"
+      ],
+      "note": "原流程针对APA/PDUI差异；不能把PDUI差异误标为log2FC。"
+    },
+    "FigureYa162boxViolin": {
+      "prefer": [
+        "箱线小提琴",
+        "原始点",
+        "violin",
+        "两组",
+        "多组"
+      ],
+      "note": "两/多组连续值分布；上游包含独立组检验，配对数据必须重写检验与连线。"
+    },
+    "FigureYa227boxdensity": {
+      "prefer": [
+        "密度叠加",
+        "密度",
+        "density",
+        "boxdensity"
+      ],
+      "note": "箱线与密度叠加；分组Subtype及连续AUC可映射其他测量。"
+    },
+    "FigureYa298ecdfPvalue": {
+      "prefer": [
+        "累积分布",
+        "ecdf",
+        "不平滑"
+      ],
+      "note": "值+组的ECDF；适合比较整体分布，不把秩检验解释成所有分布特征均相同/不同。"
+    },
+    "FigureYa68friendsV2": {
+      "prefer": [
+        "go语义相似",
+        "语义相似",
+        "semantic"
+      ],
+      "note": "原始输入是ENTREZ ID和symbol，先做GO语义相似；雨云外观可借用，但必须剥离该分析层。"
+    },
+    "FigureYa195PanPaire": {
+      "prefer": [
+        "配对",
+        "paired",
+        "连线"
+      ],
+      "note": "TCGA配对样本+基因集评分流程；普通前后测量只借用配对连线段，不引入TCGA/GSVA依赖。"
+    },
+    "FigureYa254scViolin": {
+      "prefer": [
+        "三个特征",
+        "细胞类型",
+        "多因素",
+        "facet",
+        "分面"
+      ],
+      "note": "既支持Seurat也支持普通三特征长表，不能因sc名称排除非单细胞；统计需按独立观测单位重审。",
+      "general_tabular": true
+    },
+    "FigureYa9heatmap": {
+      "prefer": [
+        "样本相关",
+        "生物学重复相关"
+      ],
+      "note": "包含样本相关和表达聚类两个分支；不能默认用于所有矩阵图。"
+    },
+    "FigureYa91cluster_heatmap": {
+      "prefer": [
+        "固定顺序",
+        "导出顺序",
+        "样本顺序",
+        "cluster"
+      ],
+      "note": "突出聚类分组、导出聚类顺序或按指定样本顺序绘图。"
+    },
+    "FigureYa124AssociationHeatmap": {
+      "families": [
+        "categorical_association"
+      ],
+      "prefer": [
+        "yes",
+        "no",
+        "二元特征",
+        "分类关联"
+      ],
+      "note": "组别+yes/no特征的关联展示，不能当连续值相关矩阵。"
+    },
+    "FigureYa126CorrelationHeatmap": {
+      "prefer": [
+        "目标基因",
+        "正负相关基因",
+        "基因表达模式"
+      ],
+      "note": "筛选与目标基因正/负相关的基因后画表达模式；不是直接画相关系数矩阵。"
+    },
+    "FigureYa144DiagHeatmap": {
+      "prefer": [
+        "双矩阵",
+        "三角",
+        "上下三角",
+        "扩增缺失",
+        "对角"
+      ],
+      "note": "两个一一对应矩阵分别编码每格两半，必须单独定义两套量纲和色标。"
+    },
+    "FigureYa149rankHeatmap": {
+      "prefer": [
+        "分档",
+        "等级",
+        "rank",
+        "p值矩阵",
+        "离散色阶"
+      ],
+      "note": "logFC/系数矩阵+P值矩阵，连续值分档并加数字；阈值改变解释且必须记录。"
+    },
+    "FigureYa165heatmapPvalue": {
+      "prefer": [
+        "组间检验",
+        "每基因p值",
+        "热图显著性"
+      ],
+      "note": "表达热图附基因组间检验，注意检验设计和多重比较；不是只给P值矩阵即可照跑。"
+    },
+    "FigureYa169sigHeatmap": {
+      "prefer": [
+        "亚型特异",
+        "特异基因集"
+      ],
+      "note": "至少三个亚型、成对对比后的特异基因集；pairwise comparison不等于受试者配对设计。"
+    },
+    "FigureYa174squareCross": {
+      "families": [
+        "network"
+      ],
+      "prefer": [
+        "上下左右",
+        "多列连线",
+        "节点顺序"
+      ],
+      "note": "节点表+边表及可选边缘柱图，是多组连线，不是普通热图。"
+    },
+    "FigureYa206scHeatmap": {
+      "prefer": [
+        "热图加富集",
+        "热图和富集",
+        "对应富集"
+      ],
+      "note": "表达热图与相应基因集富集结果联排；不能凭热图颜色虚构通路结果。"
+    },
+    "FigureYa213customizeHeatmap": {
+      "prefer": [
+        "cmap",
+        "多证据",
+        "药物靶点"
+      ],
+      "note": "药物候选多来源证据综合+ComplexHeatmap；包含肿瘤差异、CMap和辅助脚本，通用注释热图只提取绘图层。"
+    },
+    "FigureYa228linkCor": {
+      "prefer": [
+        "一对多",
+        "连线相关",
+        "蝴蝶",
+        "linkcor"
+      ],
+      "note": "多对多相关矩阵与一对多连线组合；连接线的含义与统计量必须独立核对。"
+    },
+    "FigureYa243scMarkerGroupHeatmap": {
+      "prefer": [
+        "marker",
+        "模块分块",
+        "基因分组"
+      ],
+      "note": "基因按marker组排序/分块展示，原论文bulk、示例Seurat；可以改用已有表达和分组。"
+    },
+    "FigureYa278heatmapPoints": {
+      "prefer": [
+        "双指标",
+        "叠加气泡",
+        "两套数据",
+        "热图气泡"
+      ],
+      "note": "色块和气泡来自两套对齐数据；避免将表达值和显著性无意混为同一个编码。"
+    },
+    "FigureYa307CNVHeatmap": {
+      "prefer": [
+        "gistic",
+        "cnv",
+        "拷贝数"
+      ],
+      "note": "GISTIC结果的拷贝数热图；拷贝数状态使用有意义的离散映射，不能默认行Z-score。"
+    },
+    "FigureYa320ClontypeHeatmap": {
+      "prefer": [
+        "克隆",
+        "clonotype",
+        "tcr",
+        "共享克隆"
+      ],
+      "note": "barcode、celltype、clonaltype记录计算共享克隆数量后取对数展示；不是表达矩阵。"
+    },
+    "FigureYa176BlandAltman": {
+      "prefer": [
+        "一致性",
+        "agreement",
+        "bland",
+        "altman"
+      ],
+      "note": "两种方法的配对连续测量；独立测量与重复测量需不同处理，界限不照抄示例系数。"
+    },
+    "FigureYa1survivalCurve_update": {
+      "prefer": [
+        "kaplan",
+        "km",
+        "风险表",
+        "删失"
+      ],
+      "note": "time/event/group；必须确认event=1含义；不要跟随示例自动搜索最优分组截点。"
+    },
+    "FigureYa85timeROC": {
+      "prefer": [
+        "时间依赖",
+        "timeroc",
+        "删失"
+      ],
+      "note": "time/event/marker和时点；普通二分类ROC不能替代。"
+    },
+    "FigureYa102multipanelROC": {
+      "prefer": [
+        "多指标",
+        "多面板",
+        "多个模型"
+      ],
+      "note": "比较多个指标ROC；确保同一验证集和一致阳性类。"
+    },
+    "FigureYa25Sankey_update": {
+      "prefer": [
+        "多层分类",
+        "桑基",
+        "alluvial",
+        "sankey"
+      ],
+      "note": "原始多列属性表；包含逐层继承与以首层为参照的不同语义。聚合source/target/weight需改适配。"
+    },
+    "FigureYa112Plus_venn": {
+      "prefer": [
+        "ggvenndiagram",
+        "两组交集",
+        "三组交集",
+        "四组交集"
+      ],
+      "note": "支持2–4集合的Venn示例，更多集合考虑UpSet；只声明脚本真实实现的图型。"
+    },
+    "FigureYa297Rbar": {
+      "prefer": [
+        "条纹",
+        "pattern",
+        "组成柱"
+      ],
+      "note": "输入为两部分及其和；图案样式不应牺牲数值读取与面积准确性。"
+    },
+    "FigureYa318GenesetDEDotplot": {
+      "families": [
+        "enrichment",
+        "single_cell",
+        "bubble"
+      ],
+      "prefer": [
+        "细胞类型通路",
+        "通路活性差异"
+      ],
+      "note": "细胞类型中的通路评分差异点图；点大小显著性、颜色logFC，不是普通ORA气泡图。"
+    }
+  },
+  "reviewed_commit": "f627917b79f28558779fb2e3ea2014cede41b89e"
+}

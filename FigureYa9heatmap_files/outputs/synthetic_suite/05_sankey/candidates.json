@@ -1,0 +1,194 @@
+{
+  "query": "桑基图 多层分类 流向 alluvial",
+  "commit": "f627917b79f28558779fb2e3ea2014cede41b89e",
+  "curation_current": true,
+  "matched_families": {
+    "flow": [
+      "桑基",
+      "流向",
+      "alluvial",
+      "多层分类"
+    ]
+  },
+  "profile_used": true,
+  "design": "unknown",
+  "domain": "general",
+  "decision": "CANDIDATES_ONLY: agent must compare semantics, full source and visual reference; scores are not confidence or a final selection.",
+  "needs": [
+    "Confirm observational unit, roles, units and missingness",
+    "Compare at least 3 genuinely relevant modules when available; document rejection reasons",
+    "Inspect selected source and helper dependencies before fetching or running"
+  ],
+  "candidates": [
+    {
+      "id": "FigureYa25Sankey_update",
+      "retrieval_score": 93,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 3,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 20,
+        "id_reference": 0
+      },
+      "families": [
+        "flow"
+      ],
+      "matched_intent": [
+        "flow"
+      ],
+      "keyword_hits": [
+        "流向"
+      ],
+      "specific_hits": [
+        "多层分类",
+        "桑基",
+        "alluvial"
+      ],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "edge roles or multiple categorical columns"
+        ]
+      },
+      "input_contract": "source、target、非负weight，或逐对象的多层分类记录。",
+      "warnings": [
+        "单位和分母一致；多个状态不等于真实时间迁移；聚合边表与逐对象表需要不同转换。",
+        "原始多列属性表；包含逐层继承与以首层为参照的不同语义。聚合source/target/weight需改适配。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa25Sankey_update",
+      "scripts": [
+        "FigureYa25Sankey_update/FigureYa25Sankey_update.Rmd"
+      ],
+      "summary": "用R代码画出paper里的图。 Use R code to draw the plot in paper. From <[link] / 一套数据集可能有多重属性，每层属性之间有交叉，就可以用这种图来展示。另外，以第一变量为参照，往后的多层变量均参考与第一变量的关系，从而展示第一变量的流向。 - 场景一：一个group包含多个基因，同一个基因的不同突变可能属于多个group。像例图一样，展示高频突变基因所处的分组。 原文：Graphical summary of the most frequently mutated genes (≥10 affected cases) and their subgroup distribution. ... many of which showed clear subgroup-specificity (Fig. 2a–c; Extended Data Fig. 3a, b; Suppleme"
+    },
+    {
+      "id": "FigureYa40lineage",
+      "retrieval_score": 70,
+      "score_components": {
+        "purpose": 40,
+        "text_match": 0,
+        "data_structure": 25,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "flow"
+      ],
+      "matched_intent": [
+        "flow"
+      ],
+      "keyword_hits": [],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 25,
+        "status": "structural_candidate_only",
+        "blockers": [],
+        "evidence": [
+          "edge roles or multiple categorical columns"
+        ]
+      },
+      "input_contract": "source、target、非负weight，或逐对象的多层分类记录。",
+      "warnings": [
+        "单位和分母一致；多个状态不等于真实时间迁移；聚合边表与逐对象表需要不同转换。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa40lineage",
+      "scripts": [
+        "FigureYa40lineage/FigureYa40lineage.Rmd"
+      ],
+      "summary": "用R画出文章里的这个图 Draw the image in the article using R From <[link] / 细胞谱系分析，主要用于单细胞测序数据，展示细胞在二维状态空间的拟时间（pseudotime）排列，即一群细胞怎样变成另一群细胞。 Cell lineage analysis is mainly used for single-cell sequencing data, displaying the pseudotime arrangement of cells in a two-dimensional state space, that is, how a group of cells become another group of cells."
+    },
+    {
+      "id": "FigureYa236circGroup",
+      "retrieval_score": 20,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 12,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "circular"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "桑基图"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 12,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "missing role: target"
+        ],
+        "evidence": [
+          "role candidate: source"
+        ]
+      },
+      "input_contract": "关系表/矩阵或带坐标的多轨道数据；按具体模块核实。",
+      "warnings": [
+        "missing role: target",
+        "装饰性圆形不优先于可读性；基因组坐标需版本、染色体命名和方向一致。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa236circGroup",
+      "scripts": [
+        "FigureYa236circGroup/FigureYa236circGroup.Rmd"
+      ],
+      "summary": "用圆圈图的方式展示不同分组的关系。网上没有找到可以实现的代码。最好是R语言做。 Draw this diagram to show the relationship between different groups in the form of a circle diagram. There is no code available online that can be implemented. It's best to do it in R. From <[link] Figure 3. Alignment of PDAC metabolic subgroups with known gene expression subtypes. A, Overlay of metabolic profiles (inner ring) with PDAC expression subtypes (outer rings) based o"
+    },
+    {
+      "id": "FigureYa307CNVHeatmap",
+      "retrieval_score": 8,
+      "score_components": {
+        "purpose": 0,
+        "text_match": 3,
+        "data_structure": 0,
+        "source_metadata": 5,
+        "domain": 0,
+        "specific_semantics": 0,
+        "id_reference": 0
+      },
+      "families": [
+        "heatmap",
+        "genomic"
+      ],
+      "matched_intent": [],
+      "keyword_hits": [
+        "桑基图"
+      ],
+      "specific_hits": [],
+      "data_check": {
+        "fit": 0,
+        "status": "blocked_or_unknown",
+        "blockers": [
+          "Need explicit matrix/coordinates or reshape plan; numeric-looking IDs excluded"
+        ],
+        "evidence": []
+      },
+      "input_contract": "明确行列方向的数值矩阵；注释须用唯一 ID 对齐。",
+      "warnings": [
+        "Need explicit matrix/coordinates or reshape plan; numeric-looking IDs excluded",
+        "表达热图、相关热图、P值热图、CNV热图语义不同；行 Z-score 改变解释；不可按名字默认选择9或213。",
+        "GISTIC结果的拷贝数热图；拷贝数状态使用有意义的离散映射，不能默认行Z-score。"
+      ],
+      "source_evidence": "source_metadata_extracted",
+      "source_url": "https://github.com/ying-ge/FigureYa/tree/f627917b79f28558779fb2e3ea2014cede41b89e/FigureYa307CNVHeatmap",
+      "scripts": [
+        "FigureYa307CNVHeatmap/FigureYa307CNVHeatmap.Rmd"
+      ],
+      "summary": " /  / 利用GISTIC算法的输出文件，绘制拷贝数热图（不包含底部饼图）。 我们实现过一些突变相关以及富集分析的图，可灵活运用，画出文中的图： - Figure 1ah共识聚类及热图，可参考FigureYa202consensusGene - Figure 1b桑基图，画法可参考FigureYa25sankey - Figure 1cd、2bcd、3c、4e、5c、多亚型生存分析，可参考FigureYa284pairwiseLogrank或FigureYa1survivalCurve - Figure 2a，本文档将带你实现。只画左侧频率对比图，可参考FigureYa79CNV - Figure 3e突变综合热图，可参考FigureYa248MutLandscape - Figure 5a森林图，可参考FigureYa90subgroup Copy Number Heatmap Generation Using GISTIC"
+    }
+  ],
+  "matching_count": 4
+}
